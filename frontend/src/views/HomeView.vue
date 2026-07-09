@@ -3,11 +3,12 @@
   <div v-if="homeContent" class="min-h-screen">
     <!-- iframe mode -->
     <iframe
-      v-if="isHomeContentUrl"
+      v-if="isExternalHomeContentUrl"
       :src="homeContent.trim()"
       class="h-screen w-full border-0"
       allowfullscreen
     ></iframe>
+    <div v-else-if="isSameOriginHomeContentUrl" class="min-h-screen bg-[#060504]"></div>
     <!-- HTML mode - SECURITY: homeContent is admin-only setting, XSS risk is acceptable -->
     <div v-else v-html="homeContent"></div>
   </div>
@@ -405,7 +406,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
@@ -424,11 +425,51 @@ const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
 
-// Check if homeContent is a URL (for iframe display)
-const isHomeContentUrl = computed(() => {
-  const content = homeContent.value.trim()
-  return content.startsWith('http://') || content.startsWith('https://')
+const homeContentText = computed(() => homeContent.value.trim())
+
+// Same-origin custom home pages should navigate top-level instead of iframe.
+const sameOriginHomeContentPath = computed(() => {
+  const content = homeContentText.value
+  if (!content) return ''
+
+  if (content.startsWith('/')) {
+    return content
+  }
+
+  if (content.startsWith('http://') || content.startsWith('https://')) {
+    try {
+      const url = new URL(content)
+      if (url.origin === window.location.origin) {
+        return `${url.pathname}${url.search}${url.hash}`
+      }
+    } catch {
+      return ''
+    }
+  }
+
+  return ''
 })
+
+const isSameOriginHomeContentUrl = computed(() => sameOriginHomeContentPath.value !== '')
+
+// External URLs still use iframe display.
+const isExternalHomeContentUrl = computed(() => {
+  const content = homeContent.value.trim()
+  return (
+    (content.startsWith('http://') || content.startsWith('https://')) &&
+    !isSameOriginHomeContentUrl.value
+  )
+})
+
+function redirectSameOriginHomeContent() {
+  const target = sameOriginHomeContentPath.value
+  if (!target) return
+
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (current !== target) {
+    window.location.replace(target)
+  }
+}
 
 // Theme
 const isDark = ref(document.documentElement.classList.contains('dark'))
@@ -478,6 +519,12 @@ onMounted(() => {
   if (!appStore.publicSettingsLoaded) {
     appStore.fetchPublicSettings()
   }
+
+  redirectSameOriginHomeContent()
+})
+
+watch(sameOriginHomeContentPath, () => {
+  redirectSameOriginHomeContent()
 })
 </script>
 
