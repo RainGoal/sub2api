@@ -120,7 +120,7 @@ input {
 .brand-mark {
   gap: 10px;
   color: #fff8ef;
-  font-weight: 850;
+  font-weight: 760;
 }
 
 .brand-mark img {
@@ -142,7 +142,7 @@ input {
   padding: 9px 12px;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 680;
   transition:
     background-color 0.2s ease,
     color 0.2s ease;
@@ -167,8 +167,8 @@ input {
   gap: 8px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  padding: 13px 20px;
-  font-weight: 850;
+  padding: 12px 18px;
+  font-weight: 760;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease,
@@ -191,14 +191,14 @@ input {
 }
 
 .button-primary {
-  border-color: rgba(255, 104, 72, 0.58);
+  border-color: rgba(255, 104, 72, 0.5);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 38%),
-    linear-gradient(135deg, #ff7a52, var(--accent-hot));
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 42%),
+    linear-gradient(135deg, #ff7557, #ef4e35);
   color: #260d08;
   box-shadow:
-    0 18px 42px rgba(255, 104, 72, 0.28),
-    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+    0 14px 34px rgba(255, 104, 72, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.14) inset;
 }
 
 .button-primary:hover {
@@ -228,8 +228,8 @@ input {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(100deg, transparent 0 12%, rgba(255, 104, 72, 0.09) 12% 13%, transparent 13% 100%),
-    linear-gradient(170deg, transparent 0 62%, rgba(123, 99, 255, 0.12) 62% 63%, transparent 63% 100%);
+    linear-gradient(100deg, transparent 0 15%, rgba(255, 104, 72, 0.055) 15% 15.5%, transparent 15.5% 100%),
+    linear-gradient(170deg, transparent 0 66%, rgba(88, 183, 255, 0.065) 66% 66.5%, transparent 66.5% 100%);
 }
 
 .hero-inner {
@@ -246,15 +246,15 @@ input {
 
 .hero-copy {
   display: grid;
-  gap: 24px;
+  gap: 22px;
 }
 
 .eyebrow {
   margin: 0;
-  color: var(--accent);
+  color: rgba(255, 104, 72, 0.78);
   font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.13em;
+  font-weight: 720;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -268,9 +268,10 @@ input {
 }
 
 .hero h1 {
-  max-width: 9.8ch;
-  font-size: clamp(3.2rem, 7vw, 5.75rem);
-  line-height: 0.96;
+  max-width: 11ch;
+  font-size: clamp(2.8rem, 5.3vw, 4.65rem);
+  font-weight: 800;
+  line-height: 1.04;
   text-wrap: balance;
 }
 
@@ -279,11 +280,11 @@ input {
 }
 
 .hero-lead {
-  max-width: 640px;
+  max-width: 600px;
   margin: 0;
   color: var(--ink-soft);
-  font-size: clamp(1.05rem, 2vw, 1.22rem);
-  line-height: 1.9;
+  font-size: clamp(1rem, 1.45vw, 1.13rem);
+  line-height: 1.7;
 }
 
 .hero-actions,
@@ -296,11 +297,11 @@ input {
 .hero-proof span {
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 9px 14px;
-  background: rgba(255, 255, 255, 0.045);
+  padding: 8px 13px;
+  background: rgba(255, 255, 255, 0.032);
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 680;
 }
 
 .hero-visual {
@@ -314,32 +315,34 @@ input {
   top: 50%;
   left: 50%;
   display: grid;
-  width: 720px;
-  min-height: 520px;
-  grid-template-columns: 180px 1fr;
-  gap: 16px;
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 16px;
+  width: 710px;
+  min-height: 500px;
+  grid-template-columns: 164px 1fr;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.05), transparent 38%),
-    rgba(16, 17, 22, 0.92);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.06), transparent 34%),
+    linear-gradient(180deg, rgba(18, 20, 25, 0.96), rgba(11, 12, 15, 0.96));
   box-shadow:
-    0 40px 110px rgba(0, 0, 0, 0.58),
-    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-  transform: translate(-50%, -50%) rotateX(54deg) rotateZ(-8deg) rotateY(0deg);
+    0 34px 96px rgba(0, 0, 0, 0.54),
+    0 0 0 1px rgba(255, 255, 255, 0.055) inset;
+  transform: translate(-50%, -50%) rotateX(10deg) rotateZ(-3deg);
   transform-origin: center;
 }
 
 .dashboard-frame::before {
   content: "";
   position: absolute;
-  inset: 16px;
+  inset: 12px;
   z-index: -1;
-  border-radius: 14px;
-  background: rgba(255, 104, 72, 0.1);
-  filter: blur(42px);
-  transform: translate(28px, 36px);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, rgba(255, 104, 72, 0.16), transparent 45%),
+    rgba(88, 183, 255, 0.05);
+  filter: blur(34px);
+  transform: translate(20px, 26px);
 }
 
 .mock-sidebar,
@@ -348,15 +351,18 @@ input {
 .mock-hero-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.045);
-  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.22);
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.2);
 }
 
 .mock-sidebar {
   display: grid;
   align-content: space-between;
-  min-height: 484px;
-  padding: 18px;
+  min-height: 472px;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02)),
+    rgba(255, 255, 255, 0.025);
 }
 
 .side-brand {
@@ -364,12 +370,12 @@ input {
   align-items: center;
   gap: 10px;
   color: #fff9f0;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .brand-dot {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border: 1px solid rgba(255, 104, 72, 0.35);
   border-radius: 50%;
   background:
@@ -379,17 +385,17 @@ input {
 
 .side-menu {
   display: grid;
-  gap: 12px;
-  margin-top: 26px;
+  gap: 8px;
+  margin-top: 24px;
 }
 
 .side-menu span {
   position: relative;
-  border-radius: 999px;
-  padding: 8px 10px 8px 24px;
+  border-radius: 6px;
+  padding: 8px 10px 8px 22px;
   color: rgba(248, 241, 232, 0.42);
-  font-size: 13px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 680;
 }
 
 .side-menu span::before {
@@ -405,53 +411,53 @@ input {
 }
 
 .side-menu .active {
-  background: rgba(255, 104, 72, 0.14);
-  color: var(--accent);
+  border: 1px solid rgba(255, 104, 72, 0.2);
+  background: rgba(255, 104, 72, 0.095);
+  color: #ffc6b7;
 }
 
 .side-card {
   display: grid;
-  justify-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-top: 32px;
-  padding: 18px 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
   border-radius: var(--radius);
   background:
-    linear-gradient(155deg, rgba(123, 99, 255, 0.13), transparent 58%),
+    linear-gradient(155deg, rgba(255, 104, 72, 0.08), transparent 58%),
     rgba(255, 255, 255, 0.045);
-  text-align: center;
-}
-
-.check-mark {
-  position: relative;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.check-mark::after {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 10px;
-  width: 12px;
-  height: 18px;
-  border-right: 4px solid #220c07;
-  border-bottom: 4px solid #220c07;
-  transform: rotate(42deg);
 }
 
 .side-card p {
   margin: 0;
-  color: var(--ink-soft);
-  font-size: 13px;
-  line-height: 1.55;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .side-card strong {
   color: #fff6ec;
-  font-size: 18px;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.side-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.side-metric span {
+  color: rgba(216, 206, 195, 0.56);
+  font-size: 11px;
+}
+
+.side-metric strong {
+  color: var(--success);
+  font-size: 12px;
 }
 
 .thin-meter {
@@ -472,22 +478,22 @@ input {
 
 .mock-main {
   display: grid;
-  gap: 14px;
-  padding: 16px;
+  gap: 12px;
+  padding: 14px;
   background:
-    linear-gradient(135deg, rgba(123, 99, 255, 0.09), transparent 45%),
+    linear-gradient(135deg, rgba(255, 104, 72, 0.055), transparent 42%),
     rgba(255, 255, 255, 0.035);
 }
 
 .mock-hero-card {
   display: grid;
-  min-height: 150px;
-  grid-template-columns: 1fr 180px;
-  gap: 12px;
-  align-items: center;
-  padding: 22px;
+  min-height: 138px;
+  grid-template-columns: 1fr 210px;
+  gap: 14px;
+  align-items: stretch;
+  padding: 18px;
   background:
-    linear-gradient(130deg, rgba(255, 104, 72, 0.14), transparent 45%),
+    linear-gradient(130deg, rgba(255, 104, 72, 0.095), transparent 45%),
     rgba(255, 255, 255, 0.045);
 }
 
@@ -496,15 +502,16 @@ input {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .mock-hero-card h2 {
   margin: 0 0 8px;
   color: #fff6ec;
-  font-size: 24px;
+  font-size: 20px;
+  font-weight: 760;
 }
 
 .mock-hero-card span {
@@ -512,86 +519,54 @@ input {
   font-size: 13px;
 }
 
-.sketch-panel {
+.route-matrix {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 34px;
+  gap: 7px;
+}
+
+.route-matrix span {
   position: relative;
-  height: 112px;
-  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background:
+    linear-gradient(145deg, rgba(88, 214, 159, 0.12), transparent),
+    rgba(255, 255, 255, 0.035);
 }
 
-.sketch-line {
-  position: absolute;
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.line-one {
-  top: 36px;
-  left: 18px;
-  width: 82px;
-  transform: rotate(-26deg);
-}
-
-.line-two {
-  top: 70px;
-  left: 26px;
-  width: 120px;
-  background: rgba(255, 104, 72, 0.55);
-  transform: rotate(22deg);
-}
-
-.sketch-person {
-  position: absolute;
-  right: 34px;
-  bottom: 16px;
-  width: 48px;
-  height: 54px;
-  border-radius: 24px 24px 8px 8px;
-  background: var(--accent);
-  transform: rotate(-10deg);
-}
-
-.sketch-person::before {
+.route-matrix span::after {
   content: "";
   position: absolute;
-  top: -22px;
-  left: 12px;
-  width: 22px;
-  height: 22px;
+  right: 8px;
+  top: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #e9e1d8;
+  background: var(--success);
+  box-shadow: 0 0 16px rgba(88, 214, 159, 0.45);
 }
 
-.sketch-person::after {
-  content: "";
-  position: absolute;
-  right: -16px;
-  bottom: -16px;
-  width: 42px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--violet);
+.route-matrix span:nth-child(2),
+.route-matrix span:nth-child(6) {
+  background:
+    linear-gradient(145deg, rgba(242, 189, 100, 0.12), transparent),
+    rgba(255, 255, 255, 0.032);
 }
 
-.sketch-signal {
-  position: absolute;
-  right: 10px;
-  top: 18px;
-  width: 46px;
-  height: 46px;
-  border: 2px solid rgba(88, 183, 255, 0.48);
-  border-left-color: transparent;
-  border-bottom-color: transparent;
-  border-radius: 50%;
+.route-matrix span:nth-child(2)::after,
+.route-matrix span:nth-child(6)::after {
+  background: var(--gold);
+  box-shadow: 0 0 16px rgba(242, 189, 100, 0.38);
 }
 
 .mock-tabs {
   display: flex;
-  gap: 22px;
-  padding: 4px 2px 0;
+  gap: 18px;
+  padding: 2px 2px 0;
   color: rgba(248, 241, 232, 0.36);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .mock-tabs .active {
@@ -601,12 +576,12 @@ input {
 .bento-console {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr 1fr;
-  grid-auto-rows: 112px;
-  gap: 14px;
+  grid-auto-rows: 106px;
+  gap: 12px;
 }
 
 .console-card {
-  padding: 16px;
+  padding: 14px;
 }
 
 .console-top {
@@ -628,14 +603,15 @@ input {
   display: grid;
   align-content: space-between;
   background:
-    linear-gradient(150deg, rgba(88, 183, 255, 0.12), transparent),
+    linear-gradient(150deg, rgba(88, 183, 255, 0.08), transparent),
     rgba(255, 255, 255, 0.045);
 }
 
 .route-card h3 {
-  margin: 18px 0;
+  margin: 14px 0;
   color: #fff6ec;
-  font-size: 22px;
+  font-size: 18px;
+  font-weight: 760;
 }
 
 .mini-bars {
@@ -645,8 +621,8 @@ input {
 
 .mini-bars span {
   display: block;
-  height: 9px;
-  border-radius: 999px;
+  height: 6px;
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.1);
 }
 
@@ -666,9 +642,10 @@ input {
 
 .value-card strong {
   display: block;
-  margin: 2px 0 6px;
+  margin: 0 0 8px;
   color: var(--gold);
-  font-size: 30px;
+  font-size: 22px;
+  font-weight: 760;
 }
 
 .value-card p,
@@ -676,7 +653,7 @@ input {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.48;
 }
 
 .value-card p {
@@ -692,9 +669,9 @@ input {
 
 .activity-chart {
   display: flex;
-  height: 44px;
+  height: 38px;
   align-items: end;
-  gap: 8px;
+  gap: 7px;
   margin-bottom: 12px;
 }
 
@@ -721,41 +698,36 @@ input {
   background: linear-gradient(180deg, var(--violet), rgba(123, 99, 255, 0.12));
 }
 
-.users-card {
+.ledger-card {
   display: grid;
-  align-content: center;
-  gap: 8px;
+  align-content: space-between;
+  gap: 10px;
 }
 
-.avatar-row {
+.ledger-row {
   display: flex;
-}
-
-.avatar-row span {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
   align-items: center;
-  justify-content: center;
-  border: 2px solid #181a20;
-  border-radius: 50%;
-  margin-left: -8px;
-  background: var(--panel-3);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 900;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 8px;
 }
 
-.avatar-row span:first-child {
-  margin-left: 0;
-  background: var(--accent);
-  color: #220c07;
+.ledger-row span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ledger-row strong {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 760;
 }
 
 .section {
   width: min(1120px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 88px 0;
+  padding: 80px 0;
 }
 
 .band {
@@ -773,16 +745,17 @@ input {
 
 .section-heading {
   display: grid;
-  gap: 14px;
-  max-width: 760px;
-  margin-bottom: 36px;
+  gap: 12px;
+  max-width: 720px;
+  margin-bottom: 32px;
 }
 
 .section-heading h2,
 .reliable-copy h2,
 .final-cta h2 {
-  font-size: clamp(2.1rem, 4.6vw, 4.35rem);
-  line-height: 1.05;
+  font-size: clamp(1.9rem, 3.6vw, 3.35rem);
+  font-weight: 780;
+  line-height: 1.12;
   text-wrap: balance;
 }
 
@@ -791,8 +764,8 @@ input {
 .final-cta p {
   margin: 0;
   color: var(--muted);
-  font-size: 17px;
-  line-height: 1.8;
+  font-size: 16px;
+  line-height: 1.68;
 }
 
 .problem-grid,
@@ -852,15 +825,16 @@ input {
   background: rgba(255, 104, 72, 0.16);
   color: var(--accent);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 760;
 }
 
 .problem-card h3,
 .scene-grid-cards h3,
 .value-list h3 {
-  margin: 38px 0 10px;
+  margin: 28px 0 8px;
   color: var(--ink);
-  font-size: 23px;
+  font-size: 19px;
+  font-weight: 760;
 }
 
 .problem-card p,
@@ -870,7 +844,8 @@ input {
 .faq-list p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.75;
+  font-size: 15px;
+  line-height: 1.66;
 }
 
 .reliable-section {
@@ -902,8 +877,8 @@ input {
 .signal-board-head span {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -988,12 +963,13 @@ input {
 
 .panel-topline span {
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .panel-topline strong {
   color: var(--gold);
-  font-size: 34px;
+  font-size: 28px;
+  font-weight: 760;
 }
 
 .savings-panel label {
@@ -1011,7 +987,7 @@ input {
   justify-content: space-between;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .scene-grid-cards article {
@@ -1109,7 +1085,8 @@ input {
 .compare-row > div {
   padding: 18px 22px;
   border-top: 1px solid var(--line);
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.58;
 }
 
 .compare-row > div + div {
@@ -1120,7 +1097,7 @@ input {
   border-top: 0;
   background: rgba(255, 104, 72, 0.11);
   color: var(--ink);
-  font-weight: 900;
+  font-weight: 760;
 }
 
 .compare-row:not(.header) > div:first-child {
@@ -1129,7 +1106,7 @@ input {
 
 .compare-row:not(.header) > div:last-child {
   color: #ffd8c9;
-  font-weight: 850;
+  font-weight: 720;
 }
 
 .faq-list {
@@ -1144,8 +1121,8 @@ input {
 .faq-list summary {
   cursor: pointer;
   color: var(--ink);
-  font-size: 18px;
-  font-weight: 900;
+  font-size: 17px;
+  font-weight: 760;
 }
 
 .faq-list p {
@@ -1178,7 +1155,7 @@ input {
   padding: 28px 0 44px;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 680;
 }
 
 .site-footer span {
@@ -1212,7 +1189,7 @@ input {
 
   .dashboard-frame {
     width: min(720px, 94vw);
-    transform: translate(-50%, -50%) rotateX(48deg) rotateZ(-7deg);
+    transform: translate(-50%, -50%) rotateX(8deg) rotateZ(-2deg);
   }
 }
 
@@ -1244,17 +1221,17 @@ input {
 
 @media (max-width: 720px) {
   .hero-visual {
-    min-height: 470px;
+    min-height: 450px;
     overflow: hidden;
   }
 
   .dashboard-frame {
-    top: 42%;
-    width: 620px;
+    top: 48%;
+    width: 640px;
     grid-template-columns: 150px 1fr;
     gap: 10px;
     padding: 12px;
-    transform: translate(-50%, -50%) rotateX(46deg) rotateZ(-7deg) scale(0.78);
+    transform: translate(-50%, -50%) rotateX(7deg) rotateZ(-2deg) scale(0.78);
   }
 
   .mock-sidebar {
@@ -1265,7 +1242,7 @@ input {
     grid-template-columns: 1fr;
   }
 
-  .sketch-panel {
+  .route-matrix {
     display: none;
   }
 }
@@ -1288,7 +1265,7 @@ input {
   }
 
   .hero h1 {
-    font-size: clamp(3rem, 16vw, 4.3rem);
+    font-size: clamp(2.7rem, 13vw, 3.75rem);
   }
 
   .hero-lead {
@@ -1359,20 +1336,20 @@ input {
         <div class="hero-backdrop" aria-hidden="true"></div>
         <div class="hero-inner">
           <div class="hero-copy">
-            <p class="eyebrow">为真实日常准备的 AI 使用入口</p>
-            <h1><span>稳定的 AI</span><span>不必靠折腾</span></h1>
+            <p class="eyebrow">为真实工作流准备的 AI 使用入口</p>
+            <h1><span>稳定接入</span><span>按需使用</span></h1>
             <p class="hero-lead">
-              写方案、做总结、改代码、学资料时，你需要的是打开就能继续工作。
-              我们把复杂的线路、额度和订阅放在后台，把稳定、省心和预算清楚留给你。
+              写方案、做总结、改代码、学资料时，你需要的是一个持续可用的入口。
+              复杂的线路、额度和订阅留在后台，前台只保留清楚的用量、预算和使用体验。
             </p>
             <div class="hero-actions">
               <a class="button button-primary" href="/register">立即开始使用</a>
-              <a class="button button-secondary" href="#value">看看能省在哪里</a>
+              <a class="button button-secondary" href="#value">查看成本结构</a>
             </div>
             <div class="hero-proof" aria-label="核心优势">
-              <span>减少固定订阅</span>
-              <span>余额用量透明</span>
-              <span>服务波动时尽量不中断</span>
+              <span>Route health</span>
+              <span>Usage ledger</span>
+              <span>Budget guard</span>
             </div>
           </div>
 
@@ -1381,50 +1358,55 @@ input {
               <aside class="mock-sidebar">
                 <div class="side-brand">
                   <span class="brand-dot"></span>
-                  <strong>Access</strong>
+                  <strong>Access Core</strong>
                 </div>
                 <div class="side-menu">
-                  <span class="active">稳定</span>
-                  <span>快速</span>
-                  <span>实惠</span>
-                  <span>安心</span>
+                  <span class="active">Route Health</span>
+                  <span>Usage Ledger</span>
+                  <span>Budget Guard</span>
+                  <span>Session Flow</span>
                 </div>
                 <div class="side-card">
-                  <span class="check-mark"></span>
-                  <p>线路状态持续巡检，日常使用更顺畅</p>
-                  <strong>状态稳定</strong>
+                  <p>Current operating window</p>
+                  <strong>Stable access</strong>
                   <div class="thin-meter"><span></span></div>
+                  <div class="side-metric">
+                    <span>Route pool</span>
+                    <strong>Online</strong>
+                  </div>
                 </div>
               </aside>
 
               <div class="mock-main">
                 <div class="mock-hero-card">
                   <div>
-                    <p class="mock-kicker">核心体验</p>
-                    <h2>稳定 · 快速 · 实惠</h2>
-                    <span>少切换，少等待，少为闲置订阅付费</span>
+                    <p class="mock-kicker">AI ACCESS OPERATIONS</p>
+                    <h2>稳定接入控制台</h2>
+                    <span>线路状态、用量余额和预算边界集中呈现</span>
                   </div>
-                  <div class="sketch-panel" aria-hidden="true">
-                    <span class="sketch-line line-one"></span>
-                    <span class="sketch-line line-two"></span>
-                    <span class="sketch-person"></span>
-                    <span class="sketch-signal"></span>
+                  <div class="route-matrix" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
                   </div>
                 </div>
 
                 <div class="mock-tabs">
-                  <span class="active">稳定在线</span>
-                  <span>快速响应</span>
-                  <span>成本更轻</span>
+                  <span class="active">Routing</span>
+                  <span>Ledger</span>
+                  <span>Budget</span>
                 </div>
 
                 <div class="bento-console">
                   <article class="console-card route-card">
                     <div class="console-top">
                       <span class="status-dot"></span>
-                      <small>稳定性</small>
+                      <small>Route health</small>
                     </div>
-                    <h3>持续可用</h3>
+                    <h3>可用线路持续巡检</h3>
                     <div class="mini-bars">
                       <span></span>
                       <span></span>
@@ -1432,9 +1414,9 @@ input {
                     </div>
                   </article>
                   <article class="console-card value-card">
-                    <small>实惠体验</small>
-                    <strong>按需</strong>
-                    <p>少付闲置订阅</p>
+                    <small>Budget guard</small>
+                    <strong>按需使用</strong>
+                    <p>减少闲置订阅成本</p>
                   </article>
                   <article class="console-card activity-card">
                     <div class="activity-chart">
@@ -1443,15 +1425,17 @@ input {
                       <span></span>
                       <span></span>
                     </div>
-                    <p>响应更快，减少等待和重复切换</p>
+                    <p>减少等待、切换和中断带来的工作损耗</p>
                   </article>
-                  <article class="console-card users-card">
-                    <small>核心价值</small>
-                    <div class="avatar-row">
-                      <span>稳</span>
-                      <span>快</span>
-                      <span>省</span>
-                      <span>安</span>
+                  <article class="console-card ledger-card">
+                    <small>Usage ledger</small>
+                    <div class="ledger-row">
+                      <span>Balance</span>
+                      <strong>Clear</strong>
+                    </div>
+                    <div class="ledger-row">
+                      <span>Spend</span>
+                      <strong>Visible</strong>
                     </div>
                   </article>
                 </div>
@@ -1463,23 +1447,23 @@ input {
 
       <section class="problem-section section">
         <div class="section-heading">
-          <p class="eyebrow">你需要的不是更多账号</p>
-          <h2>你需要的是一个不会打断工作的 AI 入口</h2>
+          <p class="eyebrow">不是更多账号，而是更稳定的入口</p>
+          <h2>把工具管理收起来，把完成任务放到前面</h2>
         </div>
         <div class="problem-grid">
           <article class="problem-card">
             <span class="card-index">01</span>
-            <h3>订阅越来越多</h3>
+            <h3>订阅分散</h3>
             <p>写作、编程、翻译、总结都想用 AI，但每个平台单独订阅，固定成本很快变高。</p>
           </article>
           <article class="problem-card featured-card">
             <span class="card-index">02</span>
-            <h3>使用突然中断</h3>
+            <h3>节奏中断</h3>
             <p>临时遇到额度、账号或服务波动时，工作节奏被打断，还要重新找替代方案。</p>
           </article>
           <article class="problem-card">
             <span class="card-index">03</span>
-            <h3>花费不够透明</h3>
+            <h3>成本模糊</h3>
             <p>不知道每次使用大概花了多少，也很难给自己或团队设置清楚的预算边界。</p>
           </article>
         </div>
@@ -1488,7 +1472,7 @@ input {
       <section id="reliable" class="reliable-section section band">
         <div class="reliable-copy">
           <p class="eyebrow">稳定性</p>
-          <h2>把波动留在后台，把可用性留给你</h2>
+          <h2>把服务波动留在后台，把可用性留给你</h2>
           <p>
             当单个平台状态不理想时，系统会尽可能选择可用线路继续处理请求。
             你不需要理解背后的复杂切换，只需要继续写方案、改代码、总结资料。
@@ -1521,7 +1505,7 @@ input {
       <section id="value" class="value-section section">
         <div class="section-heading">
           <p class="eyebrow">性价比</p>
-          <h2>把钱花在真正使用的 AI 上</h2>
+          <h2>预算应该跟着真实使用走</h2>
           <p>对大多数 C 端用户来说，最贵的不是单次使用，而是长期闲置的订阅。</p>
         </div>
         <div class="value-layout">
@@ -1564,7 +1548,7 @@ input {
       <section id="scenes" class="scene-section section band">
         <div class="section-heading">
           <p class="eyebrow">适合谁</p>
-          <h2>不是给少数技术玩家，而是给每天真的要完成事情的人</h2>
+          <h2>给每天真的要完成事情的人</h2>
         </div>
         <div class="scene-grid-cards">
           <article>
@@ -1603,7 +1587,7 @@ input {
       <section class="compare-section section">
         <div class="section-heading">
           <p class="eyebrow">为什么换一个入口</p>
-          <h2>从“管理一堆工具”变成“只管完成任务”</h2>
+          <h2>从管理工具，回到完成任务</h2>
         </div>
         <div class="compare-table" role="table" aria-label="使用方式对比">
           <div class="compare-row header" role="row">
@@ -1652,7 +1636,7 @@ input {
 
       <section class="final-cta">
         <p class="eyebrow">从今天开始</p>
-        <h2>让 AI 成为稳定工具，而不是新的麻烦</h2>
+        <h2>让 AI 回到工具本身</h2>
         <p>少管理账号，少担心预算，少被服务波动打断。打开，使用，完成任务。</p>
         <div class="hero-actions">
           <a class="button button-primary" href="/register">立即开始</a>
