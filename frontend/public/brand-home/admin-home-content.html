@@ -1,0 +1,1668 @@
+<style>
+:root {
+  --ink: #f8f1e8;
+  --ink-soft: #d8cec3;
+  --muted: #9c948c;
+  --void: #090a0d;
+  --void-2: #0e1014;
+  --panel: #17191f;
+  --panel-2: #20232b;
+  --panel-3: #272a33;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --accent: #ff6848;
+  --accent-hot: #ff3f2e;
+  --violet: #7b63ff;
+  --blue: #58b7ff;
+  --success: #58d69f;
+  --gold: #f2bd64;
+  --shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+  --radius: 8px;
+  --font:
+    "Aptos",
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    linear-gradient(120deg, rgba(255, 104, 72, 0.14), transparent 22rem),
+    linear-gradient(240deg, rgba(123, 99, 255, 0.1), transparent 24rem),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.026) 0 1px, transparent 1px 88px),
+    linear-gradient(180deg, #0b0c0f 0%, #111318 44%, #0a0b0e 100%);
+  font-family: var(--font);
+  letter-spacing: 0;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.032) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, black 0%, black 42%, transparent 100%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(30deg, transparent 0 46%, rgba(255, 255, 255, 0.04) 46% 47%, transparent 47% 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.site-nav {
+  position: fixed;
+  z-index: 30;
+  top: 18px;
+  left: 50%;
+  display: grid;
+  width: min(1120px, calc(100% - 32px));
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(18, 19, 24, 0.76);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+  transform: translateX(-50%);
+  backdrop-filter: blur(20px);
+  transition:
+    box-shadow 0.25s ease,
+    background-color 0.25s ease,
+    border-color 0.25s ease;
+}
+
+.site-nav[data-elevated="true"] {
+  border-color: rgba(255, 104, 72, 0.25);
+  background: rgba(18, 19, 24, 0.92);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.36);
+}
+
+.brand-mark,
+.nav-actions,
+.nav-links {
+  display: flex;
+  align-items: center;
+}
+
+.brand-mark {
+  gap: 10px;
+  color: #fff8ef;
+  font-weight: 850;
+}
+
+.brand-mark img {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  background: #111318;
+}
+
+.nav-links {
+  justify-content: center;
+  gap: 4px;
+}
+
+.nav-links a,
+.text-link {
+  border-radius: 999px;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.nav-links a:hover,
+.text-link:hover {
+  background: rgba(255, 104, 72, 0.12);
+  color: var(--ink);
+}
+
+.nav-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 13px 20px;
+  font-weight: 850;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.button:hover {
+  transform: translateY(-2px);
+}
+
+.button-small {
+  min-height: 36px;
+  border-color: rgba(255, 104, 72, 0.36);
+  padding: 8px 13px;
+  background: var(--accent);
+  color: #220c07;
+  font-size: 14px;
+  box-shadow: 0 12px 30px rgba(255, 104, 72, 0.24);
+}
+
+.button-primary {
+  border-color: rgba(255, 104, 72, 0.58);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 38%),
+    linear-gradient(135deg, #ff7a52, var(--accent-hot));
+  color: #260d08;
+  box-shadow:
+    0 18px 42px rgba(255, 104, 72, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+}
+
+.button-primary:hover {
+  box-shadow:
+    0 22px 54px rgba(255, 104, 72, 0.36),
+    0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+}
+
+.button-secondary {
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--ink);
+}
+
+.button-secondary:hover {
+  border-color: rgba(123, 99, 255, 0.36);
+  background: rgba(123, 99, 255, 0.12);
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 104px 24px 40px;
+}
+
+.hero-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(100deg, transparent 0 12%, rgba(255, 104, 72, 0.09) 12% 13%, transparent 13% 100%),
+    linear-gradient(170deg, transparent 0 62%, rgba(123, 99, 255, 0.12) 62% 63%, transparent 63% 100%);
+}
+
+.hero-inner {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(1180px, 100%);
+  min-height: min(700px, calc(100svh - 110px));
+  grid-template-columns: minmax(0, 0.92fr) minmax(520px, 1.08fr);
+  align-items: center;
+  gap: 36px;
+  margin: 0 auto;
+}
+
+.hero-copy {
+  display: grid;
+  gap: 24px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.section-heading h2,
+.reliable-copy h2,
+.final-cta h2 {
+  margin: 0;
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.hero h1 {
+  max-width: 9.8ch;
+  font-size: clamp(3.2rem, 7vw, 5.75rem);
+  line-height: 0.96;
+  text-wrap: balance;
+}
+
+.hero h1 span {
+  display: block;
+}
+
+.hero-lead {
+  max-width: 640px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: clamp(1.05rem, 2vw, 1.22rem);
+  line-height: 1.9;
+}
+
+.hero-actions,
+.hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hero-proof span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.hero-visual {
+  position: relative;
+  min-height: 620px;
+  perspective: 1400px;
+}
+
+.dashboard-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 720px;
+  min-height: 520px;
+  grid-template-columns: 180px 1fr;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.05), transparent 38%),
+    rgba(16, 17, 22, 0.92);
+  box-shadow:
+    0 40px 110px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  transform: translate(-50%, -50%) rotateX(54deg) rotateZ(-8deg) rotateY(0deg);
+  transform-origin: center;
+}
+
+.dashboard-frame::before {
+  content: "";
+  position: absolute;
+  inset: 16px;
+  z-index: -1;
+  border-radius: 14px;
+  background: rgba(255, 104, 72, 0.1);
+  filter: blur(42px);
+  transform: translate(28px, 36px);
+}
+
+.mock-sidebar,
+.mock-main,
+.console-card,
+.mock-hero-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.22);
+}
+
+.mock-sidebar {
+  display: grid;
+  align-content: space-between;
+  min-height: 484px;
+  padding: 18px;
+}
+
+.side-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff9f0;
+  font-size: 15px;
+}
+
+.brand-dot {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 104, 72, 0.35);
+  border-radius: 50%;
+  background:
+    linear-gradient(135deg, transparent 35%, rgba(255, 104, 72, 0.72)),
+    #252832;
+}
+
+.side-menu {
+  display: grid;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.side-menu span {
+  position: relative;
+  border-radius: 999px;
+  padding: 8px 10px 8px 24px;
+  color: rgba(248, 241, 232, 0.42);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.side-menu span::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+
+.side-menu .active {
+  background: rgba(255, 104, 72, 0.14);
+  color: var(--accent);
+}
+
+.side-card {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  margin-top: 32px;
+  padding: 18px 12px;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(155deg, rgba(123, 99, 255, 0.13), transparent 58%),
+    rgba(255, 255, 255, 0.045);
+  text-align: center;
+}
+
+.check-mark {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.check-mark::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: 12px;
+  height: 18px;
+  border-right: 4px solid #220c07;
+  border-bottom: 4px solid #220c07;
+  transform: rotate(42deg);
+}
+
+.side-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.side-card strong {
+  color: #fff6ec;
+  font-size: 18px;
+}
+
+.thin-meter {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.thin-meter span {
+  display: block;
+  width: 68%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--gold));
+}
+
+.mock-main {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  background:
+    linear-gradient(135deg, rgba(123, 99, 255, 0.09), transparent 45%),
+    rgba(255, 255, 255, 0.035);
+}
+
+.mock-hero-card {
+  display: grid;
+  min-height: 150px;
+  grid-template-columns: 1fr 180px;
+  gap: 12px;
+  align-items: center;
+  padding: 22px;
+  background:
+    linear-gradient(130deg, rgba(255, 104, 72, 0.14), transparent 45%),
+    rgba(255, 255, 255, 0.045);
+}
+
+.mock-kicker,
+.console-card small {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mock-hero-card h2 {
+  margin: 0 0 8px;
+  color: #fff6ec;
+  font-size: 24px;
+}
+
+.mock-hero-card span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sketch-panel {
+  position: relative;
+  height: 112px;
+  overflow: hidden;
+}
+
+.sketch-line {
+  position: absolute;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.line-one {
+  top: 36px;
+  left: 18px;
+  width: 82px;
+  transform: rotate(-26deg);
+}
+
+.line-two {
+  top: 70px;
+  left: 26px;
+  width: 120px;
+  background: rgba(255, 104, 72, 0.55);
+  transform: rotate(22deg);
+}
+
+.sketch-person {
+  position: absolute;
+  right: 34px;
+  bottom: 16px;
+  width: 48px;
+  height: 54px;
+  border-radius: 24px 24px 8px 8px;
+  background: var(--accent);
+  transform: rotate(-10deg);
+}
+
+.sketch-person::before {
+  content: "";
+  position: absolute;
+  top: -22px;
+  left: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e9e1d8;
+}
+
+.sketch-person::after {
+  content: "";
+  position: absolute;
+  right: -16px;
+  bottom: -16px;
+  width: 42px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--violet);
+}
+
+.sketch-signal {
+  position: absolute;
+  right: 10px;
+  top: 18px;
+  width: 46px;
+  height: 46px;
+  border: 2px solid rgba(88, 183, 255, 0.48);
+  border-left-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+}
+
+.mock-tabs {
+  display: flex;
+  gap: 22px;
+  padding: 4px 2px 0;
+  color: rgba(248, 241, 232, 0.36);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.mock-tabs .active {
+  color: var(--accent);
+}
+
+.bento-console {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 1fr;
+  grid-auto-rows: 112px;
+  gap: 14px;
+}
+
+.console-card {
+  padding: 16px;
+}
+
+.console-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 6px rgba(88, 214, 159, 0.1);
+}
+
+.route-card {
+  grid-row: span 2;
+  display: grid;
+  align-content: space-between;
+  background:
+    linear-gradient(150deg, rgba(88, 183, 255, 0.12), transparent),
+    rgba(255, 255, 255, 0.045);
+}
+
+.route-card h3 {
+  margin: 18px 0;
+  color: #fff6ec;
+  font-size: 22px;
+}
+
+.mini-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-bars span {
+  display: block;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mini-bars span:nth-child(1) {
+  width: 76%;
+  background: linear-gradient(90deg, var(--accent), var(--gold));
+}
+
+.mini-bars span:nth-child(2) {
+  width: 58%;
+  background: linear-gradient(90deg, var(--violet), var(--blue));
+}
+
+.mini-bars span:nth-child(3) {
+  width: 88%;
+}
+
+.value-card strong {
+  display: block;
+  margin: 2px 0 6px;
+  color: var(--gold);
+  font-size: 30px;
+}
+
+.value-card p,
+.activity-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.value-card p {
+  max-width: 8em;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+
+.activity-card {
+  grid-column: span 2;
+}
+
+.activity-chart {
+  display: flex;
+  height: 44px;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.activity-chart span {
+  flex: 1;
+  border-radius: 999px 999px 2px 2px;
+  background: linear-gradient(180deg, var(--accent), rgba(255, 104, 72, 0.16));
+}
+
+.activity-chart span:nth-child(1) {
+  height: 34%;
+}
+
+.activity-chart span:nth-child(2) {
+  height: 66%;
+}
+
+.activity-chart span:nth-child(3) {
+  height: 45%;
+}
+
+.activity-chart span:nth-child(4) {
+  height: 88%;
+  background: linear-gradient(180deg, var(--violet), rgba(123, 99, 255, 0.12));
+}
+
+.users-card {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.avatar-row {
+  display: flex;
+}
+
+.avatar-row span {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #181a20;
+  border-radius: 50%;
+  margin-left: -8px;
+  background: var(--panel-3);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.avatar-row span:first-child {
+  margin-left: 0;
+  background: var(--accent);
+  color: #220c07;
+}
+
+.section {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 88px 0;
+}
+
+.band {
+  width: 100%;
+  max-width: none;
+  padding-right: max(16px, calc((100% - 1120px) / 2));
+  padding-left: max(16px, calc((100% - 1120px) / 2));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background:
+    linear-gradient(120deg, rgba(255, 104, 72, 0.07), transparent 36rem),
+    linear-gradient(260deg, rgba(88, 183, 255, 0.06), transparent 34rem),
+    rgba(255, 255, 255, 0.025);
+}
+
+.section-heading {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+  margin-bottom: 36px;
+}
+
+.section-heading h2,
+.reliable-copy h2,
+.final-cta h2 {
+  font-size: clamp(2.1rem, 4.6vw, 4.35rem);
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.section-heading p,
+.reliable-copy p,
+.final-cta p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.problem-grid,
+.scene-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.problem-card,
+.scene-grid-cards article,
+.value-list article,
+.savings-panel,
+.signal-board,
+.faq-list details,
+.compare-table {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028)),
+    var(--panel);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.24);
+}
+
+.problem-card {
+  position: relative;
+  min-height: 250px;
+  overflow: hidden;
+  padding: 22px;
+}
+
+.problem-card::after {
+  content: "";
+  position: absolute;
+  right: -38px;
+  bottom: -36px;
+  width: 140px;
+  height: 140px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+}
+
+.featured-card {
+  border-color: rgba(255, 104, 72, 0.34);
+  background:
+    linear-gradient(145deg, rgba(255, 104, 72, 0.13), rgba(255, 255, 255, 0.035)),
+    var(--panel);
+}
+
+.card-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 104, 72, 0.16);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.problem-card h3,
+.scene-grid-cards h3,
+.value-list h3 {
+  margin: 38px 0 10px;
+  color: var(--ink);
+  font-size: 23px;
+}
+
+.problem-card p,
+.scene-grid-cards p,
+.value-list p,
+.savings-panel p,
+.faq-list p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.reliable-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 430px;
+  gap: 48px;
+  align-items: center;
+}
+
+.reliable-copy {
+  display: grid;
+  gap: 18px;
+}
+
+.signal-board {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.signal-board-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 2px 10px;
+}
+
+.signal-board-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.signal-board-head strong {
+  color: var(--success);
+  font-size: 14px;
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.signal-row span {
+  margin-right: auto;
+  color: var(--muted);
+}
+
+.signal-row strong {
+  color: var(--ink);
+}
+
+.signal-row.good::before,
+.signal-row.reroute::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 5px rgba(88, 214, 159, 0.13);
+}
+
+.signal-row.reroute::before {
+  background: var(--gold);
+  box-shadow: 0 0 0 5px rgba(242, 189, 100, 0.15);
+}
+
+.value-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.value-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.value-list article {
+  padding: 22px;
+}
+
+.value-list h3 {
+  margin-top: 0;
+}
+
+.savings-panel {
+  display: grid;
+  align-content: center;
+  gap: 16px;
+  padding: 24px;
+  border-color: rgba(255, 104, 72, 0.3);
+  background:
+    linear-gradient(145deg, rgba(255, 104, 72, 0.16), rgba(123, 99, 255, 0.08)),
+    var(--panel);
+}
+
+.panel-topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.panel-topline span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.panel-topline strong {
+  color: var(--gold);
+  font-size: 34px;
+}
+
+.savings-panel label {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.savings-panel input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.range-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.scene-grid-cards article {
+  display: grid;
+  min-height: 210px;
+  align-content: start;
+  padding: 22px;
+}
+
+.line-icon {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.line-icon::before,
+.line-icon::after {
+  content: "";
+  position: absolute;
+  background: var(--accent);
+}
+
+.line-icon::before {
+  left: 12px;
+  top: 15px;
+  width: 22px;
+  height: 3px;
+}
+
+.line-icon::after {
+  left: 12px;
+  top: 25px;
+  width: 16px;
+  height: 3px;
+  background: var(--violet);
+}
+
+.line-icon.office::after,
+.line-icon.study::after {
+  background: var(--blue);
+}
+
+.line-icon.code::before {
+  width: 10px;
+  transform: rotate(35deg);
+}
+
+.line-icon.code::after {
+  left: 25px;
+  width: 10px;
+  transform: rotate(-35deg);
+}
+
+.line-icon.team::before {
+  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  box-shadow:
+    14px 0 0 var(--blue),
+    7px 12px 0 var(--accent);
+}
+
+.line-icon.team::after {
+  display: none;
+}
+
+.line-icon.daily::before {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--success);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.line-icon.daily::after {
+  left: 27px;
+  top: 28px;
+  width: 9px;
+  height: 3px;
+  transform: rotate(42deg);
+}
+
+.compare-table {
+  overflow: hidden;
+}
+
+.compare-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.compare-row > div {
+  padding: 18px 22px;
+  border-top: 1px solid var(--line);
+  line-height: 1.65;
+}
+
+.compare-row > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.compare-row.header > div {
+  border-top: 0;
+  background: rgba(255, 104, 72, 0.11);
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.compare-row:not(.header) > div:first-child {
+  color: var(--muted);
+}
+
+.compare-row:not(.header) > div:last-child {
+  color: #ffd8c9;
+  font-weight: 850;
+}
+
+.faq-list {
+  display: grid;
+  gap: 12px;
+}
+
+.faq-list details {
+  padding: 18px 20px;
+}
+
+.faq-list summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.faq-list p {
+  margin-top: 12px;
+}
+
+.final-cta {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 96px 24px;
+  text-align: center;
+}
+
+.final-cta p {
+  max-width: 640px;
+}
+
+.final-cta .hero-actions {
+  justify-content: center;
+}
+
+.site-footer {
+  display: flex;
+  width: min(1120px, calc(100% - 32px));
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 0 auto;
+  padding: 28px 0 44px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.site-footer span {
+  color: var(--ink);
+}
+
+@media (max-width: 1080px) {
+  .hero-inner {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding-top: 26px;
+  }
+
+  .hero-copy {
+    justify-items: center;
+    text-align: center;
+  }
+
+  .hero h1 {
+    max-width: 12ch;
+  }
+
+  .hero-actions,
+  .hero-proof {
+    justify-content: center;
+  }
+
+  .hero-visual {
+    min-height: 460px;
+  }
+
+  .dashboard-frame {
+    width: min(720px, 94vw);
+    transform: translate(-50%, -50%) rotateX(48deg) rotateZ(-7deg);
+  }
+}
+
+@media (max-width: 920px) {
+  .site-nav {
+    grid-template-columns: auto auto;
+  }
+
+  .nav-links {
+    display: none;
+  }
+
+  .problem-grid,
+  .scene-grid-cards,
+  .value-list,
+  .reliable-section,
+  .value-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .reliable-section {
+    gap: 28px;
+  }
+
+  .hero {
+    padding-top: 106px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero-visual {
+    min-height: 470px;
+    overflow: hidden;
+  }
+
+  .dashboard-frame {
+    top: 42%;
+    width: 620px;
+    grid-template-columns: 150px 1fr;
+    gap: 10px;
+    padding: 12px;
+    transform: translate(-50%, -50%) rotateX(46deg) rotateZ(-7deg) scale(0.78);
+  }
+
+  .mock-sidebar {
+    padding: 14px;
+  }
+
+  .mock-hero-card {
+    grid-template-columns: 1fr;
+  }
+
+  .sketch-panel {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .site-nav {
+    top: 10px;
+    width: calc(100% - 20px);
+    gap: 10px;
+    border-radius: var(--radius);
+  }
+
+  .brand-mark span,
+  .text-link {
+    display: none;
+  }
+
+  .hero {
+    padding: 96px 16px 40px;
+  }
+
+  .hero h1 {
+    font-size: clamp(3rem, 16vw, 4.3rem);
+  }
+
+  .hero-lead {
+    font-size: 1rem;
+  }
+
+  .hero-actions {
+    width: 100%;
+  }
+
+  .button {
+    width: 100%;
+  }
+
+  .button-small {
+    width: auto;
+  }
+
+  .section {
+    padding-top: 64px;
+    padding-bottom: 64px;
+  }
+
+  .compare-row {
+    grid-template-columns: 1fr;
+  }
+
+  .compare-row > div + div {
+    border-left: 0;
+  }
+
+  .site-footer {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+</style>
+<header class="site-nav" data-elevated="false">
+      <a class="brand-mark" href="#top" aria-label="返回首页">
+        <img src="/logo.png" alt="" />
+        <span>AI Access</span>
+      </a>
+      <nav class="nav-links" aria-label="首页导航">
+        <a href="#reliable">稳定性</a>
+        <a href="#value">性价比</a>
+        <a href="#scenes">适合谁</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="text-link" href="/login">登录</a>
+        <a class="button button-small" href="/register">开始使用</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-backdrop" aria-hidden="true"></div>
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">为真实日常准备的 AI 使用入口</p>
+            <h1><span>稳定的 AI</span><span>不必靠折腾</span></h1>
+            <p class="hero-lead">
+              写方案、做总结、改代码、学资料时，你需要的是打开就能继续工作。
+              我们把复杂的线路、额度和订阅放在后台，把稳定、省心和预算清楚留给你。
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="/register">立即开始使用</a>
+              <a class="button button-secondary" href="#value">看看能省在哪里</a>
+            </div>
+            <div class="hero-proof" aria-label="核心优势">
+              <span>减少固定订阅</span>
+              <span>余额用量透明</span>
+              <span>服务波动时尽量不中断</span>
+            </div>
+          </div>
+
+          <div class="hero-visual" aria-label="AI 使用控制台示意">
+            <div class="dashboard-frame">
+              <aside class="mock-sidebar">
+                <div class="side-brand">
+                  <span class="brand-dot"></span>
+                  <strong>Access</strong>
+                </div>
+                <div class="side-menu">
+                  <span class="active">稳定</span>
+                  <span>快速</span>
+                  <span>实惠</span>
+                  <span>安心</span>
+                </div>
+                <div class="side-card">
+                  <span class="check-mark"></span>
+                  <p>线路状态持续巡检，日常使用更顺畅</p>
+                  <strong>状态稳定</strong>
+                  <div class="thin-meter"><span></span></div>
+                </div>
+              </aside>
+
+              <div class="mock-main">
+                <div class="mock-hero-card">
+                  <div>
+                    <p class="mock-kicker">核心体验</p>
+                    <h2>稳定 · 快速 · 实惠</h2>
+                    <span>少切换，少等待，少为闲置订阅付费</span>
+                  </div>
+                  <div class="sketch-panel" aria-hidden="true">
+                    <span class="sketch-line line-one"></span>
+                    <span class="sketch-line line-two"></span>
+                    <span class="sketch-person"></span>
+                    <span class="sketch-signal"></span>
+                  </div>
+                </div>
+
+                <div class="mock-tabs">
+                  <span class="active">稳定在线</span>
+                  <span>快速响应</span>
+                  <span>成本更轻</span>
+                </div>
+
+                <div class="bento-console">
+                  <article class="console-card route-card">
+                    <div class="console-top">
+                      <span class="status-dot"></span>
+                      <small>稳定性</small>
+                    </div>
+                    <h3>持续可用</h3>
+                    <div class="mini-bars">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                  </article>
+                  <article class="console-card value-card">
+                    <small>实惠体验</small>
+                    <strong>按需</strong>
+                    <p>少付闲置订阅</p>
+                  </article>
+                  <article class="console-card activity-card">
+                    <div class="activity-chart">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                    <p>响应更快，减少等待和重复切换</p>
+                  </article>
+                  <article class="console-card users-card">
+                    <small>核心价值</small>
+                    <div class="avatar-row">
+                      <span>稳</span>
+                      <span>快</span>
+                      <span>省</span>
+                      <span>安</span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="problem-section section">
+        <div class="section-heading">
+          <p class="eyebrow">你需要的不是更多账号</p>
+          <h2>你需要的是一个不会打断工作的 AI 入口</h2>
+        </div>
+        <div class="problem-grid">
+          <article class="problem-card">
+            <span class="card-index">01</span>
+            <h3>订阅越来越多</h3>
+            <p>写作、编程、翻译、总结都想用 AI，但每个平台单独订阅，固定成本很快变高。</p>
+          </article>
+          <article class="problem-card featured-card">
+            <span class="card-index">02</span>
+            <h3>使用突然中断</h3>
+            <p>临时遇到额度、账号或服务波动时，工作节奏被打断，还要重新找替代方案。</p>
+          </article>
+          <article class="problem-card">
+            <span class="card-index">03</span>
+            <h3>花费不够透明</h3>
+            <p>不知道每次使用大概花了多少，也很难给自己或团队设置清楚的预算边界。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="reliable" class="reliable-section section band">
+        <div class="reliable-copy">
+          <p class="eyebrow">稳定性</p>
+          <h2>把波动留在后台，把可用性留给你</h2>
+          <p>
+            当单个平台状态不理想时，系统会尽可能选择可用线路继续处理请求。
+            你不需要理解背后的复杂切换，只需要继续写方案、改代码、总结资料。
+          </p>
+        </div>
+        <div class="signal-board" aria-label="稳定性示意">
+          <div class="signal-board-head">
+            <span>Live route monitor</span>
+            <strong>在线监测</strong>
+          </div>
+          <div class="signal-row good">
+            <span>写作请求</span>
+            <strong>已完成</strong>
+          </div>
+          <div class="signal-row good">
+            <span>资料总结</span>
+            <strong>响应中</strong>
+          </div>
+          <div class="signal-row reroute">
+            <span>服务波动</span>
+            <strong>自动避开</strong>
+          </div>
+          <div class="signal-row good">
+            <span>代码辅助</span>
+            <strong>可继续</strong>
+          </div>
+        </div>
+      </section>
+
+      <section id="value" class="value-section section">
+        <div class="section-heading">
+          <p class="eyebrow">性价比</p>
+          <h2>把钱花在真正使用的 AI 上</h2>
+          <p>对大多数 C 端用户来说，最贵的不是单次使用，而是长期闲置的订阅。</p>
+        </div>
+        <div class="value-layout">
+          <div class="value-list">
+            <article>
+              <h3>轻度用户</h3>
+              <p>偶尔写文案、翻译、总结资料，不必长期维持多个订阅。</p>
+            </article>
+            <article>
+              <h3>重度用户</h3>
+              <p>用量和余额清楚可见，更容易给自己设置每月预算。</p>
+            </article>
+            <article>
+              <h3>轻团队</h3>
+              <p>统一入口使用，减少成员各自购买、报销和共享账号的混乱。</p>
+            </article>
+          </div>
+
+          <aside class="savings-panel" aria-label="订阅预算说明">
+            <div class="panel-topline">
+              <span>预算控制</span>
+              <strong>按需</strong>
+            </div>
+            <p>
+              把固定订阅变成按实际使用分配预算，低频和中频用户可以明显减少闲置支出。
+            </p>
+            <div class="range-meta" aria-label="适用场景">
+              <span>轻度</span>
+              <span>中频</span>
+              <span>轻团队</span>
+            </div>
+            <div class="thin-meter"><span></span></div>
+            <p>
+              余额、用量和成员成本集中展示，预算边界更清楚，也更容易长期控制。
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="scenes" class="scene-section section band">
+        <div class="section-heading">
+          <p class="eyebrow">适合谁</p>
+          <h2>不是给少数技术玩家，而是给每天真的要完成事情的人</h2>
+        </div>
+        <div class="scene-grid-cards">
+          <article>
+            <div class="line-icon writing"></div>
+            <h3>内容创作者</h3>
+            <p>写小红书、公众号、短视频脚本，保持输出节奏。</p>
+          </article>
+          <article>
+            <div class="line-icon office"></div>
+            <h3>办公人群</h3>
+            <p>写方案、做总结、改邮件、整理会议纪要。</p>
+          </article>
+          <article>
+            <div class="line-icon study"></div>
+            <h3>学习用户</h3>
+            <p>解释概念、总结论文、翻译资料、生成复习提纲。</p>
+          </article>
+          <article>
+            <div class="line-icon code"></div>
+            <h3>开发者</h3>
+            <p>辅助写代码、查错、解释报错、补测试思路。</p>
+          </article>
+          <article>
+            <div class="line-icon team"></div>
+            <h3>轻量团队</h3>
+            <p>多人共享预算，减少重复购买和账号管理成本。</p>
+          </article>
+          <article>
+            <div class="line-icon daily"></div>
+            <h3>日常用户</h3>
+            <p>把 AI 当成常用工具，而不是每次都要重新折腾。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="compare-section section">
+        <div class="section-heading">
+          <p class="eyebrow">为什么换一个入口</p>
+          <h2>从“管理一堆工具”变成“只管完成任务”</h2>
+        </div>
+        <div class="compare-table" role="table" aria-label="使用方式对比">
+          <div class="compare-row header" role="row">
+            <div role="columnheader">自己维护多个订阅</div>
+            <div role="columnheader">使用统一 AI 入口</div>
+          </div>
+          <div class="compare-row" role="row">
+            <div role="cell">多个账号、多个账单、多个入口</div>
+            <div role="cell">一个入口，登录后直接使用</div>
+          </div>
+          <div class="compare-row" role="row">
+            <div role="cell">平台波动时自己临时切换</div>
+            <div role="cell">尽可能帮你选择可用线路</div>
+          </div>
+          <div class="compare-row" role="row">
+            <div role="cell">低频使用也要付固定订阅</div>
+            <div role="cell">按需使用，预算更容易控制</div>
+          </div>
+          <div class="compare-row" role="row">
+            <div role="cell">团队共享混乱，不好统计</div>
+            <div role="cell">余额、用量、成员成本更清楚</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="faq-section section band">
+        <div class="section-heading">
+          <p class="eyebrow">常见问题</p>
+          <h2>开始前，你可能想知道这些</h2>
+        </div>
+        <div class="faq-list">
+          <details open>
+            <summary>这适合完全不懂技术的人吗？</summary>
+            <p>适合。你可以把它理解成一个统一的 AI 使用入口。注册、充值或获得额度后，就能在支持的场景里使用。</p>
+          </details>
+          <details>
+            <summary>为什么说更省钱？</summary>
+            <p>因为很多用户不是每天高频使用多个 AI 平台。按需使用可以减少长期闲置订阅，尤其适合低频、中频和轻团队用户。</p>
+          </details>
+          <details>
+            <summary>稳定性是不是绝对保证？</summary>
+            <p>任何第三方服务都可能波动。我们能做的是尽量通过多线路、状态监控和可用性策略降低中断对你的影响。</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <p class="eyebrow">从今天开始</p>
+        <h2>让 AI 成为稳定工具，而不是新的麻烦</h2>
+        <p>少管理账号，少担心预算，少被服务波动打断。打开，使用，完成任务。</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="/register">立即开始</a>
+          <a class="button button-secondary" href="/login">已有账号登录</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>AI Access</span>
+      <a href="/key-usage">查询用量</a>
+      <a href="/login">登录控制台</a>
+    </footer>

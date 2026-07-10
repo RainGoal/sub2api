@@ -7,6 +7,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -560,6 +562,36 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
 	})
+
+	t.Run("serves_override_files_before_spa_fallback", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		overrideDir := filepath.Join(t.TempDir(), "public")
+		overridePath := filepath.Join(overrideDir, "override-only", "index.html")
+		require.NoError(t, os.MkdirAll(filepath.Dir(overridePath), 0o755))
+		require.NoError(t, os.WriteFile(overridePath, []byte("<!doctype html><title>override brand home</title>"), 0o644))
+		server.overrideDir = overrideDir
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		for _, path := range []string{"/override-only/index.html", "/override-only/"} {
+			t.Run(path, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+				assert.Contains(t, w.Body.String(), "override brand home")
+			})
+		}
+	})
 }
 
 func TestNewFrontendServer(t *testing.T) {
@@ -648,6 +680,34 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 			})
 		}
+	})
+
+	t.Run("serves_override_files_before_spa_fallback", func(t *testing.T) {
+		previousWd, err := os.Getwd()
+		require.NoError(t, err)
+
+		tempRoot := t.TempDir()
+		require.NoError(t, os.Chdir(tempRoot))
+		t.Cleanup(func() {
+			require.NoError(t, os.Chdir(previousWd))
+		})
+
+		overridePath := filepath.Join("data", "public", "override-only", "legacy.html")
+		require.NoError(t, os.MkdirAll(filepath.Dir(overridePath), 0o755))
+		require.NoError(t, os.WriteFile(overridePath, []byte("<!doctype html><title>legacy override</title>"), 0o644))
+
+		middleware := ServeEmbeddedFrontend()
+
+		router := gin.New()
+		router.Use(middleware)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/override-only/legacy.html", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+		assert.Contains(t, w.Body.String(), "legacy override")
 	})
 
 	t.Run("skips_api_routes", func(t *testing.T) {

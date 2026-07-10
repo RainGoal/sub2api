@@ -10,6 +10,7 @@ import (
 	htmlpkg "html"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -98,14 +99,15 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		// For index.html or SPA routes, serve with injected settings
-		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
-			s.serveIndexHTML(c)
+		// Try local override before SPA fallback so data/public can add files
+		// that are not embedded in the compiled frontend bundle.
+		if cleanPath != "index.html" && s.tryServeOverride(c, cleanPath) {
 			return
 		}
 
-		// Try local override first
-		if s.tryServeOverride(c, cleanPath) {
+		// For index.html or SPA routes, serve with injected settings
+		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
+			s.serveIndexHTML(c)
 			return
 		}
 
@@ -127,17 +129,7 @@ func (s *FrontendServer) fileExists(path string) bool {
 // tryServeOverride checks if a local override file exists and serves it.
 // Files in overrideDir take precedence over embedded files.
 func (s *FrontendServer) tryServeOverride(c *gin.Context, cleanPath string) bool {
-	if s.overrideDir == "" {
-		return false
-	}
-	filePath := filepath.Join(s.overrideDir, filepath.Clean("/"+cleanPath))
-	info, err := os.Stat(filePath)
-	if err != nil || info.IsDir() {
-		return false
-	}
-	c.File(filePath)
-	c.Abort()
-	return true
+	return tryServeOverrideFile(c, s.overrideDir, cleanPath)
 }
 
 func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
@@ -267,12 +259,14 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
+		// Try local override before SPA fallback so data/public can add files
+		// that are not embedded in the compiled frontend bundle.
+		if cleanPath != "index.html" && tryServeOverrideFile(c, overrideDir, cleanPath) {
+			return
+		}
+
 		if file, err := distFS.Open(cleanPath); err == nil {
 			_ = file.Close()
-			// Try local override first
-			if tryServeOverrideFile(c, overrideDir, cleanPath) {
-				return
-			}
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
@@ -289,10 +283,30 @@ func tryServeOverrideFile(c *gin.Context, overrideDir, cleanPath string) bool {
 	}
 	filePath := filepath.Join(overrideDir, filepath.Clean("/"+cleanPath))
 	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+	if info.IsDir() {
+		filePath = filepath.Join(filePath, "index.html")
+		info, err = os.Stat(filePath)
+	}
 	if err != nil || info.IsDir() {
 		return false
 	}
-	c.File(filePath)
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to read override file")
+		c.Abort()
+		return true
+	}
+
+	contentType := mime.TypeByExtension(filepath.Ext(filePath))
+	if contentType == "" {
+		contentType = http.DetectContentType(content)
+	}
+
+	c.Header("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
+	c.Data(http.StatusOK, contentType, content)
 	c.Abort()
 	return true
 }
