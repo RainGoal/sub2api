@@ -416,7 +416,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildGatewayUrl } from '@/api/client'
 import { sanitizeUrl } from '@/utils/url'
-import { forceDarkTheme } from '@/utils/theme'
+import { getCurrentTheme, type ThemeMode } from '@/utils/theme'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -430,7 +430,7 @@ const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
 
 // ==================== Theme (same as HomeView) ====================
 
-const isDark = ref(document.documentElement.classList.contains('dark'))
+const isDark = ref(getCurrentTheme() === 'dark')
 
 const currentYear = computed(() => new Date().getFullYear())
 
@@ -893,9 +893,8 @@ async function queryKey() {
 
 // ==================== Lifecycle ====================
 
-function initTheme() {
-  forceDarkTheme()
-  isDark.value = true
+function handleThemeChange(event: Event) {
+  isDark.value = (event as CustomEvent<ThemeMode>).detail === 'dark'
 }
 
 function formatResetTime(resetAt: string | null | undefined): string {
@@ -911,7 +910,8 @@ function formatResetTime(resetAt: string | null | undefined): string {
 }
 
 onMounted(() => {
-  initTheme()
+  isDark.value = getCurrentTheme() === 'dark'
+  window.addEventListener('themechange', handleThemeChange)
   if (!appStore.publicSettingsLoaded) {
     appStore.fetchPublicSettings()
   }
@@ -919,6 +919,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('themechange', handleThemeChange)
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>

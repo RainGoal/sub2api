@@ -26,6 +26,26 @@
     sans-serif;
 }
 
+html.light {
+  --ink: #15171d;
+  --ink-soft: #313945;
+  --muted: #68707d;
+  --void: #f8f9fb;
+  --void-2: #e9edf4;
+  --panel: #ffffff;
+  --panel-2: #f1f3f7;
+  --panel-3: #e8ecf3;
+  --line: rgba(24, 31, 42, 0.11);
+  --line-strong: rgba(24, 31, 42, 0.18);
+  --accent: #e85b3d;
+  --accent-hot: #d9482f;
+  --violet: #6654e8;
+  --blue: #287fbd;
+  --success: #16845f;
+  --gold: #b87920;
+  --shadow: 0 28px 80px rgba(23, 30, 42, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1160,6 +1180,165 @@ input {
 
 .site-footer span {
   color: var(--ink);
+}
+
+html.light body {
+  color: var(--ink);
+  background:
+    linear-gradient(120deg, rgba(255, 104, 72, 0.14), transparent 22rem),
+    linear-gradient(240deg, rgba(102, 84, 232, 0.08), transparent 24rem),
+    repeating-linear-gradient(90deg, rgba(24, 31, 42, 0.035) 0 1px, transparent 1px 88px),
+    linear-gradient(180deg, #f8f9fb 0%, #eef1f6 44%, #e7ebf2 100%);
+}
+
+html.light body::before {
+  background-image:
+    linear-gradient(rgba(24, 31, 42, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 31, 42, 0.045) 1px, transparent 1px);
+}
+
+html.light body::after {
+  opacity: 0.18;
+  background-image:
+    linear-gradient(30deg, transparent 0 46%, rgba(24, 31, 42, 0.045) 46% 47%, transparent 47% 100%),
+    repeating-linear-gradient(0deg, rgba(24, 31, 42, 0.026) 0 1px, transparent 1px 3px);
+}
+
+html.light .site-nav {
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 60px rgba(23, 30, 42, 0.1);
+}
+
+html.light .site-nav[data-elevated="true"] {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 20px 70px rgba(23, 30, 42, 0.12);
+}
+
+html.light .brand-mark,
+html.light .side-brand,
+html.light .side-card strong,
+html.light .mock-hero-card h2,
+html.light .route-card h3 {
+  color: var(--ink);
+}
+
+html.light .brand-mark img {
+  border-color: rgba(24, 31, 42, 0.1);
+  background: #fff8f4;
+}
+
+html.light .button-secondary,
+html.light .hero-proof span {
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--ink);
+}
+
+html.light .dashboard-frame {
+  border-color: rgba(24, 31, 42, 0.12);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.82), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(232, 236, 243, 0.96));
+  box-shadow:
+    0 34px 96px rgba(23, 30, 42, 0.16),
+    0 0 0 1px rgba(255, 255, 255, 0.9) inset;
+}
+
+html.light .dashboard-frame::before {
+  background:
+    linear-gradient(90deg, rgba(255, 104, 72, 0.16), transparent 45%),
+    rgba(40, 127, 189, 0.08);
+}
+
+html.light .mock-sidebar,
+html.light .mock-main,
+html.light .console-card,
+html.light .mock-hero-card,
+html.light .problem-card,
+html.light .scene-grid-cards article,
+html.light .value-list article,
+html.light .savings-panel,
+html.light .signal-board,
+html.light .faq-list details,
+html.light .compare-table {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.48)),
+    var(--panel);
+  box-shadow: 0 18px 56px rgba(23, 30, 42, 0.1);
+}
+
+html.light .mock-sidebar,
+html.light .mock-main,
+html.light .console-card,
+html.light .mock-hero-card {
+  border-color: var(--line);
+}
+
+html.light .side-menu span {
+  color: rgba(49, 57, 69, 0.56);
+}
+
+html.light .side-menu .active {
+  border-color: rgba(255, 104, 72, 0.28);
+  background: rgba(255, 104, 72, 0.1);
+  color: #9d341f;
+}
+
+html.light .side-card,
+html.light .route-matrix span,
+html.light .signal-row,
+html.light .line-icon {
+  border-color: var(--line);
+  background: rgba(24, 31, 42, 0.035);
+}
+
+html.light .side-metric,
+html.light .ledger-row {
+  border-top-color: rgba(24, 31, 42, 0.08);
+}
+
+html.light .side-metric span,
+html.light .mock-tabs {
+  color: rgba(49, 57, 69, 0.58);
+}
+
+html.light .thin-meter,
+html.light .mini-bars span {
+  background: rgba(24, 31, 42, 0.1);
+}
+
+html.light .band {
+  background:
+    linear-gradient(120deg, rgba(255, 104, 72, 0.08), transparent 36rem),
+    linear-gradient(260deg, rgba(40, 127, 189, 0.07), transparent 34rem),
+    rgba(255, 255, 255, 0.38);
+}
+
+html.light .problem-card::after {
+  border-color: rgba(24, 31, 42, 0.08);
+}
+
+html.light .featured-card,
+html.light .savings-panel {
+  background:
+    linear-gradient(145deg, rgba(255, 104, 72, 0.13), rgba(102, 84, 232, 0.055)),
+    var(--panel);
+}
+
+html.light .compare-row:not(.header) > div:last-child {
+  color: #9d341f;
+}
+
+html.light .route-matrix span {
+  background:
+    linear-gradient(145deg, rgba(22, 132, 95, 0.11), transparent),
+    rgba(24, 31, 42, 0.035);
+}
+
+html.light .route-matrix span:nth-child(2),
+html.light .route-matrix span:nth-child(6) {
+  background:
+    linear-gradient(145deg, rgba(184, 121, 32, 0.12), transparent),
+    rgba(24, 31, 42, 0.032);
 }
 
 @media (max-width: 1080px) {

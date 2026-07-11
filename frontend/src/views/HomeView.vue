@@ -402,7 +402,6 @@ import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
-import { forceDarkTheme } from '@/utils/theme'
 
 const { t } = useI18n()
 
@@ -479,8 +478,6 @@ const userInitial = computed(() => {
 const currentYear = computed(() => new Date().getFullYear())
 
 onMounted(() => {
-  forceDarkTheme()
-
   // Check auth state
   authStore.checkAuth()
 

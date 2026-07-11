@@ -4,12 +4,12 @@ import App from './App.vue'
 import router from './router'
 import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
-import { forceDarkTheme } from '@/utils/theme'
+import { initTheme } from '@/utils/theme'
 import './style.css'
 import './brand/brand.css'
 
 function initThemeClass() {
-  forceDarkTheme()
+  initTheme()
 }
 
 async function bootstrap() {

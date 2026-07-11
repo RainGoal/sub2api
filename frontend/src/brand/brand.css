@@ -26,6 +26,28 @@
     sans-serif;
 }
 
+html.light {
+  color-scheme: light;
+  --brand-bg: #f6f7fa;
+  --brand-bg-2: #e9edf4;
+  --brand-panel: rgba(255, 255, 255, 0.88);
+  --brand-panel-strong: rgba(255, 255, 255, 0.96);
+  --brand-panel-soft: rgba(24, 31, 42, 0.052);
+  --brand-line: rgba(24, 31, 42, 0.11);
+  --brand-line-strong: rgba(24, 31, 42, 0.18);
+  --brand-muted: #68707d;
+  --brand-text: #15171d;
+  --brand-text-soft: #313945;
+  --brand-accent: #e85b3d;
+  --brand-accent-strong: #d9482f;
+  --brand-violet: #6654e8;
+  --brand-blue: #287fbd;
+  --brand-gold: #b87920;
+  --brand-success: #16845f;
+  --brand-danger: #d83f4a;
+  --brand-shadow: 0 22px 64px rgba(23, 30, 42, 0.11);
+}
+
 html {
   color-scheme: dark;
 }
@@ -64,6 +86,19 @@ body {
 .btn {
   font-family: var(--brand-font);
   letter-spacing: 0;
+}
+
+.theme-toggle {
+  border: 1px solid var(--brand-line) !important;
+  background: var(--brand-panel-soft) !important;
+  color: var(--brand-text-soft) !important;
+  box-shadow: none !important;
+}
+
+.theme-toggle:hover {
+  border-color: rgba(255, 104, 72, 0.35) !important;
+  background: rgba(255, 104, 72, 0.1) !important;
+  color: var(--brand-text) !important;
 }
 
 .btn-primary {
@@ -585,6 +620,195 @@ header h1,
 .brand-auth-shell a,
 .brand-home a {
   color: inherit;
+}
+
+html.light ::selection {
+  background: rgba(255, 104, 72, 0.22);
+  color: #2b160e;
+}
+
+html.light body,
+html.light .brand-app-shell,
+html.light .brand-home,
+html.light .brand-auth-shell > .absolute.inset-0:not(.pointer-events-none) {
+  background:
+    linear-gradient(120deg, rgba(255, 104, 72, 0.14), transparent 24rem),
+    linear-gradient(250deg, rgba(102, 84, 232, 0.08), transparent 28rem),
+    linear-gradient(180deg, #f8f9fb 0%, #e9edf4 100%) !important;
+}
+
+html.light .brand-app-shell::before,
+html.light .brand-home::before,
+html.light .brand-auth-shell::before {
+  background-image:
+    linear-gradient(rgba(24, 31, 42, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 31, 42, 0.045) 1px, transparent 1px);
+}
+
+html.light .brand-app-shell::after,
+html.light .brand-auth-shell::after {
+  opacity: 0.18;
+  background:
+    linear-gradient(100deg, transparent 0 22%, rgba(255, 104, 72, 0.08) 22% 23%, transparent 23% 100%),
+    repeating-linear-gradient(0deg, rgba(24, 31, 42, 0.026) 0 1px, transparent 1px 3px);
+}
+
+html.light .brand-app-shell > .pointer-events-none.fixed {
+  background:
+    linear-gradient(135deg, rgba(255, 104, 72, 0.1), transparent 28rem),
+    linear-gradient(235deg, rgba(40, 127, 189, 0.075), transparent 26rem) !important;
+}
+
+html.light .card,
+html.light .glass-card,
+html.light .card-glass,
+html.light .modal-content,
+html.light .dialog-container,
+html.light .dropdown,
+html.light .toast,
+html.light .stat-card,
+html.light .brand-home main .group {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.42)),
+    var(--brand-panel) !important;
+  box-shadow: var(--brand-shadow) !important;
+}
+
+html.light .table-container {
+  box-shadow: 0 18px 48px rgba(23, 30, 42, 0.08);
+}
+
+html.light .table td {
+  border-bottom-color: rgba(24, 31, 42, 0.065) !important;
+}
+
+html.light .table tbody tr:hover {
+  background: rgba(255, 104, 72, 0.06) !important;
+}
+
+html.light .badge-primary,
+html.light .tab-active,
+html.light .switch-active {
+  background: rgba(255, 104, 72, 0.14) !important;
+  color: #9d341f !important;
+}
+
+html.light .badge-success {
+  background: rgba(22, 132, 95, 0.12) !important;
+  color: var(--brand-success) !important;
+}
+
+html.light .badge-warning {
+  background: rgba(184, 121, 32, 0.14) !important;
+  color: var(--brand-gold) !important;
+}
+
+html.light .badge-danger {
+  background: rgba(216, 63, 74, 0.12) !important;
+  color: var(--brand-danger) !important;
+}
+
+html.light .badge-gray,
+html.light .tabs,
+html.light .progress,
+html.light .code {
+  background: rgba(24, 31, 42, 0.06) !important;
+  color: var(--brand-text-soft) !important;
+}
+
+html.light .sidebar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(246, 247, 250, 0.76)),
+    rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 22px 0 64px rgba(23, 30, 42, 0.1);
+}
+
+html.light .sidebar-logo {
+  background:
+    linear-gradient(135deg, rgba(255, 104, 72, 0.16), transparent),
+    #fff8f4 !important;
+  box-shadow:
+    0 12px 28px rgba(23, 30, 42, 0.1),
+    0 0 26px rgba(255, 104, 72, 0.12) !important;
+}
+
+html.light .sidebar-section-title {
+  color: rgba(104, 112, 125, 0.76) !important;
+}
+
+html.light .sidebar-link:hover {
+  background: rgba(255, 104, 72, 0.075) !important;
+}
+
+html.light .sidebar-link-active {
+  background:
+    linear-gradient(90deg, rgba(255, 104, 72, 0.14), rgba(102, 84, 232, 0.07)) !important;
+  border-color: rgba(255, 104, 72, 0.3) !important;
+  color: #9d341f !important;
+  box-shadow:
+    inset 3px 0 0 var(--brand-accent),
+    0 10px 24px rgba(255, 104, 72, 0.09);
+}
+
+html.light .brand-app-shell header.glass {
+  background: rgba(255, 255, 255, 0.78) !important;
+  box-shadow: 0 14px 44px rgba(23, 30, 42, 0.08);
+}
+
+html.light .dialog-footer {
+  background: rgba(24, 31, 42, 0.035) !important;
+}
+
+html.light .stat-icon-primary,
+html.light .stat-icon-warning,
+html.light .stat-icon-success,
+html.light .stat-icon-danger {
+  background: rgba(24, 31, 42, 0.06) !important;
+}
+
+html.light .dropdown-item:hover {
+  background: rgba(255, 104, 72, 0.075) !important;
+}
+
+html.light .brand-home > .pointer-events-none > div:last-child,
+html.light .brand-auth-shell > .pointer-events-none > div:last-child {
+  background-image:
+    linear-gradient(rgba(24, 31, 42, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 31, 42, 0.045) 1px, transparent 1px) !important;
+}
+
+html.light .brand-home header nav {
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 18px 54px rgba(23, 30, 42, 0.1);
+}
+
+html.light .brand-home main .group:hover {
+  box-shadow:
+    0 22px 62px rgba(23, 30, 42, 0.12),
+    0 0 0 1px rgba(255, 104, 72, 0.16) inset !important;
+}
+
+html.light .brand-home .terminal-window {
+  background:
+    linear-gradient(145deg, rgba(255, 104, 72, 0.12), transparent 36%),
+    linear-gradient(145deg, #ffffff, #e9edf4) !important;
+  border-color: rgba(255, 104, 72, 0.22);
+  box-shadow:
+    0 30px 80px rgba(23, 30, 42, 0.16),
+    0 0 0 1px rgba(255, 255, 255, 0.9) inset !important;
+}
+
+html.light .brand-home .terminal-header {
+  background: rgba(255, 104, 72, 0.07) !important;
+}
+
+html.light .brand-auth-shell .card-glass {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.56)),
+    rgba(255, 255, 255, 0.9) !important;
+  box-shadow:
+    0 30px 90px rgba(23, 30, 42, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.82) inset !important;
 }
 
 @media (max-width: 640px) {
