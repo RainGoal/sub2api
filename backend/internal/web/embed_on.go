@@ -10,7 +10,6 @@ import (
 	htmlpkg "html"
 	"io"
 	"io/fs"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -99,19 +98,19 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		// Try local override before SPA fallback so data/public can add files
-		// that are not embedded in the compiled frontend bundle.
-		if cleanPath != "index.html" && s.tryServeOverride(c, cleanPath) {
-			return
-		}
-
 		// For index.html or SPA routes, serve with injected settings
 		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
 			s.serveIndexHTML(c)
 			return
 		}
 
-		// Serve static files normally
+		// Try local override first
+		if s.tryServeOverride(c, cleanPath) {
+			return
+		}
+
+		// Serve static files normally (hashed assets get long-lived cache headers)
+		applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
 		s.fileServer.ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
@@ -129,7 +128,18 @@ func (s *FrontendServer) fileExists(path string) bool {
 // tryServeOverride checks if a local override file exists and serves it.
 // Files in overrideDir take precedence over embedded files.
 func (s *FrontendServer) tryServeOverride(c *gin.Context, cleanPath string) bool {
-	return tryServeOverrideFile(c, s.overrideDir, cleanPath)
+	if s.overrideDir == "" {
+		return false
+	}
+	filePath := filepath.Join(s.overrideDir, filepath.Clean("/"+cleanPath))
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
+	c.File(filePath)
+	c.Abort()
+	return true
 }
 
 func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
@@ -259,14 +269,13 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			cleanPath = "index.html"
 		}
 
-		// Try local override before SPA fallback so data/public can add files
-		// that are not embedded in the compiled frontend bundle.
-		if cleanPath != "index.html" && tryServeOverrideFile(c, overrideDir, cleanPath) {
-			return
-		}
-
 		if file, err := distFS.Open(cleanPath); err == nil {
 			_ = file.Close()
+			// Try local override first
+			if tryServeOverrideFile(c, overrideDir, cleanPath) {
+				return
+			}
+			applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
@@ -283,30 +292,11 @@ func tryServeOverrideFile(c *gin.Context, overrideDir, cleanPath string) bool {
 	}
 	filePath := filepath.Join(overrideDir, filepath.Clean("/"+cleanPath))
 	info, err := os.Stat(filePath)
-	if err != nil {
-		return false
-	}
-	if info.IsDir() {
-		filePath = filepath.Join(filePath, "index.html")
-		info, err = os.Stat(filePath)
-	}
 	if err != nil || info.IsDir() {
 		return false
 	}
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to read override file")
-		c.Abort()
-		return true
-	}
-
-	contentType := mime.TypeByExtension(filepath.Ext(filePath))
-	if contentType == "" {
-		contentType = http.DetectContentType(content)
-	}
-
-	c.Header("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
-	c.Data(http.StatusOK, contentType, content)
+	applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
+	c.File(filePath)
 	c.Abort()
 	return true
 }
@@ -322,7 +312,9 @@ func shouldBypassEmbeddedFrontend(path string) bool {
 		trimmed == "/health" ||
 		trimmed == "/responses" ||
 		strings.HasPrefix(trimmed, "/responses/") ||
-		strings.HasPrefix(trimmed, "/images/")
+		trimmed == "/alpha/search" ||
+		strings.HasPrefix(trimmed, "/images/") ||
+		strings.HasPrefix(trimmed, "/videos/")
 }
 
 func serveIndexHTML(c *gin.Context, fsys fs.FS) {

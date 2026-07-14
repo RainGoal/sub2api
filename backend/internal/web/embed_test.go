@@ -7,8 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -509,6 +507,32 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
 	})
 
+	t.Run("skips_alpha_search_post_route", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"test": "value"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+		nextCalled := false
+		router.POST("/alpha/search", func(c *gin.Context) {
+			nextCalled = true
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+		})
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/alpha/search", strings.NewReader(`{"model":"gpt-5.6-sol"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		assert.True(t, nextCalled, "next handler should be called for alpha search API route")
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	})
+
 	t.Run("serves_index_for_spa_routes", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
@@ -562,36 +586,17 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
 	})
+}
 
-	t.Run("serves_override_files_before_spa_fallback", func(t *testing.T) {
-		provider := &mockSettingsProvider{
-			settings: map[string]string{"test": "value"},
-		}
-
-		server, err := NewFrontendServer(provider)
-		require.NoError(t, err)
-
-		overrideDir := filepath.Join(t.TempDir(), "public")
-		overridePath := filepath.Join(overrideDir, "override-only", "index.html")
-		require.NoError(t, os.MkdirAll(filepath.Dir(overridePath), 0o755))
-		require.NoError(t, os.WriteFile(overridePath, []byte("<!doctype html><title>override brand home</title>"), 0o644))
-		server.overrideDir = overrideDir
-
-		router := gin.New()
-		router.Use(server.Middleware())
-
-		for _, path := range []string{"/override-only/index.html", "/override-only/"} {
-			t.Run(path, func(t *testing.T) {
-				w := httptest.NewRecorder()
-				req := httptest.NewRequest(http.MethodGet, path, nil)
-				router.ServeHTTP(w, req)
-
-				assert.Equal(t, http.StatusOK, w.Code)
-				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
-				assert.Contains(t, w.Body.String(), "override brand home")
-			})
-		}
-	})
+func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
+	for _, path := range []string{
+		"/videos/generations",
+		"/videos/edits",
+		"/videos/extensions",
+		"/videos/request-123",
+	} {
+		require.True(t, shouldBypassEmbeddedFrontend(path), "path=%s", path)
+	}
 }
 
 func TestNewFrontendServer(t *testing.T) {
@@ -680,34 +685,6 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 			})
 		}
-	})
-
-	t.Run("serves_override_files_before_spa_fallback", func(t *testing.T) {
-		previousWd, err := os.Getwd()
-		require.NoError(t, err)
-
-		tempRoot := t.TempDir()
-		require.NoError(t, os.Chdir(tempRoot))
-		t.Cleanup(func() {
-			require.NoError(t, os.Chdir(previousWd))
-		})
-
-		overridePath := filepath.Join("data", "public", "override-only", "legacy.html")
-		require.NoError(t, os.MkdirAll(filepath.Dir(overridePath), 0o755))
-		require.NoError(t, os.WriteFile(overridePath, []byte("<!doctype html><title>legacy override</title>"), 0o644))
-
-		middleware := ServeEmbeddedFrontend()
-
-		router := gin.New()
-		router.Use(middleware)
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/override-only/legacy.html", nil)
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
-		assert.Contains(t, w.Body.String(), "legacy override")
 	})
 
 	t.Run("skips_api_routes", func(t *testing.T) {
