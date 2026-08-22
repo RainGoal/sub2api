@@ -1086,7 +1086,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						}
 					}
 					if data != "" {
-						MarkFirstSSEData(c.Request.Context(), data)
+						if c != nil && c.Request != nil {
+							MarkFirstSSEData(c.Request.Context(), data)
+						}
 						if firstTokenMs == nil && data != "[DONE]" {
 							ms := int(time.Since(startTime).Milliseconds())
 							firstTokenMs = &ms

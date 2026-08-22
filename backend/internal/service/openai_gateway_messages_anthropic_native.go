@@ -422,7 +422,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
-				MarkFirstSSEData(c.Request.Context(), trimmed)
+				if c != nil && c.Request != nil {
+					MarkFirstSSEData(c.Request.Context(), trimmed)
+				}
 				observer.ObserveAnthropic([]byte(trimmed))
 				if anthropicStreamEventIsTerminal("", trimmed) {
 					sawTerminalEvent = true

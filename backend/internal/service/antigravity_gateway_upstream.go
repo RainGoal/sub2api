@@ -253,7 +253,9 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmedData := strings.TrimSpace(data)
-				MarkFirstSSEData(c.Request.Context(), trimmedData)
+				if c != nil && c.Request != nil {
+					MarkFirstSSEData(c.Request.Context(), trimmedData)
+				}
 				upstreamResponseModelObserverFromContext(c).ObserveAnthropic([]byte(trimmedData))
 			}
 

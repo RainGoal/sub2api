@@ -259,7 +259,9 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		if !ok {
 			continue
 		}
-		MarkFirstSSEData(c.Request.Context(), payload)
+		if c != nil && c.Request != nil {
+			MarkFirstSSEData(c.Request.Context(), payload)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -467,7 +469,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		if !ok {
 			continue
 		}
-		MarkFirstSSEData(c.Request.Context(), payload)
+		if c != nil && c.Request != nil {
+			MarkFirstSSEData(c.Request.Context(), payload)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {

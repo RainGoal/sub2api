@@ -599,7 +599,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if trimmedData == "" {
 			continue
 		}
-		MarkFirstSSEData(c.Request.Context(), trimmedData)
+		markContext := ctx
+		if c != nil && c.Request != nil {
+			markContext = c.Request.Context()
+		}
+		MarkFirstSSEData(markContext, trimmedData)
 		if trimmedData == "[DONE]" {
 			sawDone = true
 			continue

@@ -251,7 +251,9 @@ func (s *AntigravityGatewayService) handleGeminiStreamingResponse(c *gin.Context
 					cw.Fprintf("%s\n", line)
 					continue
 				}
-				MarkFirstSSEData(c.Request.Context(), payload)
+				if c != nil && c.Request != nil {
+					MarkFirstSSEData(c.Request.Context(), payload)
+				}
 
 				// 解包 v1internal 响应
 				inner, parseErr := s.unwrapV1InternalResponse([]byte(payload))
@@ -416,7 +418,9 @@ func (s *AntigravityGatewayService) handleGeminiStreamToNonStreaming(c *gin.Cont
 			if payload == "" || payload == "[DONE]" {
 				continue
 			}
-			MarkFirstSSEData(c.Request.Context(), payload)
+			if c != nil && c.Request != nil {
+				MarkFirstSSEData(c.Request.Context(), payload)
+			}
 
 			// 解包 v1internal 响应
 			inner, parseErr := s.unwrapV1InternalResponse([]byte(payload))
@@ -1156,7 +1160,9 @@ func (s *AntigravityGatewayService) handleClaudeStreamingResponse(c *gin.Context
 			lastDataAt = time.Now()
 			s.observeAntigravityGeminiSSELine(c, ev.line)
 			if data, ok := extractAnthropicSSEDataLine(ev.line); ok {
-				MarkFirstSSEData(c.Request.Context(), data)
+				if c != nil && c.Request != nil {
+					MarkFirstSSEData(c.Request.Context(), data)
+				}
 			}
 
 			// 处理 SSE 行，转换为 Claude 格式

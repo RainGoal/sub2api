@@ -2134,7 +2134,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			}
 			continue
 		}
-		if c.Request != nil {
+		if c != nil && c.Request != nil {
 			MarkFirstSSEData(c.Request.Context(), payload)
 		}
 
@@ -2739,7 +2739,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					}
 					observer.ObserveGemini(rawBytes)
 					observeGeminiImageOutputs(c, rawBytes)
-					if c.Request != nil {
+					if c != nil && c.Request != nil {
 						MarkFirstSSEData(c.Request.Context(), payload)
 					}
 
