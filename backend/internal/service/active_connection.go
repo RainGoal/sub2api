@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	ActiveConnectionPhaseQueued      = "queued"
-	ActiveConnectionPhaseConnecting  = "connecting"
-	ActiveConnectionPhaseReceiving   = "receiving"
-	ActiveConnectionPhaseFinalizing  = "finalizing"
-	ActiveConnectionStatusCompleted  = "completed"
-	ActiveConnectionStatusFailed     = "failed"
-	activeConnectionSubscriberBuffer = 32
-	activeConnectionMaxPerUser       = 32
+	ActiveConnectionPhaseQueued     = "queued"
+	ActiveConnectionPhaseConnecting = "connecting"
+	ActiveConnectionPhaseReceiving  = "receiving"
+	ActiveConnectionPhaseFinalizing = "finalizing"
+	ActiveConnectionStatusCompleted = "completed"
+	ActiveConnectionStatusFailed    = "failed"
+	// Keep enough room for a burst of hundreds of starts without making a slow
+	// monitoring panel block or immediately lose the initial event sequence.
+	activeConnectionSubscriberBuffer = 512
 	activeConnectionTTL              = 10 * time.Minute
 )
 
@@ -112,10 +113,6 @@ func (s *ActiveConnectionService) Start(userID int64, input ActiveConnectionStar
 	s.mu.Lock()
 	s.pruneLocked(now)
 	userConnections := s.byUser[userID]
-	if len(userConnections) >= activeConnectionMaxPerUser {
-		s.mu.Unlock()
-		return nil
-	}
 	if userConnections == nil {
 		userConnections = make(map[string]*activeConnectionEntry)
 		s.byUser[userID] = userConnections

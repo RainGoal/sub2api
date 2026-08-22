@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -82,5 +83,17 @@ func TestActiveConnectionPrunesExpiredEntries(t *testing.T) {
 	failed := <-events
 	if failed.Type != "connection.failed" || failed.RequestID != "expired" {
 		t.Fatalf("unexpected expiry event: %+v", failed)
+	}
+}
+
+func TestActiveConnectionTracksMoreThanLegacyLimit(t *testing.T) {
+	svc := NewActiveConnectionService()
+	for i := 0; i < 128; i++ {
+		if handle := svc.Start(11, ActiveConnectionStart{RequestID: "req-" + strconv.Itoa(i)}); handle == nil {
+			t.Fatalf("connection %d was not tracked", i)
+		}
+	}
+	if got := len(svc.Snapshot(11)); got != 128 {
+		t.Fatalf("expected all active connections to be tracked, got %d", got)
 	}
 }
