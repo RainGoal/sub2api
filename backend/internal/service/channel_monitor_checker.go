@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 	"github.com/tidwall/gjson"
 )
@@ -164,6 +165,33 @@ type providerAdapter struct {
 	extractText  func([]byte) string
 }
 
+// buildAnthropicClaudeCodeMonitorBody keeps the Anthropic probe compatible with
+// the API-key account test. The session metadata must be generated per request;
+// a static value from a request template becomes stale and can be rejected by
+// upstream client-fingerprint checks.
+func buildAnthropicClaudeCodeMonitorBody(model, prompt string) ([]byte, error) {
+	payload, err := createTestPayload(model)
+	if err != nil {
+		return nil, fmt.Errorf("create Claude Code monitor payload: %w", err)
+	}
+	payload["messages"] = []map[string]any{
+		{
+			"role": "user",
+			"content": []map[string]any{
+				{
+					"type": "text",
+					"text": prompt,
+					"cache_control": map[string]string{
+						"type": "ephemeral",
+					},
+				},
+			},
+		},
+	}
+	payload["max_tokens"] = monitorChallengeMaxTokens
+	return json.Marshal(payload)
+}
+
 // providerAdapters 全部已支持的 provider。键值即 MonitorProvider* 字符串。
 //
 //nolint:gochecknoglobals // 适配器表是只读静态数据，初始化后不变更。
@@ -177,18 +205,16 @@ var providerAdapters = map[string]providerAdapter{
 	MonitorProviderDeepseek: providerDeepseekChatAdapter,
 	MonitorProviderAnthropic: {
 		buildPath: func(string) string { return providerAnthropicPath },
-		buildBody: func(model, prompt string) ([]byte, error) {
-			return json.Marshal(map[string]any{
-				"model":      model,
-				"messages":   []map[string]string{{"role": "user", "content": prompt}},
-				"max_tokens": monitorChallengeMaxTokens,
-			})
-		},
+		buildBody: buildAnthropicClaudeCodeMonitorBody,
 		buildHeaders: func(apiKey string) map[string]string {
-			return map[string]string{
-				"x-api-key":         apiKey,
-				"anthropic-version": monitorAnthropicAPIVersion,
+			headers := make(map[string]string, len(claude.DefaultHeaders)+3)
+			for key, value := range claude.DefaultHeaders {
+				headers[key] = value
 			}
+			headers["x-api-key"] = apiKey
+			headers["anthropic-version"] = monitorAnthropicAPIVersion
+			headers["anthropic-beta"] = claude.APIKeyBetaHeader
+			return headers
 		},
 		extractText: extractAnthropicMonitorText,
 	},
@@ -315,6 +341,11 @@ func extractMonitorResponseText(adapter providerAdapter, respBytes []byte) strin
 }
 
 func extractAnthropicMonitorText(respBytes []byte) string {
+	trimmed := bytes.TrimSpace(respBytes)
+	if bytes.HasPrefix(trimmed, []byte("data:")) || bytes.Contains(trimmed, []byte("\ndata:")) {
+		return extractAnthropicMonitorSSEText(trimmed)
+	}
+
 	content := gjson.GetBytes(respBytes, "content")
 	if !content.IsArray() {
 		return ""
@@ -332,6 +363,30 @@ func extractAnthropicMonitorText(respBytes []byte) string {
 		return true
 	})
 	return strings.Join(parts, "\n")
+}
+
+func extractAnthropicMonitorSSEText(respBytes []byte) string {
+	var parts []string
+	for _, rawLine := range strings.Split(string(respBytes), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		if gjson.Get(data, "type").String() != "content_block_delta" {
+			continue
+		}
+		if gjson.Get(data, "delta.type").String() != "text_delta" {
+			continue
+		}
+		if text := gjson.Get(data, "delta.text").String(); strings.TrimSpace(text) != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "")
 }
 
 // extractOpenAIResponsesText 聚合 Responses API 的最终 assistant 文本。

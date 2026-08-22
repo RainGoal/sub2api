@@ -53,8 +53,9 @@ const (
 	providerZhipuPath = "/api/paas/v4/chat/completions"
 	// providerOpenAIResponsesPath OpenAI Responses API 路径。
 	providerOpenAIResponsesPath = "/v1/responses"
-	// providerAnthropicPath Anthropic Messages 路径。
-	providerAnthropicPath = "/v1/messages"
+	// providerAnthropicPath Anthropic Messages 路径。beta=true 与账号 API Key
+	// 连通测试一致，兼容要求 Claude Code beta 路径的上游代理。
+	providerAnthropicPath = "/v1/messages?beta=true"
 	// providerGeminiPathTemplate Gemini generateContent 路径模板（含 model 占位）。
 	providerGeminiPathTemplate = "/v1beta/models/%s:generateContent"
 

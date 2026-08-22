@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // swapMonitorHTTPClient 临时替换 monitorHTTPClient 为不带 SSRF 校验的普通 client，
@@ -161,8 +163,39 @@ func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
 	if _, ok := h.lastBody["messages"]; !ok {
 		t.Error("default body should contain messages")
 	}
+	if h.lastBody["stream"] != true {
+		t.Errorf("Anthropic monitor should use Claude Code streaming, got %v", h.lastBody["stream"])
+	}
+	if system, ok := h.lastBody["system"].([]any); !ok || len(system) == 0 {
+		t.Errorf("Anthropic monitor should include Claude Code system prompt, got %v", h.lastBody["system"])
+	}
+	metadata, _ := h.lastBody["metadata"].(map[string]any)
+	userID, _ := metadata["user_id"].(string)
+	if ParseMetadataUserID(userID) == nil {
+		t.Errorf("Anthropic monitor should generate valid metadata.user_id, got %v", metadata["user_id"])
+	}
+	if h.lastHeaders.Get("User-Agent") != claude.DefaultHeaders["User-Agent"] {
+		t.Errorf("expected Claude Code User-Agent, got %q", h.lastHeaders.Get("User-Agent"))
+	}
+	if h.lastHeaders.Get("X-App") != "cli" {
+		t.Errorf("expected X-App=cli, got %q", h.lastHeaders.Get("X-App"))
+	}
+	if h.lastHeaders.Get("anthropic-beta") != claude.APIKeyBetaHeader {
+		t.Errorf("expected API-key Claude beta header, got %q", h.lastHeaders.Get("anthropic-beta"))
+	}
 	if h.lastHeaders.Get("x-api-key") != "sk-fake" {
 		t.Errorf("expected adapter's x-api-key header, got %q", h.lastHeaders.Get("x-api-key"))
+	}
+}
+
+func TestExtractAnthropicMonitorText_SSE(t *testing.T) {
+	body := []byte("event: message_start\ndata: {\"type\":\"message_start\"}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"42\"}}\n\n" +
+		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\" ok\"}}\n\n" +
+		"data: {\"type\":\"message_stop\"}\n\n")
+
+	if got := extractAnthropicMonitorText(body); got != "42 ok" {
+		t.Fatalf("SSE text = %q, want %q", got, "42 ok")
 	}
 }
 
