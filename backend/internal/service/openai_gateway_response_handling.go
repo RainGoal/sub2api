@@ -477,6 +477,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedData := strings.TrimSpace(data)
+			MarkFirstSSEData(c.Request.Context(), trimmedData)
 			// This fork defines TTFT as the arrival of the first non-empty SSE data frame.
 			// Output commitment and first-output failover remain progress-based below.
 			if firstTokenMs == nil && trimmedData != "" && trimmedData != "[DONE]" {

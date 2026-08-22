@@ -351,6 +351,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		if !ok {
 			continue
 		}
+		MarkFirstSSEData(c.Request.Context(), payload)
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -590,6 +591,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		if !ok {
 			continue
 		}
+		MarkFirstSSEData(c.Request.Context(), payload)
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {

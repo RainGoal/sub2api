@@ -429,6 +429,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 	service.SetOpenAIHTTPResponseOwner(c, subject.UserID, apiKey.ID)
+	service.UpdateActiveConnectionMetadata(c.Request.Context(), reqModel, reqStream, "responses")
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
@@ -1082,6 +1083,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqStream := gjson.GetBytes(body, "stream").Bool()
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	service.UpdateActiveConnectionMetadata(c.Request.Context(), reqModel, reqStream, "messages")
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))

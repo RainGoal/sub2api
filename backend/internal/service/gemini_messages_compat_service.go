@@ -2134,6 +2134,9 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 			}
 			continue
 		}
+		if c.Request != nil {
+			MarkFirstSSEData(c.Request.Context(), payload)
+		}
 
 		unwrappedBytes, err := unwrapGeminiResponse([]byte(payload))
 		if err != nil {
@@ -2736,6 +2739,9 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					}
 					observer.ObserveGemini(rawBytes)
 					observeGeminiImageOutputs(c, rawBytes)
+					if c.Request != nil {
+						MarkFirstSSEData(c.Request.Context(), payload)
+					}
 
 					if firstTokenMs == nil {
 						ms := int(time.Since(startTime).Milliseconds())

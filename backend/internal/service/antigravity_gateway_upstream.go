@@ -252,7 +252,9 @@ func (s *AntigravityGatewayService) streamUpstreamResponse(c *gin.Context, resp 
 
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
-				upstreamResponseModelObserverFromContext(c).ObserveAnthropic([]byte(strings.TrimSpace(data)))
+				trimmedData := strings.TrimSpace(data)
+				MarkFirstSSEData(c.Request.Context(), trimmedData)
+				upstreamResponseModelObserverFromContext(c).ObserveAnthropic([]byte(trimmedData))
 			}
 
 			// 记录首 token 时间

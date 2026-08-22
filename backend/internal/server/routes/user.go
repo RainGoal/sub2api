@@ -16,7 +16,12 @@ func RegisterUserRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
+	activeConnectionServices ...*service.ActiveConnectionService,
 ) {
+	var activeConnectionService *service.ActiveConnectionService
+	if len(activeConnectionServices) > 0 {
+		activeConnectionService = activeConnectionServices[0]
+	}
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
@@ -24,6 +29,7 @@ func RegisterUserRoutes(
 	authenticated.Use(panelRateLimiter.Global())
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
+	registerUserActiveConnectionRoutes(authenticated, activeConnectionService)
 	{
 		// 用户接口
 		user := authenticated.Group("/user")

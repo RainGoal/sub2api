@@ -1784,6 +1784,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
+			MarkFirstSSEData(c.Request.Context(), trimmedData)
 			// This fork defines TTFT as the arrival of the first non-empty SSE data frame.
 			if firstTokenMs == nil && trimmedData != "" && trimmedData != "[DONE]" {
 				ms := int(time.Since(startTime).Milliseconds())

@@ -128,6 +128,7 @@ func (s *GatewayService) handleBedrockStreamingResponse(
 			if sseData == nil {
 				continue
 			}
+			MarkFirstSSEData(c.Request.Context(), string(sseData))
 
 			if firstTokenMs == nil {
 				ms := int(time.Since(startTime).Milliseconds())
