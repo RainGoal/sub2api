@@ -293,6 +293,9 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 		return "", "", 0, err
 	}
 	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
+	if probeHeader := BuildChannelMonitorProbeHeader(apiKey, time.Now()); probeHeader != "" {
+		headers[ChannelMonitorProbeHeaderName] = probeHeader
+	}
 	full := joinURL(endpoint, adapter.buildPath(model))
 	respBytes, status, err := postRawJSON(ctx, full, body, headers)
 	if err != nil {

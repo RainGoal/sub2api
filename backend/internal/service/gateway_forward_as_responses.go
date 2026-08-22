@@ -141,6 +141,9 @@ func (s *GatewayService) ForwardAsResponses(
 	// 11. Send request
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
+		if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, err); failoverErr != nil {
+			return nil, failoverErr
+		}
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
@@ -401,6 +404,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	}
 
 	if err := scanner.Err(); err != nil {
+		if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, err); failoverErr != nil {
+			return nil, failoverErr
+		}
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("forward_as_responses buffered: read error",
 				zap.Error(err),

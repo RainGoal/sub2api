@@ -181,6 +181,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		}
 	}
 	onIdle := func() (*OpenAIForwardResult, error) {
+		if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, context.DeadlineExceeded); failoverErr != nil {
+			return nil, failoverErr
+		}
 		_ = resp.Body.Close()
 		logger.L().Warn("openai responses via native anthropic buffered: data interval timeout",
 			zap.String("request_id", requestID),
@@ -196,6 +199,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
 			}
+			if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, rerr); failoverErr != nil {
+				return nil, failoverErr
+			}
 			logReadErr(rerr)
 			break
 		}
@@ -208,6 +214,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		if rerr != nil {
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
+			}
+			if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, rerr); failoverErr != nil {
+				return nil, failoverErr
 			}
 			logReadErr(rerr)
 			break

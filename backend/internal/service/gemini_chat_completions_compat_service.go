@@ -125,6 +125,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, err); failoverErr != nil {
+				return nil, failoverErr
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -260,6 +263,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	} else if useUpstreamStream {
 		collected, usageObj, err := collectGeminiSSE(resp.Body, account.Type == AccountTypeOAuth)
 		if err != nil {
+			if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, err); failoverErr != nil {
+				return nil, failoverErr
+			}
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Failed to read upstream stream")
 		}
 		collectedBytes, _ := json.Marshal(collected)
@@ -455,6 +461,9 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 ) (*ClaudeUsage, error) {
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
+		if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, err); failoverErr != nil {
+			return nil, failoverErr
+		}
 		return nil, err
 	}
 	if isOAuth {

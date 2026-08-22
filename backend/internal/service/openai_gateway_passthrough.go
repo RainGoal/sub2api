@@ -2055,6 +2055,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 ) (*openaiNonStreamingResultPassthrough, error) {
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
+		if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, err); failoverErr != nil {
+			return nil, failoverErr
+		}
 		return nil, err
 	}
 	observer := upstreamResponseModelObserverFromContext(c)

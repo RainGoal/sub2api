@@ -30,6 +30,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		h.chatCompletionsErrorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	if service.VerifyChannelMonitorProbeHeader(c.GetHeader(service.ChannelMonitorProbeHeaderName), apiKey.Key, time.Now()) {
+		c.Request = c.Request.WithContext(service.WithChannelMonitorProbe(c.Request.Context()))
+	}
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -266,17 +269,20 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		var result *service.ForwardResult
 		setActualUpstreamEndpoint(c, "")
+		forwardCtx, forwardCancel := service.ChannelMonitorProbeAttemptContext(c.Request.Context())
 		if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
+				forwardCancel()
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 				return
 			}
-			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
+			result, err = h.geminiCompatService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody)
 		} else if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
+				forwardCancel()
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
@@ -284,10 +290,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
-			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, parsedReq)
 		} else {
-			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.gatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, parsedReq)
 		}
+		forwardCancel()
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()

@@ -178,6 +178,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		}
 	}
 	onIdle := func() (*OpenAIForwardResult, error) {
+		if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, context.DeadlineExceeded); failoverErr != nil {
+			return nil, failoverErr
+		}
 		_ = resp.Body.Close()
 		logger.L().Warn("openai cc via native anthropic buffered: data interval timeout",
 			zap.String("request_id", requestID),
@@ -192,6 +195,9 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		if rerr != nil {
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
+			}
+			if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, rerr); failoverErr != nil {
+				return nil, failoverErr
 			}
 			logReadErr(rerr)
 			break
@@ -444,6 +450,9 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		if rerr != nil {
 			if errors.Is(rerr, errAnthropicNativeStreamIdle) {
 				return onIdle()
+			}
+			if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, rerr); failoverErr != nil {
+				return nil, failoverErr
 			}
 			// EOF / 读错误：事件行后流终止，进入 finalize。
 			logReadErr(rerr)

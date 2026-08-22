@@ -311,6 +311,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	if service.VerifyChannelMonitorProbeHeader(c.GetHeader(service.ChannelMonitorProbeHeaderName), apiKey.Key, time.Now()) {
+		c.Request = c.Request.WithContext(service.WithChannelMonitorProbe(c.Request.Context()))
+	}
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -668,12 +671,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
 		result, err := func() (*service.OpenAIForwardResult, error) {
+			forwardCtx, forwardCancel := service.ChannelMonitorProbeAttemptContext(c.Request.Context())
+			defer forwardCancel()
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			return h.gatewayService.Forward(forwardCtx, c, account, attemptBody)
 		}()
 		var cyberBlockBodyHTTP []byte
 		if service.GetOpsCyberPolicy(c) != nil {

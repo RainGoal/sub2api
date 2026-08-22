@@ -573,6 +573,9 @@ func (s *OpenAIGatewayService) newOpenAICompatBufferedReadFailoverError(
 	if !errors.As(err, &readErr) || readErr == nil || errors.Is(readErr.cause, bufio.ErrTooLong) {
 		return err
 	}
+	if failoverErr := NewChannelMonitorProbeTimeoutFailoverError(c, resp, readErr.cause); failoverErr != nil {
+		return failoverErr
+	}
 	var requestContext context.Context
 	if c != nil && c.Request != nil {
 		requestContext = c.Request.Context()

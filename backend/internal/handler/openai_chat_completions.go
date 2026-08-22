@@ -31,6 +31,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	if service.VerifyChannelMonitorProbeHeader(c.GetHeader(service.ChannelMonitorProbeHeaderName), apiKey.Key, time.Now()) {
+		c.Request = c.Request.WithContext(service.WithChannelMonitorProbe(c.Request.Context()))
+	}
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -235,12 +238,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
+			forwardCtx, forwardCancel := service.ChannelMonitorProbeAttemptContext(c.Request.Context())
+			defer forwardCancel()
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
+			return h.gatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, promptCacheKey, "")
 		}()
 		var cyberBlockBodyChat []byte
 		if service.GetOpsCyberPolicy(c) != nil {
