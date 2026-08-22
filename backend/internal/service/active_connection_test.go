@@ -73,7 +73,7 @@ func TestActiveConnectionPrunesExpiredEntries(t *testing.T) {
 	if svc.Start(9, ActiveConnectionStart{RequestID: "expired"}) == nil {
 		t.Fatal("expected active connection handle")
 	}
-	_ = <-events
+	<-events
 	clock = clock.Add(activeConnectionTTL + time.Second)
 	svc.PruneExpired()
 	if got := len(svc.Snapshot(9)); got != 0 {
