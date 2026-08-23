@@ -607,7 +607,7 @@ export default {
         label: 'Request template',
         none: 'No template',
         placeholder: 'Pick a template (filtered by current provider)',
-        applyHint: 'Picking a template copies its headers and body to this monitor (snapshot). Later template edits are not auto-synced.'
+        applyHint: 'Picking a template copies its headers and body to this monitor (snapshot); selecting "No template" clears the current snapshot. Later template edits are not auto-synced.'
       },
       template: {
         manageButton: 'Templates',

@@ -358,6 +358,37 @@ describe('MonitorFormDialog linked account selector', () => {
     expect(monitorUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ account_id: 0 }))
   })
 
+  it('clears the request snapshot when selecting no template', async () => {
+    const wrapper = mountDialog(makeMonitor({
+      provider: 'anthropic',
+      template_id: 129,
+      extra_headers: { 'User-Agent': 'claude-code' },
+      body_override_mode: 'json',
+      body_override: { system: 'stale snapshot' },
+    }))
+    await flushPromises()
+
+    await wrapper.get('details summary').trigger('click')
+    await wrapper.get('details .select-trigger').trigger('click')
+    const option = [...document.body.querySelectorAll('.select-dropdown-portal .select-option')].find((el) =>
+      el.textContent?.includes('admin.channelMonitor.templateField.none'),
+    )
+    expect(option).toBeDefined()
+    ;(option as HTMLElement).click()
+    await nextTick()
+
+    await wrapper.get('#channel-monitor-form').trigger('submit')
+    await flushPromises()
+
+    expect(monitorUpdate).toHaveBeenCalledWith(42, expect.objectContaining({
+      clear_template: true,
+      extra_headers: {},
+      body_override_mode: 'off',
+      body_override: null,
+    }))
+    expect(monitorUpdate.mock.calls[0][1]).not.toHaveProperty('template_id')
+  })
+
   // P2-7(c)：create 绝不发 0（后端会把 0 存成 &0 触发外键违约），保持 null。
   it('keeps account_id null when creating a probe monitor', async () => {
     const wrapper = mountDialog()
