@@ -209,15 +209,13 @@ var providerAdapters = map[string]providerAdapter{
 		buildPath: func(string) string { return providerAnthropicPath },
 		buildBody: buildAnthropicClaudeCodeMonitorBody,
 		buildHeaders: func(apiKey string) map[string]string {
-			headers := make(map[string]string, len(claude.DefaultHeaders)+4)
+			headers := make(map[string]string, len(claude.DefaultHeaders)+3)
 			for key, value := range claude.DefaultHeaders {
 				headers[key] = value
 			}
 			headers["x-api-key"] = apiKey
 			headers["anthropic-version"] = monitorAnthropicAPIVersion
 			headers["anthropic-beta"] = claude.APIKeyBetaHeader
-			// Claude Code sends application/json even when stream=true.
-			headers["Accept"] = "application/json"
 			return headers
 		},
 		extractText: extractAnthropicMonitorText,
@@ -681,7 +679,12 @@ func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers ma
 		return nil, 0, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	// Anthropic Claude Code connectivity tests omit Accept and rely on
+	// stream=true to negotiate SSE. Keep the JSON default for other providers,
+	// while preserving an explicit template override.
+	if monitorHeaderValue(headers, "Accept") == "" {
+		req.Header.Set("Accept", "application/json")
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

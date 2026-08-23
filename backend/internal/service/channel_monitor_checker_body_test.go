@@ -186,8 +186,8 @@ func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
 	if h.lastHeaders.Get("anthropic-beta") != claude.APIKeyBetaHeader {
 		t.Errorf("expected API-key Claude beta header, got %q", h.lastHeaders.Get("anthropic-beta"))
 	}
-	if h.lastHeaders.Get("Accept") != "application/json" {
-		t.Errorf("expected Claude Code JSON Accept header, got %q", h.lastHeaders.Get("Accept"))
+	if got := h.lastHeaders.Get("Accept"); got != "" {
+		t.Errorf("Anthropic monitor should omit default Accept like account test, got %q", got)
 	}
 	if h.lastHeaders.Get("x-api-key") != "sk-fake" {
 		t.Errorf("expected adapter's x-api-key header, got %q", h.lastHeaders.Get("x-api-key"))
