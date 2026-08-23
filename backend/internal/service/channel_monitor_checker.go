@@ -318,6 +318,9 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	}
 	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
 	normalizeAnthropicMonitorHeaders(provider, headers, apiKey)
+	if provider != MonitorProviderAnthropic && monitorHeaderValue(headers, "Accept") == "" {
+		headers["Accept"] = "application/json"
+	}
 	body, err := buildRequestBody(adapter, provider, apiMode, model, prompt, opts, headers)
 	if err != nil {
 		return "", "", 0, err
@@ -679,12 +682,6 @@ func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers ma
 		return nil, 0, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Anthropic Claude Code connectivity tests omit Accept and rely on
-	// stream=true to negotiate SSE. Keep the JSON default for other providers,
-	// while preserving an explicit template override.
-	if monitorHeaderValue(headers, "Accept") == "" {
-		req.Header.Set("Accept", "application/json")
-	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
