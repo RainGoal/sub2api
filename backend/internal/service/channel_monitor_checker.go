@@ -188,7 +188,9 @@ func buildAnthropicClaudeCodeMonitorBody(model, prompt string) ([]byte, error) {
 			},
 		},
 	}
-	payload["max_tokens"] = monitorChallengeMaxTokens
+	// Keep the same budget as the account connectivity test. The arithmetic
+	// challenge is short, but some Claude-compatible upstreams use the request
+	// shape (including max_tokens) as part of their client classification.
 	return json.Marshal(payload)
 }
 
@@ -207,13 +209,15 @@ var providerAdapters = map[string]providerAdapter{
 		buildPath: func(string) string { return providerAnthropicPath },
 		buildBody: buildAnthropicClaudeCodeMonitorBody,
 		buildHeaders: func(apiKey string) map[string]string {
-			headers := make(map[string]string, len(claude.DefaultHeaders)+3)
+			headers := make(map[string]string, len(claude.DefaultHeaders)+4)
 			for key, value := range claude.DefaultHeaders {
 				headers[key] = value
 			}
 			headers["x-api-key"] = apiKey
 			headers["anthropic-version"] = monitorAnthropicAPIVersion
 			headers["anthropic-beta"] = claude.APIKeyBetaHeader
+			// Claude Code sends application/json even when stream=true.
+			headers["Accept"] = "application/json"
 			return headers
 		},
 		extractText: extractAnthropicMonitorText,
@@ -314,11 +318,12 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	if !ok {
 		return "", "", 0, fmt.Errorf("unsupported provider %q", provider)
 	}
-	body, err := buildRequestBody(adapter, provider, apiMode, model, prompt, opts)
+	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
+	normalizeAnthropicMonitorHeaders(provider, headers, apiKey)
+	body, err := buildRequestBody(adapter, provider, apiMode, model, prompt, opts, headers)
 	if err != nil {
 		return "", "", 0, err
 	}
-	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
 	if probeHeader := BuildChannelMonitorProbeHeader(apiKey, time.Now()); probeHeader != "" {
 		headers[ChannelMonitorProbeHeaderName] = probeHeader
 	}
@@ -450,6 +455,40 @@ func mergeHeaders(base map[string]string, opts *CheckOptions) map[string]string 
 	return out
 }
 
+// normalizeAnthropicMonitorHeaders keeps the authentication scheme aligned
+// with the generated probe request. In particular, an explicit bearer header
+// must not be sent alongside the monitor API key.
+func normalizeAnthropicMonitorHeaders(provider string, headers map[string]string, apiKey string) {
+	if provider != MonitorProviderAnthropic || headers == nil {
+		return
+	}
+
+	// Anthropic API-key accounts support x-api-key and Authorization: Bearer as
+	// mutually exclusive schemes. A template that explicitly supplies the
+	// latter must not receive an additional x-api-key header, otherwise some
+	// compatible upstreams choose the wrong credential before client validation.
+	if monitorHeaderValue(headers, "Authorization") != "" {
+		deleteMonitorHeader(headers, "x-api-key")
+	} else {
+		setMonitorHeader(headers, "x-api-key", apiKey)
+	}
+}
+
+func setMonitorHeader(headers map[string]string, name, value string) {
+	deleteMonitorHeader(headers, name)
+	if value != "" {
+		headers[name] = value
+	}
+}
+
+func deleteMonitorHeader(headers map[string]string, name string) {
+	for existing := range headers {
+		if strings.EqualFold(existing, name) {
+			delete(headers, existing)
+		}
+	}
+}
+
 // buildRequestBody 根据 body_override_mode 构造请求 body。
 //
 //   - off:     adapter 默认 body
@@ -458,7 +497,7 @@ func mergeHeaders(base map[string]string, opts *CheckOptions) map[string]string 
 //   - replace: 直接 marshal BodyOverride 作为完整 body
 //
 // 任何 mode 返回的 []byte 都已经是合法 JSON，可直接送入 postRawJSON。
-func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt string, opts *CheckOptions) ([]byte, error) {
+func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt string, opts *CheckOptions, headers map[string]string) ([]byte, error) {
 	mode := bodyOverrideMode(opts)
 
 	if mode == MonitorBodyOverrideModeReplace {
@@ -480,7 +519,7 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 		return nil, fmt.Errorf("marshal default body: %w", err)
 	}
 	if mode != MonitorBodyOverrideModeMerge || opts == nil || len(opts.BodyOverride) == 0 {
-		return defaultBody, nil
+		return normalizeAnthropicMonitorIdentity(provider, defaultBody, headers)
 	}
 
 	var defaultMap map[string]any
@@ -498,7 +537,55 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 	if err != nil {
 		return nil, fmt.Errorf("marshal merged body: %w", err)
 	}
-	return merged, nil
+	return normalizeAnthropicMonitorIdentity(provider, merged, headers)
+}
+
+// normalizeAnthropicMonitorIdentity keeps metadata.user_id compatible with
+// the final Claude Code User-Agent. Older request templates can still carry
+// a 2.1.114 UA while the default payload generator uses the newer JSON
+// metadata format; Anthropic may reject that mixed fingerprint as non-CC.
+func normalizeAnthropicMonitorIdentity(provider string, body []byte, headers map[string]string) ([]byte, error) {
+	if provider != MonitorProviderAnthropic {
+		return body, nil
+	}
+	version := ExtractCLIVersion(monitorHeaderValue(headers, "User-Agent"))
+	if version == "" {
+		return body, nil
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("unmarshal Anthropic monitor body for identity sync: %w", err)
+	}
+	metadata, ok := payload["metadata"].(map[string]any)
+	if !ok {
+		return body, nil
+	}
+	userID, _ := metadata["user_id"].(string)
+	parsed := ParseMetadataUserID(userID)
+	if parsed == nil {
+		return body, nil
+	}
+	normalized := FormatMetadataUserID(parsed.DeviceID, parsed.AccountUUID, parsed.SessionID, version)
+	if normalized == userID {
+		return body, nil
+	}
+	metadata["user_id"] = normalized
+	payload["metadata"] = metadata
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Anthropic monitor body after identity sync: %w", err)
+	}
+	return updated, nil
+}
+
+func monitorHeaderValue(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
 }
 
 // bodyMergeKeyDenyList 在 merge 模式下，禁止用户覆盖这些 provider-specific 的关键字段。
@@ -509,8 +596,11 @@ func buildRequestBody(adapter providerAdapter, provider, apiMode, model, prompt 
 var bodyMergeKeyDenyList = map[string]map[string]bool{
 	MonitorProviderOpenAI + ":" + MonitorAPIModeChatCompletions: {"model": true, "messages": true, "stream": true},
 	MonitorProviderOpenAI + ":" + MonitorAPIModeResponses:       {"model": true, "instructions": true, "input": true, "stream": true},
-	MonitorProviderGrok:      {"model": true, "messages": true, "stream": true},
-	MonitorProviderAnthropic: {"model": true, "messages": true},
+	MonitorProviderGrok: {"model": true, "messages": true, "stream": true},
+	// Claude Code identity fields are generated per probe. Allowing a template
+	// to replace them can leave a stale metadata.user_id or an incompatible
+	// system shape, which upstream may classify as a non-Claude-Code client.
+	MonitorProviderAnthropic: {"model": true, "messages": true, "system": true, "metadata": true, "stream": true},
 	MonitorProviderGemini:    {"contents": true},
 	// 国产 3 家与 OpenAI Chat Completions 同构。
 	MonitorProviderKimi:     {"model": true, "messages": true, "stream": true},

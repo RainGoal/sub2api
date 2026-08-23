@@ -166,6 +166,9 @@ func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
 	if h.lastBody["stream"] != true {
 		t.Errorf("Anthropic monitor should use Claude Code streaming, got %v", h.lastBody["stream"])
 	}
+	if h.lastBody["max_tokens"] != float64(1024) {
+		t.Errorf("Anthropic monitor should match account test max_tokens=1024, got %v", h.lastBody["max_tokens"])
+	}
 	if system, ok := h.lastBody["system"].([]any); !ok || len(system) == 0 {
 		t.Errorf("Anthropic monitor should include Claude Code system prompt, got %v", h.lastBody["system"])
 	}
@@ -182,6 +185,9 @@ func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
 	}
 	if h.lastHeaders.Get("anthropic-beta") != claude.APIKeyBetaHeader {
 		t.Errorf("expected API-key Claude beta header, got %q", h.lastHeaders.Get("anthropic-beta"))
+	}
+	if h.lastHeaders.Get("Accept") != "application/json" {
+		t.Errorf("expected Claude Code JSON Accept header, got %q", h.lastHeaders.Get("Accept"))
 	}
 	if h.lastHeaders.Get("x-api-key") != "sk-fake" {
 		t.Errorf("expected adapter's x-api-key header, got %q", h.lastHeaders.Get("x-api-key"))
@@ -396,20 +402,40 @@ func TestRunCheckForModel_MergeMode_UserFieldsWinButDenyListProtects(t *testing.
 		BodyOverrideMode: MonitorBodyOverrideModeMerge,
 		BodyOverride: map[string]any{
 			"system":     "You are Claude Code...",
-			"max_tokens": float64(999),   // 应该覆盖默认 50
+			"metadata":   map[string]any{"user_id": "stale-user-id"},
+			"max_tokens": float64(999),   // 应该覆盖账号测试默认 1024
 			"model":      "hacked-model", // 应该被黑名单挡住，保留原 model
 			"messages":   []any{},        // 同上，被挡
+			"stream":     false,          // 应该被黑名单挡住，保持 Claude Code streaming
 		},
 		ExtraHeaders: map[string]string{
-			"User-Agent":     "claude-cli/1.0",
-			"Content-Length": "999", // 黑名单
-			"x-custom":       "ok",
+			"User-Agent":        "claude-cli/1.0.0",
+			"anthropic-version": "custom-version",
+			"anthropic-beta":    "custom-beta",
+			"X-App":             "custom-app",
+			"Accept":            "custom-accept",
+			"Content-Length":    "999", // 黑名单
+			"x-custom":          "ok",
 		},
 	}
 	_ = runCheckForModel(context.Background(), MonitorProviderAnthropic, endpoint, "sk-fake", "claude-x", opts)
 
-	if h.lastBody["system"] != "You are Claude Code..." {
-		t.Errorf("merge mode should inject system, got %v", h.lastBody["system"])
+	system, ok := h.lastBody["system"].([]any)
+	if !ok || len(system) == 0 {
+		t.Fatalf("merge mode should keep generated Claude Code system, got %v", h.lastBody["system"])
+	}
+	systemBlock, _ := system[0].(map[string]any)
+	if systemBlock["text"] != claudeCodeSystemPrompt {
+		t.Errorf("merge mode should keep generated Claude Code system, got %v", system[0])
+	}
+	metadata, _ := h.lastBody["metadata"].(map[string]any)
+	userID, _ := metadata["user_id"].(string)
+	parsedUserID := ParseMetadataUserID(userID)
+	if userID == "stale-user-id" || parsedUserID == nil {
+		t.Errorf("merge mode should keep generated metadata.user_id, got %q", userID)
+	}
+	if parsedUserID != nil && parsedUserID.IsNewFormat {
+		t.Errorf("legacy Claude Code User-Agent should use legacy metadata.user_id, got %q", userID)
 	}
 	// max_tokens 覆盖生效
 	if mt, ok := h.lastBody["max_tokens"].(float64); !ok || mt != 999 {
@@ -425,14 +451,54 @@ func TestRunCheckForModel_MergeMode_UserFieldsWinButDenyListProtects(t *testing.
 		t.Error("messages should be protected by deny list (kept default, non-empty)")
 	}
 	// header 合并
-	if h.lastHeaders.Get("User-Agent") != "claude-cli/1.0" {
+	if h.lastHeaders.Get("User-Agent") != "claude-cli/1.0.0" {
 		t.Errorf("extra User-Agent should override, got %q", h.lastHeaders.Get("User-Agent"))
 	}
 	if h.lastHeaders.Get("x-custom") != "ok" {
 		t.Errorf("extra custom header should be present, got %q", h.lastHeaders.Get("x-custom"))
 	}
+	if h.lastHeaders.Get("anthropic-beta") != "custom-beta" {
+		t.Errorf("merge mode should preserve explicit beta header, got %q", h.lastHeaders.Get("anthropic-beta"))
+	}
+	if h.lastHeaders.Get("anthropic-version") != "custom-version" {
+		t.Errorf("merge mode should preserve explicit API version, got %q", h.lastHeaders.Get("anthropic-version"))
+	}
+	if h.lastHeaders.Get("X-App") != "custom-app" {
+		t.Errorf("merge mode should preserve explicit X-App header, got %q", h.lastHeaders.Get("X-App"))
+	}
+	if h.lastHeaders.Get("x-api-key") != "sk-fake" {
+		t.Errorf("merge mode should keep monitor API key, got %q", h.lastHeaders.Get("x-api-key"))
+	}
+	if h.lastHeaders.Get("Accept") != "custom-accept" {
+		t.Errorf("merge mode should preserve explicit Accept header, got %q", h.lastHeaders.Get("Accept"))
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
+	request.Header = h.lastHeaders.Clone()
+	if !NewClaudeCodeValidator().Validate(request, h.lastBody) {
+		t.Fatal("final Anthropic merge request must pass the repository Claude Code validator")
+	}
 	// Content-Length 黑名单：会被 net/http 自动重算，但不应由用户的 "999" 决定。
 	// 我们无法直接断言丢弃（http.Client 总会填上），只断言请求成功即可。
+}
+
+func TestRunCheckForModel_AnthropicBearerTemplateSuppressesXAPIKey(t *testing.T) {
+	h := &captureHandler{respondText: "the answer is 42"}
+	endpoint := setupFakeAnthropic(t, h)
+
+	_ = runCheckForModel(context.Background(), MonitorProviderAnthropic, endpoint, "sk-fake", "claude-x", &CheckOptions{
+		ExtraHeaders: map[string]string{
+			"Authorization": "Bearer upstream-key",
+		},
+	})
+
+	// The capture response is intentionally static, so this case only verifies
+	// authentication header selection rather than the random arithmetic result.
+	if h.lastHeaders.Get("Authorization") != "Bearer upstream-key" {
+		t.Errorf("expected explicit bearer auth header, got %q", h.lastHeaders.Get("Authorization"))
+	}
+	if got := h.lastHeaders.Get("x-api-key"); got != "" {
+		t.Errorf("x-api-key must be omitted when bearer auth is explicit, got %q", got)
+	}
 }
 
 func TestRunCheckForModel_ReplaceMode_FullBodyUsedAndChallengeSkipped(t *testing.T) {
