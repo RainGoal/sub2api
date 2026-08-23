@@ -3460,3 +3460,24 @@ func TestGatewayService_ResolveGatewayGroup_DetectsFallbackCycle(t *testing.T) {
 	require.Nil(t, gotID)
 	require.Contains(t, err.Error(), "fallback group cycle")
 }
+
+func TestGatewayService_ResolveGatewayGroup_ChannelMonitorProbeAllowsClaudeCodeOnly(t *testing.T) {
+	groupID := int64(12)
+	group := &Group{
+		ID:             groupID,
+		Platform:       PlatformAnthropic,
+		Status:         StatusActive,
+		ClaudeCodeOnly: true,
+	}
+	groupRepo := &mockGroupRepoForGateway{
+		groups: map[int64]*Group{groupID: group},
+	}
+
+	svc := &GatewayService{groupRepo: groupRepo}
+	gotGroup, gotID, err := svc.resolveGatewayGroup(WithChannelMonitorProbe(context.Background()), &groupID)
+
+	require.NoError(t, err)
+	require.Same(t, group, gotGroup)
+	require.NotNil(t, gotID)
+	require.Equal(t, groupID, *gotID)
+}

@@ -24,7 +24,8 @@ const (
 type channelMonitorProbeContextKey struct{}
 
 // BuildChannelMonitorProbeHeader creates a short-lived marker bound to the API key.
-// The marker only changes timeout/failover behavior; it does not grant any access.
+// The marker does not grant API-key access; it only identifies an authenticated
+// internal probe for monitor-specific routing and timeout/failover behavior.
 func BuildChannelMonitorProbeHeader(apiKey string, now time.Time) string {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {

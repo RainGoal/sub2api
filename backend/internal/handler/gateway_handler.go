@@ -126,6 +126,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	if service.VerifyChannelMonitorProbeHeader(c.GetHeader(service.ChannelMonitorProbeHeaderName), apiKey.Key, time.Now()) {
+		c.Request = c.Request.WithContext(service.WithChannelMonitorProbe(c.Request.Context()))
+	}
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
