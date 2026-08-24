@@ -15,17 +15,12 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/tidwall/gjson"
 )
 
 // monitorHTTPClient 共享一个 http.Client，避免每次检测重建 transport。
 // 自定义 Transport 在 dial 时强制再次校验 IP，防止 DNS rebinding 绕过 validateEndpoint。
 var monitorHTTPClient = newSSRFSafeHTTPClient(monitorRequestTimeout)
-
-// monitorAnthropicHTTPClient 使用项目已有的 Node.js 24.x ClientHello，确保
-// Claude Code-only 上游看到的 TLS 指纹与账号测试链路一致。
-var monitorAnthropicHTTPClient = newSSRFSafeClaudeHTTPClient(monitorRequestTimeout)
 
 // monitorPingHTTPClient 用于 endpoint origin 的 HEAD ping，超时更短。
 var monitorPingHTTPClient = newSSRFSafeHTTPClient(monitorPingTimeout)
@@ -36,22 +31,6 @@ func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
 	tr := &http.Transport{
 		DialContext:           safeDialContext,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          16,
-		IdleConnTimeout:       monitorIdleConnTimeout,
-		TLSHandshakeTimeout:   monitorTLSHandshakeTimeout,
-		ResponseHeaderTimeout: monitorResponseHeaderTimeout,
-	}
-	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(tr)}
-}
-
-func newSSRFSafeClaudeHTTPClient(timeout time.Duration) *http.Client {
-	dialer := tlsfingerprint.NewDialer(
-		&tlsfingerprint.Profile{Name: "Channel Monitor Claude Code (Node.js 24.x)"},
-		safeDialContext,
-	)
-	tr := &http.Transport{
-		DialContext:           safeDialContext,
-		DialTLSContext:        dialer.DialTLSContext,
 		MaxIdleConns:          16,
 		IdleConnTimeout:       monitorIdleConnTimeout,
 		TLSHandshakeTimeout:   monitorTLSHandshakeTimeout,
@@ -110,13 +89,17 @@ func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model str
 		return res
 	}
 
-	// Replace 模式：跳过 challenge 校验（用户 body 是静态的，challenge 没法嵌入）。
-	// 改用「HTTP 2xx + 响应文本（adapter.textPath 抽取）非空」作为 operational 判定。
-	// 响应文本为空则降级为 failed（视为上游回了 200 但没实际内容）。
-	if mode == MonitorBodyOverrideModeReplace {
+	// Anthropic 复用账号测试的最小 Claude Code 请求，不发送容易被严格上游识别为
+	// 健康检查流量的算术题；replace 模式同样无法嵌入 challenge。两者都以
+	// 「HTTP 2xx + 非空响应文本」判定模型确实可用。
+	if provider == MonitorProviderAnthropic || mode == MonitorBodyOverrideModeReplace {
 		if strings.TrimSpace(respText) == "" {
 			res.Status = MonitorStatusFailed
-			res.Message = truncateMessage("replace-mode: upstream returned 2xx with empty text")
+			message := "upstream returned 2xx with empty text"
+			if mode == MonitorBodyOverrideModeReplace {
+				message = "replace-mode: " + message
+			}
+			res.Message = truncateMessage(message)
 			return res
 		}
 		return finalizeOperationalOrDegraded(res, latency, latencyMs)
@@ -188,32 +171,15 @@ type providerAdapter struct {
 	extractText  func([]byte) string
 }
 
-// buildAnthropicClaudeCodeMonitorBody keeps the Anthropic probe compatible with
-// the API-key account test. The session metadata must be generated per request;
-// a static value from a request template becomes stale and can be rejected by
-// upstream client-fingerprint checks.
-func buildAnthropicClaudeCodeMonitorBody(model, prompt string) ([]byte, error) {
+// buildAnthropicClaudeCodeMonitorBody reuses the exact minimal request payload
+// used by the successful API-key account connectivity test. Session metadata is
+// generated per request, and the benign "hi" message avoids synthetic monitor
+// prompts that strict Claude Code-only gateways can reject.
+func buildAnthropicClaudeCodeMonitorBody(model, _ string) ([]byte, error) {
 	payload, err := createTestPayload(model)
 	if err != nil {
 		return nil, fmt.Errorf("create Claude Code monitor payload: %w", err)
 	}
-	payload["messages"] = []map[string]any{
-		{
-			"role": "user",
-			"content": []map[string]any{
-				{
-					"type": "text",
-					"text": prompt,
-					"cache_control": map[string]string{
-						"type": "ephemeral",
-					},
-				},
-			},
-		},
-	}
-	// Keep the same budget as the account connectivity test. The arithmetic
-	// challenge is short, but some Claude-compatible upstreams use the request
-	// shape (including max_tokens) as part of their client classification.
 	return json.Marshal(payload)
 }
 
@@ -722,10 +688,7 @@ func monitorRequestHeaders(headers map[string]string) http.Header {
 	return requestHeaders
 }
 
-func monitorHTTPClientForProvider(provider string) (*http.Client, string) {
-	if provider == MonitorProviderAnthropic {
-		return monitorAnthropicHTTPClient, "claude_code_tls_fingerprint"
-	}
+func monitorHTTPClientForProvider(_ string) (*http.Client, string) {
 	return monitorHTTPClient, "go_default_tls"
 }
 

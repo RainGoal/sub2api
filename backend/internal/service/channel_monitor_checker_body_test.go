@@ -21,12 +21,9 @@ import (
 func swapMonitorHTTPClient(t *testing.T) {
 	t.Helper()
 	orig := monitorHTTPClient
-	origAnthropic := monitorAnthropicHTTPClient
 	monitorHTTPClient = &http.Client{Timeout: 5 * time.Second}
-	monitorAnthropicHTTPClient = monitorHTTPClient
 	t.Cleanup(func() {
 		monitorHTTPClient = orig
-		monitorAnthropicHTTPClient = origAnthropic
 	})
 }
 
@@ -156,17 +153,27 @@ func answerFromChallengePrompt(prompt string) string {
 }
 
 func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
-	h := &captureHandler{respondText: "the answer is 42"}
+	h := &captureHandler{respondText: "Hello! How can I help you today?"}
 	endpoint := setupFakeAnthropic(t, h)
 
 	// 跑一次 off 模式（opts=nil），确认默认 body 行为未变
-	_ = runCheckForModel(context.Background(), MonitorProviderAnthropic, endpoint, "sk-fake", "claude-x", nil)
+	res := runCheckForModel(context.Background(), MonitorProviderAnthropic, endpoint, "sk-fake", "claude-x", nil)
+	if res.Status != MonitorStatusOperational {
+		t.Fatalf("Anthropic monitor should accept non-empty account-test response, got status=%s message=%q", res.Status, res.Message)
+	}
 
 	if h.lastBody["model"] != "claude-x" {
 		t.Errorf("default body should contain model=claude-x, got %v", h.lastBody["model"])
 	}
 	if _, ok := h.lastBody["messages"]; !ok {
 		t.Error("default body should contain messages")
+	}
+	messages, _ := h.lastBody["messages"].([]any)
+	message, _ := messages[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	textBlock, _ := content[0].(map[string]any)
+	if textBlock["text"] != "hi" {
+		t.Errorf("Anthropic monitor should reuse account-test prompt, got %v", textBlock["text"])
 	}
 	if h.lastBody["stream"] != true {
 		t.Errorf("Anthropic monitor should use Claude Code streaming, got %v", h.lastBody["stream"])

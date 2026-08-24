@@ -34,10 +34,10 @@ func TestUpstreamRequestDiagnosticRedactsSecretsAndKeepsClaudeIdentity(t *testin
 	}
 }
 
-func TestMonitorHTTPClientForProviderUsesClaudeFingerprintOnlyForAnthropic(t *testing.T) {
+func TestMonitorHTTPClientForProviderMatchesSuccessfulAccountDefaultTLS(t *testing.T) {
 	client, transport := monitorHTTPClientForProvider(MonitorProviderAnthropic)
-	if client != monitorAnthropicHTTPClient || transport != "claude_code_tls_fingerprint" {
-		t.Fatalf("Anthropic monitor transport = %q, want Claude Code TLS fingerprint", transport)
+	if client != monitorHTTPClient || transport != "go_default_tls" {
+		t.Fatalf("Anthropic monitor transport = %q, want default TLS", transport)
 	}
 
 	client, transport = monitorHTTPClientForProvider(MonitorProviderOpenAI)
