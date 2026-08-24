@@ -15,12 +15,17 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/tidwall/gjson"
 )
 
 // monitorHTTPClient 共享一个 http.Client，避免每次检测重建 transport。
 // 自定义 Transport 在 dial 时强制再次校验 IP，防止 DNS rebinding 绕过 validateEndpoint。
 var monitorHTTPClient = newSSRFSafeHTTPClient(monitorRequestTimeout)
+
+// monitorAnthropicHTTPClient 使用项目已有的 Node.js 24.x ClientHello，确保
+// Claude Code-only 上游看到的 TLS 指纹与账号测试链路一致。
+var monitorAnthropicHTTPClient = newSSRFSafeClaudeHTTPClient(monitorRequestTimeout)
 
 // monitorPingHTTPClient 用于 endpoint origin 的 HEAD ping，超时更短。
 var monitorPingHTTPClient = newSSRFSafeHTTPClient(monitorPingTimeout)
@@ -39,9 +44,27 @@ func newSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(tr)}
 }
 
+func newSSRFSafeClaudeHTTPClient(timeout time.Duration) *http.Client {
+	dialer := tlsfingerprint.NewDialer(
+		&tlsfingerprint.Profile{Name: "Channel Monitor Claude Code (Node.js 24.x)"},
+		safeDialContext,
+	)
+	tr := &http.Transport{
+		DialContext:           safeDialContext,
+		DialTLSContext:        dialer.DialTLSContext,
+		MaxIdleConns:          16,
+		IdleConnTimeout:       monitorIdleConnTimeout,
+		TLSHandshakeTimeout:   monitorTLSHandshakeTimeout,
+		ResponseHeaderTimeout: monitorResponseHeaderTimeout,
+	}
+	return &http.Client{Timeout: timeout, Transport: servertiming.WrapRoundTripper(tr)}
+}
+
 // CheckOptions 承载一次检测的自定义入参。
 // 所有字段都是可选（零值即等价于"用默认行为"）。
 type CheckOptions struct {
+	// MonitorID 仅用于脱敏诊断日志关联，不参与请求构造。
+	MonitorID int64
 	// APIMode 仅对 OpenAI provider 生效；空串等同 chat_completions。
 	APIMode string
 	// ExtraHeaders 用户自定义 HTTP 头（merge 到 adapter 默认 headers，用户优先）。
@@ -329,7 +352,21 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 		headers[ChannelMonitorProbeHeaderName] = probeHeader
 	}
 	full := joinURL(endpoint, adapter.buildPath(model))
-	respBytes, status, err := postRawJSON(ctx, full, body, headers)
+	requestHeaders := monitorRequestHeaders(headers)
+	client, transportName := monitorHTTPClientForProvider(provider)
+	respBytes, status, responseHeaders, err := postRawJSON(ctx, client, full, body, requestHeaders)
+	if provider == MonitorProviderAnthropic && (err != nil || status < 200 || status >= 300) {
+		diagnosticAttrs := []any{
+			"monitor_id", checkMonitorID(opts),
+			"provider", provider,
+			"model", model,
+			"auth_scheme", monitorAnthropicAuthScheme(headers),
+			"transport", transportName,
+			"body_override_mode", bodyOverrideMode(opts),
+		}
+		logWarnUpstreamRequestDiagnostic(ctx, "channel_monitor.claude_outbound_request_failed", http.MethodPost, full, requestHeaders, body, diagnosticAttrs...)
+		logWarnUpstreamResponseDiagnostic(ctx, "channel_monitor.claude_upstream_response", status, responseHeaders, respBytes, err, diagnosticAttrs...)
+	}
 	if err != nil {
 		return "", "", status, err
 	}
@@ -676,27 +713,54 @@ func hasNonEmptyBodyValue(v any) bool {
 
 // postRawJSON 发送 POST + 已序列化好的 JSON 字节，限制响应体大小，返回响应字节、HTTP status、错误。
 // adapter 自行 marshal 是为了精确控制字段顺序与类型，所以这里直接收 []byte 而不是 any。
-func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers map[string]string) ([]byte, int, error) {
+func monitorRequestHeaders(headers map[string]string) http.Header {
+	requestHeaders := make(http.Header, len(headers)+1)
+	requestHeaders.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		requestHeaders.Set(key, value)
+	}
+	return requestHeaders
+}
+
+func monitorHTTPClientForProvider(provider string) (*http.Client, string) {
+	if provider == MonitorProviderAnthropic {
+		return monitorAnthropicHTTPClient, "claude_code_tls_fingerprint"
+	}
+	return monitorHTTPClient, "go_default_tls"
+}
+
+func monitorAnthropicAuthScheme(headers map[string]string) string {
+	if monitorHeaderValue(headers, "Authorization") != "" {
+		return AnthropicAPIKeyAuthSchemeAuthorizationBearer
+	}
+	return AnthropicAPIKeyAuthSchemeXAPIKey
+}
+
+func checkMonitorID(opts *CheckOptions) int64 {
+	if opts == nil {
+		return 0
+	}
+	return opts.MonitorID
+}
+
+func postRawJSON(ctx context.Context, client *http.Client, fullURL string, payload []byte, headers http.Header) ([]byte, int, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	if err != nil {
-		return nil, 0, fmt.Errorf("build request: %w", err)
+		return nil, 0, nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
+	req.Header = headers.Clone()
 
-	resp, err := monitorHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("do request: %w", err)
+		return nil, 0, nil, fmt.Errorf("do request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, monitorResponseMaxBytes))
 	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
+		return nil, resp.StatusCode, resp.Header.Clone(), fmt.Errorf("read body: %w", err)
 	}
-	return respBody, resp.StatusCode, nil
+	return respBody, resp.StatusCode, resp.Header.Clone(), nil
 }
 
 // joinURL 把 base origin 与 path 拼成完整 URL。

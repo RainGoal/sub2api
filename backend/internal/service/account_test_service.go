@@ -439,14 +439,30 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
+	tlsProfileName := "disabled"
+	if tlsProfile != nil {
+		tlsProfileName = tlsProfile.Name
+	}
+	diagnosticAttrs := []any{
+		"account_id", account.ID,
+		"model", testModelID,
+		"auth_scheme", account.GetAnthropicAPIKeyAuthScheme(),
+		"proxy_configured", proxyURL != "",
+		"tls_profile", tlsProfileName,
+	}
+	logInfoUpstreamRequestDiagnostic(ctx, "claude_account_test.outbound_request", req.Method, req.URL.String(), req.Header, payloadBytes, diagnosticAttrs...)
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
 	if err != nil {
+		logWarnUpstreamResponseDiagnostic(ctx, "claude_account_test.upstream_response", 0, nil, nil, err, diagnosticAttrs...)
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		logWarnUpstreamResponseDiagnostic(ctx, "claude_account_test.upstream_response", resp.StatusCode, resp.Header, body, nil, diagnosticAttrs...)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
@@ -456,6 +472,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 		return s.sendErrorAndEnd(c, errMsg)
 	}
+	logInfoUpstreamResponseDiagnostic(ctx, "claude_account_test.upstream_response", resp.StatusCode, resp.Header, nil, nil, diagnosticAttrs...)
 
 	// Process SSE stream
 	return s.processClaudeStream(c, resp.Body)
