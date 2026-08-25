@@ -67,6 +67,6 @@ func TestAccountTestServiceSeedanceUsesCostFreeModelsProbe(t *testing.T) {
 	require.Equal(t, http.MethodGet, upstream.request.Method)
 	require.Equal(t, "https://api.bblabu.ai/v1/models", upstream.request.URL.String())
 	require.Equal(t, "Bearer seedance-secret", upstream.request.Header.Get("Authorization"))
-	require.Equal(t, []string{"custom-value"}, upstream.request.Header["x-custom"])
+	require.Equal(t, "custom-value", getHeaderRaw(upstream.request.Header, "x-custom"))
 	require.Contains(t, recorder.Body.String(), `"success":true`)
 }

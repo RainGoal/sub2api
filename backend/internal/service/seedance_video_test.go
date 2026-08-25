@@ -85,7 +85,7 @@ func TestForwardSeedanceVideoCreateUsesBblabuCanonicalEndpoint(t *testing.T) {
 	require.Equal(t, http.MethodPost, upstream.requests[0].Method)
 	require.Equal(t, "https://api.bblabu.ai/v1/videos", upstream.requests[0].URL.String())
 	require.Equal(t, "Bearer seedance-secret", upstream.requests[0].Header.Get("Authorization"))
-	require.Equal(t, []string{"tenant-1"}, upstream.requests[0].Header["x-tenant"])
+	require.Equal(t, "tenant-1", getHeaderRaw(upstream.requests[0].Header, "x-tenant"))
 	require.JSONEq(t, `{"model":"Seedance-2.0","prompt":"waves","duration":10,"resolution":"720p","ratio":"16:9"}`, string(upstream.bodies[0]))
 	require.Equal(t, "task-123", result.ResponseID)
 	require.Equal(t, "upstream-create", result.RequestID)
