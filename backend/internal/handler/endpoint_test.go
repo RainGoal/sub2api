@@ -135,6 +135,8 @@ func TestDeriveUpstreamEndpoint(t *testing.T) {
 		{"grok responses", EndpointResponses, "/v1/responses", service.PlatformGrok, EndpointResponses},
 		{"grok video generations", EndpointVideosGenerations, "/v1/videos/generations", service.PlatformGrok, EndpointVideosGenerations},
 		{"grok video status", EndpointVideos, "/videos/req_123", service.PlatformGrok, EndpointVideos},
+		{"seedance video create maps to canonical upstream", EndpointVideosGenerations, "/v1/videos/generations", service.PlatformSeedance, EndpointVideos},
+		{"seedance video status", EndpointVideos, "/v1/videos/req_123", service.PlatformSeedance, EndpointVideos},
 
 		// Antigravity — uses inbound to pick Claude vs Gemini upstream.
 		{"antigravity claude", EndpointMessages, "/antigravity/v1/messages", service.PlatformAntigravity, EndpointMessages},

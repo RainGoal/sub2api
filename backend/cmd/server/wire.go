@@ -116,6 +116,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	seedanceVideoRecovery *service.SeedanceVideoRecoveryService,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
@@ -329,6 +330,12 @@ func provideCleanup(
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
+				}
+				return nil
+			}},
+			{"SeedanceVideoRecoveryService", func() error {
+				if seedanceVideoRecovery != nil {
+					seedanceVideoRecovery.Stop()
 				}
 				return nil
 			}},

@@ -26,6 +26,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -2660,6 +2661,31 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	if account.Platform == service.PlatformAntigravity {
 		// 直接复用 antigravity.DefaultModels()，与 /v1/models 端点保持同步
 		response.Success(c, antigravity.DefaultModels())
+		return
+	}
+
+	// Video accounts expose the catalog implemented by their selected driver.
+	if account.Platform == service.PlatformSeedance {
+		driver, err := videoprovider.Resolve(string(account.GetVideoProviderID()))
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, "Invalid video provider configuration")
+			return
+		}
+		modelIDs := driver.ModelIDs()
+		if mapping := account.GetModelMapping(); len(mapping) > 0 {
+			modelIDs = modelIDs[:0]
+			for modelID := range mapping {
+				if driver.SupportsModel(modelID) {
+					modelIDs = append(modelIDs, modelID)
+				}
+			}
+			sort.Strings(modelIDs)
+		}
+		models := make([]claude.Model, 0, len(modelIDs))
+		for _, modelID := range modelIDs {
+			models = append(models, claude.Model{ID: modelID, Type: "model", DisplayName: modelID})
+		}
+		response.Success(c, models)
 		return
 	}
 

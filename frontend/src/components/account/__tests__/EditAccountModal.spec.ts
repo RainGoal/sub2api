@@ -355,6 +355,38 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('rehydrates and updates the selected Seedance video protocol', async () => {
+    const account = {
+      ...buildAccount(),
+      id: 20,
+      name: 'fflink video',
+      platform: 'seedance',
+      credentials: {
+        api_key: 'sk-video',
+        base_url: 'https://api.fflink.top/v1',
+        video_provider: 'fflink_v1'
+      }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    expect((wrapper.get('[data-testid="video-provider-select"]').element as HTMLSelectElement).value)
+      .toBe('fflink_v1')
+    expect((wrapper.get('[data-testid="account-base-url"]').element as HTMLInputElement).value)
+      .toBe('https://api.fflink.top/v1')
+
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('bblabu_v1')
+    expect((wrapper.get('[data-testid="account-base-url"]').element as HTMLInputElement).value)
+      .toBe('https://api.bblabu.ai/v1')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://api.bblabu.ai/v1',
+      video_provider: 'bblabu_v1'
+    })
+  })
+
   it('preserves adaptive GLM endpoints on submit', async () => {
     const account = buildAccount()
     account.platform = 'zhipu'

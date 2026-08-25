@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 )
 
 // UpstreamModelSyncErrorKind classifies model sync failures for safe HTTP mapping.
@@ -115,11 +116,20 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 		)
 	}
 
-	extractModels := extractUpstreamModelIDs
-	if account.IsGrok() {
-		extractModels = extractGrokUpstreamModelIDs
+	var models []string
+	if account.IsSeedance() {
+		driver, resolveErr := videoprovider.Resolve(string(account.GetVideoProviderID()))
+		if resolveErr != nil {
+			return nil, newUpstreamModelSyncConfigError("Invalid video provider", resolveErr)
+		}
+		models, err = driver.ParseModels(body)
+	} else {
+		extractModels := extractUpstreamModelIDs
+		if account.IsGrok() {
+			extractModels = extractGrokUpstreamModelIDs
+		}
+		models, err = extractModels(body)
 	}
-	models, err := extractModels(body)
 	if err != nil {
 		return nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
 	}
@@ -136,6 +146,8 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
 	case account.IsGrok():
 		return s.buildGrokUpstreamModelsRequest(ctx, account)
+	case account.IsSeedance():
+		return s.buildVideoProviderModelsRequest(ctx, account)
 	case account.IsOpenAI() || account.IsCNProvider():
 		// 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）复用 OpenAI /v1/models 探测。
 		return s.buildOpenAIUpstreamModelsRequest(ctx, account)
@@ -148,6 +160,32 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 			fmt.Sprintf("Unsupported platform for upstream model sync: %s", account.Platform), nil,
 		)
 	}
+}
+
+func (s *AccountTestService) buildVideoProviderModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return nil, newUpstreamModelSyncUnsupportedError("Video provider model sync requires an API-key account", nil)
+	}
+	apiKey := account.GetSeedanceAPIKey()
+	if apiKey == "" {
+		return nil, newUpstreamModelSyncConfigError("No video provider API key is available", nil)
+	}
+	baseURL, err := s.validateUpstreamBaseURL(account.GetSeedanceBaseURL())
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid video provider base URL", err)
+	}
+	driver, err := videoprovider.Resolve(string(account.GetVideoProviderID()))
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid video provider", err)
+	}
+	req, err := driver.BuildRequest(ctx, videoprovider.RequestParams{
+		BaseURL: baseURL, APIKey: apiKey, Operation: videoprovider.OperationModels,
+	})
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid video provider model list request", err)
+	}
+	account.ApplyHeaderOverrides(req.Header)
+	return req, nil
 }
 
 func (s *AccountTestService) buildGrokUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {

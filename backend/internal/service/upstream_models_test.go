@@ -394,6 +394,30 @@ func TestFetchUpstreamSupportedModelsParsesOpenAIResponse(t *testing.T) {
 	require.Equal(t, "Bearer openai-key", upstream.lastReq.Header.Get("Authorization"))
 }
 
+func TestFetchUpstreamSupportedModelsUsesVideoDriverParser(t *testing.T) {
+	t.Parallel()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"data":[{"id":"seedance-2.0-fast"},{"id":"kling-3.0"},{"id":"seedance-2.0-fast"}]
+		}`)),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream, cfg: upstreamModelSyncTestConfig()}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID: 8, Platform: PlatformSeedance, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "video-key", "base_url": "https://video.example.com/v1", "video_provider": "fflink_v1",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"seedance-2.0-fast"}, models)
+	require.Equal(t, "https://video.example.com/v1/models", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer video-key", upstream.lastReq.Header.Get("Authorization"))
+}
+
 func TestFetchUpstreamSupportedModelsUsesConfiguredBodyLimit(t *testing.T) {
 	t.Parallel()
 

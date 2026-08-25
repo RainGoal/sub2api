@@ -38,6 +38,8 @@ type UsageBillingCommand struct {
 	MediaType           string
 
 	BalanceCost         float64
+	BalanceHoldID       string
+	BalanceHoldAmount   float64
 	SubscriptionCost    float64
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
@@ -82,6 +84,7 @@ const UsageBillingMonetaryScale = 8
 // 存储阶段不再发生任何舍入，delta 精确相等。
 func (c *UsageBillingCommand) quantizeMonetaryFields() {
 	c.BalanceCost = QuantizeUsageBillingAmount(c.BalanceCost)
+	c.BalanceHoldAmount = QuantizeUsageBillingAmount(c.BalanceHoldAmount)
 	c.SubscriptionCost = QuantizeUsageBillingAmount(c.SubscriptionCost)
 	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
 	c.APIKeyRateLimitCost = QuantizeUsageBillingAmount(c.APIKeyRateLimitCost)
@@ -131,6 +134,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	)
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
+	}
+	if holdID := strings.TrimSpace(c.BalanceHoldID); holdID != "" || c.BalanceHoldAmount != 0 {
+		raw += fmt.Sprintf("|hold:%s|%0.10f", holdID, c.BalanceHoldAmount)
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

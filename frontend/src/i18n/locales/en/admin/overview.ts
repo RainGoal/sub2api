@@ -950,6 +950,7 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        seedance: 'Seedance Video',
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
@@ -1001,7 +1002,18 @@ export default {
         modeHint:
           'Videos are billed per second: per-second price × duration (1-15s, default 8s). By default the current effective group multiplier applies; independent mode uses the video multiplier instead.',
         finalPricePreview: 'Final per-second price preview',
-        notConfigured: 'Not configured'
+        notConfigured: 'Not configured',
+        seedance: {
+          title: 'Seedance Video Pricing',
+          description: 'Configure Seedance prices by model and resolution in USD per second. Seedance groups have no built-in fallback price; configure every tier you intend to expose before use.',
+          modelOverridesTitle: 'Seedance model price matrix',
+          modelOverridesDescription: 'Seedance-2.0 supports 480p / 720p / 1080p / 4K; Seedance-2.5 supports 480p / 720p. An unpriced model-resolution pair is rejected at task creation to prevent zero-price usage.',
+          independentMultiplier: 'Use independent video multiplier',
+          videoMultiplier: 'Video multiplier',
+          modeHint: 'Seedance-2.0 bills output seconds only. Seedance-2.5 adds reference-video input seconds reported by the upstream; clients need no extension field.',
+          finalPricePreview: 'Final per-second price preview',
+          notConfigured: 'Not configured',
+        },
       },
       explicitPricing: {
         title: 'Grok Search & Voice Pricing',

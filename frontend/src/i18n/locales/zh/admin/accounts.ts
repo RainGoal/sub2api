@@ -307,9 +307,17 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        seedance: 'Seedance 视频',
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
+      },
+      seedance: {
+        accountTypeHint: 'Seedance 视频账号仅支持 API Key；请求将按所选上游协议转发到异步视频接口。',
+        provider: '视频上游协议',
+        providerHint: '协议决定接口路径、请求字段和任务状态解析；自定义中转地址不会影响协议选择。',
+        baseUrlHint: '{provider} 默认地址为 {url}。只填写到 /v1，视频路径由 Sub2API 自动拼接。',
+        apiKeyHint: '填写所选视频上游的 API Key。该凭证仅用于视频任务。',
       },
       cnProviders: {
         accountMode: {

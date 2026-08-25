@@ -90,9 +90,11 @@ func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model str
 	}
 
 	// Anthropic 复用账号测试的最小 Claude Code 请求，不发送容易被严格上游识别为
-	// 健康检查流量的算术题；replace 模式同样无法嵌入 challenge。两者都以
-	// 「HTTP 2xx + 非空响应文本」判定模型确实可用。
-	if provider == MonitorProviderAnthropic || mode == MonitorBodyOverrideModeReplace {
+	// 健康检查流量的算术题；OpenAI 分组监控关注请求链路是否可达；replace 模式
+	// 同样无法嵌入 challenge。以上场景均以「HTTP 2xx + 非空响应文本」判定可用。
+	if provider == MonitorProviderAnthropic ||
+		provider == MonitorProviderOpenAI ||
+		mode == MonitorBodyOverrideModeReplace {
 		if strings.TrimSpace(respText) == "" {
 			res.Status = MonitorStatusFailed
 			message := "upstream returned 2xx with empty text"

@@ -528,7 +528,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'composite'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'seedance' | 'kimi' | 'zhipu' | 'deepseek' | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
@@ -657,13 +657,14 @@ export type CompositeRouteEndpoint =
   | 'gemini'
 
 export type CompositeRouteSource = 'route' | 'detector' | string
+export type CompositeTargetPlatform = Exclude<GroupPlatform, 'composite' | 'seedance'>
 
 export interface CompositeModelRoute {
   id: number
   group_id: number
   public_model: string
   match_type: CompositeRouteMatchType
-  target_platform: Exclude<GroupPlatform, 'composite'>
+  target_platform: CompositeTargetPlatform
   upstream_model: string
   endpoint: CompositeRouteEndpoint
   priority: number
@@ -676,7 +677,7 @@ export interface CompositeModelRoute {
 export interface CompositeModelRouteInput {
   public_model: string
   match_type: CompositeRouteMatchType
-  target_platform: Exclude<GroupPlatform, 'composite'>
+  target_platform: CompositeTargetPlatform
   upstream_model?: string
   endpoint: CompositeRouteEndpoint
   priority?: number
@@ -694,7 +695,7 @@ export interface CompositeRouteDecision {
   source: CompositeRouteSource
   group_id: number
   public_model: string
-  target_platform: Exclude<GroupPlatform, 'composite'> | ''
+  target_platform: CompositeTargetPlatform | ''
   upstream_model: string
   endpoint: CompositeRouteEndpoint
   route?: CompositeModelRoute
@@ -885,7 +886,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'seedance' | 'kimi' | 'zhipu' | 'deepseek'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'

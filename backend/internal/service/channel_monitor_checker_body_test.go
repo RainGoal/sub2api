@@ -246,6 +246,34 @@ func TestRunCheckForModel_OpenAI_DefaultChatRequest(t *testing.T) {
 	}
 }
 
+func TestRunCheckForModel_OpenAI_UsesReachabilityInsteadOfChallengeAccuracy(t *testing.T) {
+	t.Run("non-empty wrong answer remains available", func(t *testing.T) {
+		h := &openAICaptureHandler{
+			rawResponse: `{"choices":[{"message":{"content":"24\n"}}]}`,
+		}
+		endpoint := setupFakeOpenAI(t, h)
+
+		res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-test", nil)
+
+		if res.Status != MonitorStatusOperational {
+			t.Fatalf("non-empty OpenAI response should prove reachability, got status=%s message=%q", res.Status, res.Message)
+		}
+	})
+
+	t.Run("empty answer remains failed", func(t *testing.T) {
+		h := &openAICaptureHandler{
+			rawResponse: `{"choices":[{"message":{"content":""}}]}`,
+		}
+		endpoint := setupFakeOpenAI(t, h)
+
+		res := runCheckForModel(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-test", nil)
+
+		if res.Status != MonitorStatusFailed {
+			t.Fatalf("empty OpenAI response should remain failed, got status=%s message=%q", res.Status, res.Message)
+		}
+	})
+}
+
 func TestGrokMonitorConfiguration(t *testing.T) {
 	if err := validateProvider(MonitorProviderGrok); err != nil {
 		t.Fatalf("grok provider should be supported: %v", err)

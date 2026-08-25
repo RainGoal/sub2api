@@ -22,6 +22,9 @@ export default {
     platformBreakdownEmpty: 'No platform usage yet',
     platformCount: '{count} platforms',
     platformOther: 'Other',
+    platforms: {
+      seedance: 'Seedance Video',
+    },
     platformQuota: {
       title: 'Quota Usage',
       daily: 'Daily',

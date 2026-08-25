@@ -18,8 +18,9 @@ describe("groups image pricing platform support", () => {
     expect(imagePricingPlatforms.has("grok")).toBe(true);
   });
 
-  it("enables video pricing controls for Grok only", () => {
+  it("enables video pricing controls for Grok and Seedance", () => {
     expect(supportsVideoPricingPlatform("grok")).toBe(true);
+    expect(supportsVideoPricingPlatform("seedance")).toBe(true);
     expect(supportsVideoPricingPlatform("openai")).toBe(false);
   });
 
@@ -37,6 +38,9 @@ describe("groups image pricing platform support", () => {
       "admin.groups.imagePricing.title",
     );
     expect(videoPricingI18nKey("title")).toBe("admin.groups.videoPricing.title");
+    expect(videoPricingI18nKey("title", "seedance")).toBe(
+      "admin.groups.videoPricing.seedance.title",
+    );
   });
 
   it("uses Grok media defaults instead of generic image fallback placeholders", () => {

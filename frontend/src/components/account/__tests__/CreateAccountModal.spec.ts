@@ -304,6 +304,51 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     })
   })
 
+  it('creates a Seedance API key account bound to the selected video groups', async () => {
+    authIsSimpleMode.value = false
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="select-pricing-groups"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Seedance account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-seedance')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'seedance',
+      type: 'apikey',
+      group_ids: [1, 2],
+      credentials: {
+        base_url: 'https://api.bblabu.ai/v1',
+        api_key: 'sk-seedance',
+        video_provider: 'bblabu_v1'
+      }
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.upstream_billing_probe_enabled).toBeUndefined()
+    expect(probeUpstreamBillingMock).not.toHaveBeenCalled()
+  })
+
+  it('switches a Seedance account to the fflink video protocol', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('fflink_v1')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('fflink video')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-fflink')
+
+    expect((wrapper.get('[data-testid="account-base-url"]').element as HTMLInputElement).value)
+      .toBe('https://api.fflink.top/v1')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      api_key: 'sk-fflink',
+      base_url: 'https://api.fflink.top/v1',
+      video_provider: 'fflink_v1'
+    })
+  })
+
   it('uses the edited adaptive Chat endpoint when previewing upstream models', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'Kimi')

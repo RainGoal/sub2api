@@ -217,6 +217,12 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 		}
 		return EndpointResponses
 
+	case service.PlatformSeedance:
+		if inbound == EndpointVideosGenerations || inbound == EndpointVideos {
+			return EndpointVideos
+		}
+		return inbound
+
 	case service.PlatformAnthropic:
 		return EndpointMessages
 

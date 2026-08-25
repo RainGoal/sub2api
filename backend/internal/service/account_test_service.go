@@ -31,6 +31,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
@@ -317,11 +318,58 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.testGrokAccountConnection(c, account, modelID, prompt, mode, testOpts)
 	}
 
+	if account.Platform == PlatformSeedance {
+		return s.testSeedanceAccountConnection(c, account, modelID)
+	}
+
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
+}
+
+func (s *AccountTestService) testSeedanceAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	if s.httpUpstream == nil {
+		return s.sendErrorAndEnd(c, "HTTP upstream not configured")
+	}
+	apiKey := account.GetSeedanceAPIKey()
+	if apiKey == "" {
+		return s.sendErrorAndEnd(c, "No API key available")
+	}
+	baseURL, err := s.validateUpstreamBaseURL(account.GetSeedanceBaseURL())
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Seedance base URL: %s", err.Error()))
+	}
+	if strings.TrimSpace(modelID) == "" {
+		modelID = videoprovider.ModelSeedance20
+	}
+	driver, err := videoprovider.Resolve(string(account.GetVideoProviderID()))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid video provider: %s", err.Error()))
+	}
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
+	s.sendEvent(c, TestEvent{Type: "status", Text: "Calling Seedance /v1/models connectivity probe..."})
+	req, err := driver.BuildRequest(c.Request.Context(), videoprovider.RequestParams{
+		BaseURL: baseURL, APIKey: apiKey, Operation: videoprovider.OperationModels,
+	})
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Seedance connectivity request")
+	}
+	account.ApplyHeaderOverrides(req.Header)
+
+	resp, err := s.httpUpstream.Do(req, accountProxyURL(account), account.ID, account.Concurrency)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Seedance connectivity request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Seedance models API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Seedance API key and base URL are reachable."})
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
 }
 
 func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Context, account *Account, modelID string, prompt string) error {

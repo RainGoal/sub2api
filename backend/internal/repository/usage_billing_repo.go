@@ -178,7 +178,14 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		}
 	}
 
-	if cmd.BalanceCost > 0 {
+	if cmd.BalanceHoldAmount > 0 {
+		newBalance, err := captureUsageBillingBalanceHold(ctx, tx, cmd)
+		if err != nil {
+			return err
+		}
+		result.NewBalance = &newBalance
+		result.BalanceOverdrafted = newBalance < 0
+	} else if cmd.BalanceCost > 0 {
 		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
 		if err != nil {
 			return err
@@ -210,6 +217,42 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	return nil
+}
+
+func captureUsageBillingBalanceHold(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) (float64, error) {
+	holdID := strings.TrimSpace(cmd.BalanceHoldID)
+	if holdID == "" || cmd.BalanceHoldAmount <= 0 {
+		return 0, errors.New("usage billing balance hold is invalid")
+	}
+	held, err := batchImageHoldClaimExists(ctx, tx, service.BatchImageHoldRequestID(holdID), cmd.APIKeyID)
+	if err != nil {
+		return 0, err
+	}
+	if !held {
+		return 0, errors.New("usage billing balance hold was never reserved")
+	}
+
+	var balance float64
+	err = tx.QueryRowContext(ctx, `
+		UPDATE users
+		SET balance = balance + $1 - $2,
+			frozen_balance = COALESCE(frozen_balance, 0) - $1,
+			updated_at = NOW()
+		WHERE id = $3 AND deleted_at IS NULL AND COALESCE(frozen_balance, 0) >= $1
+		RETURNING balance
+	`, cmd.BalanceHoldAmount, cmd.BalanceCost, cmd.UserID).Scan(&balance)
+	if err == nil {
+		return balance, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	if exists, existsErr := userExistsForBilling(ctx, tx, cmd.UserID); existsErr != nil {
+		return 0, existsErr
+	} else if !exists {
+		return 0, service.ErrUserNotFound
+	}
+	return 0, errors.New("usage billing frozen balance is insufficient")
 }
 
 func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) error {

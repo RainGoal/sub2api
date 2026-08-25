@@ -104,9 +104,17 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        seedance: 'Seedance Video',
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
+      },
+      seedance: {
+        accountTypeHint: 'Seedance video accounts use API keys only and forward requests through the selected asynchronous video protocol.',
+        provider: 'Video upstream protocol',
+        providerHint: 'The protocol controls endpoint paths, request fields, and task status parsing; custom relay URLs do not change it.',
+        baseUrlHint: '{provider} defaults to {url}. Enter the URL through /v1 only; Sub2API appends video paths.',
+        apiKeyHint: 'Enter the API key for the selected video upstream. This credential is used only for video tasks.',
       },
       cnProviders: {
         accountMode: {

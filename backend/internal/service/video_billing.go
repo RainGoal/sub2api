@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -53,7 +54,8 @@ func CanonicalGrokImagineVideoPriceFamily(model string) string {
 }
 
 // NormalizeVideoModelPrices cleans and canonicalizes a per-model resolution map.
-// Keys become price families; tiers use 480p/720p/1080p. Negative prices dropped.
+// Keys become price families; tiers are restricted to each provider model's
+// documented resolution catalog. Negative prices are dropped.
 //
 // Model keys are walked in sorted order rather than in Go map order: several
 // aliases can canonicalize onto the same family, and an unordered walk would
@@ -110,6 +112,13 @@ func NormalizeVideoModelPrices(in map[string]map[string]float64) map[string]map[
 					"resolution", tierKey)
 				continue
 			}
+			if !isVideoPriceResolutionSupported(family, tier) {
+				slog.Warn("video_model_prices_unsupported_resolution_dropped",
+					"model_key", modelKey,
+					"family", family,
+					"resolution", tier)
+				continue
+			}
 			if existing, exists := normalizedTiers[tier]; exists && existing != price {
 				slog.Warn("video_model_prices_conflicting_tier_price",
 					"model_key", modelKey,
@@ -128,6 +137,23 @@ func NormalizeVideoModelPrices(in map[string]map[string]float64) map[string]map[
 		return nil
 	}
 	return out
+}
+
+func isVideoPriceResolutionSupported(family, tier string) bool {
+	canonical, ok := videoprovider.CanonicalModel(family)
+	if !ok {
+		return tier != VideoBillingResolution4K
+	}
+	spec, ok := videoprovider.LookupModel(canonical)
+	if !ok {
+		return false
+	}
+	for _, resolution := range spec.Resolutions {
+		if normalized, valid := LookupVideoBillingResolution(resolution); valid && normalized == tier {
+			return true
+		}
+	}
+	return false
 }
 
 // LookupVideoModelPrice returns a per-second price from a model×resolution map, or nil.

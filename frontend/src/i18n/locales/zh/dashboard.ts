@@ -22,6 +22,9 @@ export default {
     platformBreakdownEmpty: '暂无平台用量',
     platformCount: '{count} 个平台',
     platformOther: '其他',
+    platforms: {
+      seedance: 'Seedance 视频',
+    },
     platformQuota: {
       title: '配额用量',
       daily: '日',

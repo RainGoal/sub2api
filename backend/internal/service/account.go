@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -272,6 +273,10 @@ func (a *Account) IsGrokOAuth() bool {
 	return a.IsGrok() && a.Type == AccountTypeOAuth
 }
 
+func (a *Account) IsSeedance() bool {
+	return a != nil && a.Platform == PlatformSeedance
+}
+
 // IsKimi / IsZhipu / IsDeepseek 标识国产 OpenAI 兼容供应商账号。
 func (a *Account) IsKimi() bool {
 	return a.Platform == PlatformKimi
@@ -296,6 +301,49 @@ func (a *Account) IsCNProvider() bool {
 func (a *Account) IsOpenAICompatible() bool {
 	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok ||
 		a.Platform == PlatformKimi || a.Platform == PlatformZhipu || a.Platform == PlatformDeepseek)
+}
+
+// IsOpenAISchedulerCompatible allows the isolated Seedance provider to reuse
+// the mature account scheduler without advertising text endpoint support.
+func (a *Account) IsOpenAISchedulerCompatible() bool {
+	return a != nil && (a.IsOpenAICompatible() || a.IsSeedance())
+}
+
+func (a *Account) GetSeedanceBaseURL() string {
+	return a.GetVideoProviderBaseURL(string(a.GetVideoProviderID()))
+}
+
+func (a *Account) GetVideoProviderBaseURL(providerID string) string {
+	if !a.IsSeedance() {
+		return ""
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(a.GetCredential("base_url")), "/")
+	if baseURL == "" {
+		driver, err := videoprovider.Resolve(providerID)
+		if err != nil {
+			return ""
+		}
+		return driver.DefaultBaseURL()
+	}
+	return baseURL
+}
+
+func (a *Account) GetVideoProviderID() videoprovider.ID {
+	if !a.IsSeedance() {
+		return ""
+	}
+	id, err := videoprovider.NormalizeID(a.GetCredential("video_provider"))
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+func (a *Account) GetSeedanceAPIKey() string {
+	if !a.IsSeedance() || a.Type != AccountTypeAPIKey {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("api_key"))
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -842,6 +890,12 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 	// model_mapping 白名单错误排除出候选集，导致 no available accounts / 404（issue #4936）。
 	if a.IsOpenAIPassthroughEnabled() {
 		return true
+	}
+	if a.IsSeedance() {
+		driver, err := videoprovider.Resolve(string(a.GetVideoProviderID()))
+		if err != nil || !driver.SupportsModel(requestedModel) {
+			return false
+		}
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {

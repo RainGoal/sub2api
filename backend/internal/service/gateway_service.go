@@ -21,6 +21,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
@@ -1404,6 +1405,26 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	hasAnyMapping := false
 
 	for _, acc := range accounts {
+		if platform == PlatformSeedance {
+			driver, resolveErr := videoprovider.Resolve(string(acc.GetVideoProviderID()))
+			if resolveErr != nil {
+				continue
+			}
+			mapping := acc.GetModelMapping()
+			if len(mapping) == 0 {
+				for _, model := range driver.ModelIDs() {
+					modelSet[model] = struct{}{}
+				}
+			} else {
+				for model := range mapping {
+					if driver.SupportsModel(model) {
+						modelSet[model] = struct{}{}
+					}
+				}
+			}
+			hasAnyMapping = len(modelSet) > 0
+			continue
+		}
 		// Passthrough routing accepts models independently of model_mapping. A stale
 		// mapping on any eligible passthrough account therefore cannot define the
 		// public whitelist; return nil so the handler uses its default model set.

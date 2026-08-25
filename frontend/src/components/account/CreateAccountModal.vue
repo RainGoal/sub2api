@@ -161,6 +161,21 @@
             Grok
           </button>
         </div>
+        <div class="mt-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+          <button
+            type="button"
+            @click="selectSeedancePlatform"
+            :class="[
+              'flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'seedance'
+                ? 'bg-white text-rose-600 shadow-sm dark:bg-dark-600 dark:text-rose-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="seedance" size="sm" />
+            {{ t('admin.accounts.platforms.seedance') }}
+          </button>
+        </div>
         <!-- CN providers row: Kimi / Zhipu GLM / DeepSeek -->
         <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
           <button
@@ -203,6 +218,13 @@
             DeepSeek
           </button>
         </div>
+      </div>
+
+      <div
+        v-if="form.platform === 'seedance'"
+        class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200"
+      >
+        {{ t('admin.accounts.seedance.accountTypeHint') }}
       </div>
 
       <!-- Account Type Selection (Anthropic) -->
@@ -1250,12 +1272,22 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+        <div v-if="form.platform === 'seedance'">
+          <label class="input-label">{{ t('admin.accounts.seedance.provider') }}</label>
+          <select v-model="videoProvider" class="input" data-testid="video-provider-select">
+            <option v-for="provider in videoProviderOptions" :key="provider.id" :value="provider.id">
+              {{ provider.label }}
+            </option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.seedance.providerHint') }}</p>
+        </div>
         <div v-if="!isCNPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
             type="text"
             class="input"
+            data-testid="account-base-url"
             :placeholder="apiKeyBaseUrlPlaceholder"
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
@@ -1307,6 +1339,7 @@
 
         <!-- 上游倍率自动探测：全部 API-key 平台可用（所在区块已限定 apikey 类型） -->
         <div
+          v-if="form.platform !== 'seedance'"
           class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
         >
           <div>
@@ -1333,7 +1366,7 @@
         </div>
 
         <!-- Model Restriction Section (Antigravity 已在上层条件排除) -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="form.platform !== 'seedance'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
 
           <div
@@ -1519,7 +1552,7 @@
         </div>
 
         <!-- Pool Mode Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="form.platform !== 'seedance'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
@@ -1583,7 +1616,7 @@
         </div>
 
         <!-- Custom Error Codes Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div v-if="form.platform !== 'seedance'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
@@ -2038,7 +2071,7 @@
 
       <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
       <div
-        v-else-if="form.type === 'apikey' || form.type === 'bedrock'"
+        v-else-if="(form.type === 'apikey' || form.type === 'bedrock') && form.platform !== 'seedance'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -3778,6 +3811,13 @@ import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/forma
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
+  DEFAULT_VIDEO_PROVIDER_ID,
+  VIDEO_PROVIDER_OPTIONS,
+  videoProviderDefaultBaseUrl,
+  videoProviderDisplayName,
+  type VideoProviderID
+} from '@/constants/videoProviders'
+import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
@@ -3815,10 +3855,19 @@ const oauthStepTitle = computed(() => {
   return t('admin.accounts.oauth.title')
 })
 
+const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
+const videoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
+
 // Platform-specific hints for API Key type
 const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
+  if (form.platform === 'seedance') {
+    return t('admin.accounts.seedance.baseUrlHint', {
+      provider: videoProviderDisplayName(videoProvider.value),
+      url: videoProviderDefaultBaseUrl(videoProvider.value)
+    })
+  }
   if (form.platform === 'grok') return ''
   return t('admin.accounts.baseUrlHint')
 })
@@ -3826,6 +3875,7 @@ const baseUrlHint = computed(() => {
 const apiKeyHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.apiKeyHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.apiKeyHint')
+  if (form.platform === 'seedance') return t('admin.accounts.seedance.apiKeyHint')
   if (form.platform === 'grok') return ''
   return t('admin.accounts.apiKeyHint')
 })
@@ -3842,6 +3892,8 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
       return 'https://generativelanguage.googleapis.com'
     case 'grok':
       return 'https://api.x.ai/v1'
+    case 'seedance':
+      return videoProviderDefaultBaseUrl(videoProvider.value)
     default:
       return 'https://api.anthropic.com'
   }
@@ -3855,6 +3907,8 @@ const apiKeyValuePlaceholder = computed(() => {
       return 'AIza...'
     case 'grok':
       return 'xai-...'
+    case 'seedance':
+      return 'sk-...'
     case 'kimi':
       return 'sk-...'
     case 'zhipu':
@@ -4032,6 +4086,15 @@ function selectCNPlatform(platform: 'kimi' | 'zhipu' | 'deepseek') {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
+
+function selectSeedancePlatform() {
+  form.platform = 'seedance'
+  form.type = 'apikey'
+  accountCategory.value = 'apikey'
+  videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
+  apiKeyBaseUrl.value = videoProviderDefaultBaseUrl(videoProvider.value)
+  upstreamBillingAutoProbeEnabled.value = false
+}
 // 账号类型 / 协议变更时同步默认 base url。
 watch(accountMode, (mode, previousMode) => {
   if (!isCNPlatform.value) return
@@ -4059,6 +4122,13 @@ watch(apiProtocol, (protocol) => {
     return
   }
   apiKeyBaseUrl.value = defaultCNBaseUrl(form.platform, accountMode.value, protocol)
+})
+watch(videoProvider, (provider, previousProvider) => {
+  if (form.platform !== 'seedance') return
+  const currentBaseUrl = apiKeyBaseUrl.value.trim()
+  if (!currentBaseUrl || currentBaseUrl === videoProviderDefaultBaseUrl(previousProvider)) {
+    apiKeyBaseUrl.value = videoProviderDefaultBaseUrl(provider)
+  }
 })
 // 点击预设端点：同时回填 base url、账号类型与协议。
 function onCnPresetSelect(preset: { mode: CnAccountMode; protocol: CnApiProtocol; url: string }) {
@@ -4539,6 +4609,10 @@ watch(
 watch(
   [accountCategory, addMethod, antigravityAccountType, () => form.platform],
   ([category, method, agType]) => {
+    if (form.platform === 'seedance') {
+      form.type = 'apikey'
+      return
+    }
     // Antigravity upstream 类型（实际创建为 apikey）
     if (form.platform === 'antigravity' && agType === 'upstream') {
       form.type = 'apikey'
@@ -4575,6 +4649,8 @@ watch(
             ? 'https://generativelanguage.googleapis.com'
             : newPlatform === 'grok'
               ? 'https://api.x.ai/v1'
+              : newPlatform === 'seedance'
+                ? videoProviderDefaultBaseUrl(videoProvider.value)
               : 'https://api.anthropic.com'
     }
     // Clear model-related settings
@@ -4602,6 +4678,14 @@ watch(
       modelRestrictionMode.value = 'mapping'
       form.concurrency = 1
       form.load_factor = null
+    }
+    if (newPlatform === 'seedance') {
+      accountCategory.value = 'apikey'
+      addMethod.value = 'oauth'
+      form.type = 'apikey'
+      form.concurrency = 1
+      form.load_factor = null
+      upstreamBillingAutoProbeEnabled.value = false
     }
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
       accountCategory.value = 'oauth-based'
@@ -5022,6 +5106,7 @@ const resetForm = () => {
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -5471,12 +5556,17 @@ const handleSubmit = async () => {
         ? 'https://generativelanguage.googleapis.com'
         : form.platform === 'grok'
           ? 'https://api.x.ai/v1'
+          : form.platform === 'seedance'
+            ? videoProviderDefaultBaseUrl(videoProvider.value)
           : 'https://api.anthropic.com'
 
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {
     base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
+  }
+  if (form.platform === 'seedance') {
+    credentials.video_provider = videoProvider.value
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
@@ -5506,7 +5596,7 @@ const handleSubmit = async () => {
   }
 
   // Add model mapping if configured（OpenAI 开启自动透传时不应用）
-  if (!isOpenAIModelRestrictionDisabled.value) {
+  if (form.platform !== 'seedance' && !isOpenAIModelRestrictionDisabled.value) {
     const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
       credentials.model_mapping = modelMapping
@@ -5521,7 +5611,7 @@ const handleSubmit = async () => {
   }
 
   // Add pool mode if enabled
-  if (poolModeEnabled.value) {
+  if (form.platform !== 'seedance' && poolModeEnabled.value) {
     credentials.pool_mode = true
     credentials.pool_mode_retry_count = normalizePoolModeRetryCount(poolModeRetryCount.value)
     const parsedRetryStatusCodes = parsePoolModeRetryStatusCodes(poolModeRetryStatusCodesInput.value)
@@ -5531,7 +5621,7 @@ const handleSubmit = async () => {
   }
 
   // Add custom error codes if enabled
-  if (customErrorCodesEnabled.value) {
+  if (form.platform !== 'seedance' && customErrorCodesEnabled.value) {
     credentials.custom_error_codes_enabled = true
     credentials.custom_error_codes = [...selectedErrorCodes.value]
   }
@@ -5560,7 +5650,8 @@ const handleSubmit = async () => {
     ...form,
     group_ids: form.group_ids,
     extra,
-    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
+    upstream_billing_probe_enabled:
+      form.platform === 'seedance' ? undefined : upstreamBillingAutoProbeEnabled.value,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }
@@ -5691,7 +5782,8 @@ const createAccountAndFinish = async (
     expires_at: form.expires_at,
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
     // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
-    upstream_billing_probe_enabled: type === 'apikey' ? upstreamBillingAutoProbeEnabled.value : undefined,
+    upstream_billing_probe_enabled:
+      type === 'apikey' && platform !== 'seedance' ? upstreamBillingAutoProbeEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }

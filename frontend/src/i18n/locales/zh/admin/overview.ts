@@ -883,6 +883,7 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        seedance: 'Seedance 视频',
         kimi: 'Kimi',
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
@@ -998,7 +999,18 @@ export default {
         modeHint:
           '视频按秒计费：费用 = 每秒价格 × 时长（1-15 秒，未指定默认 8 秒）。默认叠加当前分组有效倍率；开启独立倍率后改用视频独立倍率。',
         finalPricePreview: '最终每秒价格预览',
-        notConfigured: '未配置'
+        notConfigured: '未配置',
+        seedance: {
+          title: 'Seedance 视频生成计费',
+          description: '按模型和清晰度配置 Seedance 每秒单价（USD/秒）。Seedance 分组没有内置兜底价格，投入使用前请填写实际开放档位。',
+          modelOverridesTitle: 'Seedance 模型价格矩阵',
+          modelOverridesDescription: 'Seedance-2.0 支持 480p / 720p / 1080p / 4K；Seedance-2.5 支持 480p / 720p。未配置的模型与清晰度组合会拒绝创建任务，避免零价调用。',
+          independentMultiplier: '视频倍率独立',
+          videoMultiplier: '视频独立倍率',
+          modeHint: 'Seedance-2.0 按输出秒数计费；Seedance-2.5 按输出秒数加上游回传的参考视频输入秒数计费，调用方无需额外扩展字段。',
+          finalPricePreview: '最终每秒价格预览',
+          notConfigured: '未配置',
+        },
       },
       explicitPricing: {
         title: 'Grok 搜索与 Voice 定价',

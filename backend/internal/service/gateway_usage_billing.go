@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -79,6 +80,8 @@ type postUsageBillingParams struct {
 	Subscription          *UserSubscription
 	RequestPayloadHash    string
 	IsSubscriptionBill    bool
+	BalanceHoldID         string
+	BalanceHoldAmount     float64
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
 	Platform              string // 来自 APIKey 关联 Group 的平台标识
@@ -229,6 +232,7 @@ func isForcedUsageBillingRequestID(requestID string) bool {
 	id := strings.TrimSpace(requestID)
 	return strings.HasPrefix(id, "web_search:") ||
 		strings.HasPrefix(id, "grok-video:") ||
+		strings.HasPrefix(id, "seedance-video:") ||
 		strings.HasPrefix(id, "grok_audio:") ||
 		strings.HasPrefix(id, "grok_realtime:")
 }
@@ -286,6 +290,8 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		AccountID:          p.Account.ID,
 		AccountType:        p.Account.Type,
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
+		BalanceHoldID:      strings.TrimSpace(p.BalanceHoldID),
+		BalanceHoldAmount:  p.BalanceHoldAmount,
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
@@ -313,7 +319,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
 		cmd.SubscriptionID = &p.Subscription.ID
 		cmd.SubscriptionCost = p.Cost.ActualCost
-	} else if p.Cost.ActualCost > 0 {
+	} else if p.Cost.ActualCost > 0 || p.BalanceHoldAmount > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
 	}
 
@@ -338,6 +344,9 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
+		if cmd != nil && cmd.BalanceHoldAmount > 0 {
+			return false, errors.New("usage billing repository is required to capture a balance hold")
+		}
 		postUsageBilling(ctx, p, deps)
 		return true, nil
 	}

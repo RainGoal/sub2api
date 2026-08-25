@@ -1029,7 +1029,7 @@
           </p>
         </div>
 
-        <!-- 视频生成计费配置（仅 Grok 平台） -->
+        <!-- 视频生成计费配置（Grok / Seedance） -->
         <div
           v-if="supportsVideoPricingPlatform(createForm.platform)"
           class="border-t pt-4"
@@ -1037,10 +1037,10 @@
           <label
             class="block mb-2 font-medium text-gray-700 dark:text-gray-300"
           >
-            {{ t(videoPricingI18nKey("title")) }}
+            {{ t(videoPricingI18nKey("title", createForm.platform)) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t(videoPricingI18nKey("description")) }}
+            {{ t(videoPricingI18nKey("description", createForm.platform)) }}
           </p>
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -1049,7 +1049,7 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              {{ t(videoPricingI18nKey("independentMultiplier")) }}
+              {{ t(videoPricingI18nKey("independentMultiplier", createForm.platform)) }}
             </label>
           </div>
           <div
@@ -1057,7 +1057,7 @@
             class="mb-4"
           >
             <label class="input-label">{{
-              t(videoPricingI18nKey("videoMultiplier"))
+              t(videoPricingI18nKey("videoMultiplier", createForm.platform))
             }}</label>
             <input
               v-model.number="createForm.video_rate_multiplier"
@@ -1068,7 +1068,7 @@
               placeholder="1"
             />
           </div>
-          <div class="grid grid-cols-3 gap-3">
+          <div v-if="createForm.platform === 'grok'" class="grid grid-cols-3 gap-3">
             <div>
               <label class="input-label">480p ($/s)</label>
               <input
@@ -1115,15 +1115,15 @@
             </p>
             <div class="mt-3 space-y-3">
               <div
-                v-for="family in videoModelPriceFamilyRows(createForm.video_model_prices)"
+                v-for="family in videoModelPriceFamilyRows(createForm.video_model_prices, createForm.platform)"
                 :key="family.key"
-                class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
+                class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 lg:items-end"
               >
                 <div class="min-w-0 pb-1 font-mono text-xs text-gray-700 dark:text-gray-300">
                   {{ family.label }}
                 </div>
                 <label
-                  v-for="resolution in grokVideoPriceResolutions"
+                  v-for="resolution in family.resolutions"
                   :key="resolution.key"
                   class="block"
                 >
@@ -1143,11 +1143,11 @@
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(videoPricingI18nKey("modeHint")) }}
+            {{ t(videoPricingI18nKey("modeHint", createForm.platform)) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <div v-if="createForm.platform === 'grok'" class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             <div class="mb-1 font-medium">
-              {{ t(videoPricingI18nKey("finalPricePreview")) }}
+              {{ t(videoPricingI18nKey("finalPricePreview", createForm.platform)) }}
             </div>
             <div class="grid grid-cols-3 gap-2">
               <div
@@ -2761,7 +2761,7 @@
           </p>
         </div>
 
-        <!-- 视频生成计费配置（仅 Grok 平台） -->
+        <!-- 视频生成计费配置（Grok / Seedance） -->
         <div
           v-if="supportsVideoPricingPlatform(editForm.platform)"
           class="border-t pt-4"
@@ -2769,10 +2769,10 @@
           <label
             class="block mb-2 font-medium text-gray-700 dark:text-gray-300"
           >
-            {{ t(videoPricingI18nKey("title")) }}
+            {{ t(videoPricingI18nKey("title", editForm.platform)) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t(videoPricingI18nKey("description")) }}
+            {{ t(videoPricingI18nKey("description", editForm.platform)) }}
           </p>
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -2781,7 +2781,7 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              {{ t(videoPricingI18nKey("independentMultiplier")) }}
+              {{ t(videoPricingI18nKey("independentMultiplier", editForm.platform)) }}
             </label>
           </div>
           <div
@@ -2789,7 +2789,7 @@
             class="mb-4"
           >
             <label class="input-label">{{
-              t(videoPricingI18nKey("videoMultiplier"))
+              t(videoPricingI18nKey("videoMultiplier", editForm.platform))
             }}</label>
             <input
               v-model.number="editForm.video_rate_multiplier"
@@ -2800,7 +2800,7 @@
               placeholder="1"
             />
           </div>
-          <div class="grid grid-cols-3 gap-3">
+          <div v-if="editForm.platform === 'grok'" class="grid grid-cols-3 gap-3">
             <div>
               <label class="input-label">480p ($/s)</label>
               <input
@@ -2847,15 +2847,15 @@
             </p>
             <div class="mt-3 space-y-3">
               <div
-                v-for="family in videoModelPriceFamilyRows(editForm.video_model_prices)"
+                v-for="family in videoModelPriceFamilyRows(editForm.video_model_prices, editForm.platform)"
                 :key="family.key"
-                class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,7rem))] sm:items-end"
+                class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5 lg:items-end"
               >
                 <div class="min-w-0 pb-1 font-mono text-xs text-gray-700 dark:text-gray-300">
                   {{ family.label }}
                 </div>
                 <label
-                  v-for="resolution in grokVideoPriceResolutions"
+                  v-for="resolution in family.resolutions"
                   :key="resolution.key"
                   class="block"
                 >
@@ -2875,11 +2875,11 @@
             </div>
           </div>
           <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(videoPricingI18nKey("modeHint")) }}
+            {{ t(videoPricingI18nKey("modeHint", editForm.platform)) }}
           </p>
-          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <div v-if="editForm.platform === 'grok'" class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             <div class="mb-1 font-medium">
-              {{ t(videoPricingI18nKey("finalPricePreview")) }}
+              {{ t(videoPricingI18nKey("finalPricePreview", editForm.platform)) }}
             </div>
             <div class="grid grid-cols-3 gap-2">
               <div
@@ -4427,6 +4427,7 @@ import type {
   AdminGroup,
   CompositeModelRoute,
   CompositeModelRouteInput,
+  CompositeTargetPlatform,
   CompositeRouteDecision,
   CompositeRouteEndpoint,
   CompositeRouteMatchType,
@@ -4434,7 +4435,7 @@ import type {
   SubscriptionType,
 } from "@/types";
 import {
-  CONCRETE_PLATFORM_OPTIONS,
+  COMPOSITE_TARGET_PLATFORM_OPTIONS,
   GROUP_PLATFORM_OPTIONS,
 } from "@/constants/platforms";
 import type { Column } from "@/components/common/types";
@@ -4445,7 +4446,7 @@ import Pagination from "@/components/common/Pagination.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
-import Select from "@/components/common/Select.vue";
+import Select, { type SelectOption } from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
@@ -4512,7 +4513,6 @@ import {
 } from "./groupsImagePricing";
 import {
   createVideoModelPricesForm,
-  grokVideoPriceResolutions,
   serializeVideoModelPrices,
   videoModelPriceFamilyRows,
 } from "./groupsVideoModelPricing";
@@ -4763,9 +4763,9 @@ const platformFilterOptions = computed(() => [
   ...GROUP_PLATFORM_OPTIONS,
 ]);
 
-const compositeRoutePlatformOptions = computed(() => [
-  ...CONCRETE_PLATFORM_OPTIONS,
-]);
+const compositeRoutePlatformOptions = computed<SelectOption[]>(() =>
+  COMPOSITE_TARGET_PLATFORM_OPTIONS.map(({ value, label }) => ({ value, label })),
+);
 
 const compositeRouteEndpointOptions = computed(() => [
   { value: "any", label: t("admin.groups.compositeRoutes.endpoints.any") },
@@ -4984,11 +4984,10 @@ const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
-type ConcreteGroupPlatform = Exclude<GroupPlatform, "composite">;
 type CompositeRouteFormState = {
   public_model: string;
   match_type: CompositeRouteMatchType;
-  target_platform: ConcreteGroupPlatform;
+  target_platform: CompositeTargetPlatform;
   upstream_model: string;
   endpoint: CompositeRouteEndpoint;
   priority: number;
@@ -5058,7 +5057,7 @@ const createForm = reactive({
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
-  // 视频生成计费配置（仅 Grok 平台）
+  // 视频生成计费配置（Grok / Seedance）
   video_rate_independent: false,
   video_rate_multiplier: 1,
   video_price_480p: null as number | null,
@@ -5419,7 +5418,7 @@ const editForm = reactive({
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
-  // 视频生成计费配置（仅 Grok 平台）
+  // 视频生成计费配置（Grok / Seedance）
   video_rate_independent: false,
   video_rate_multiplier: 1,
   video_price_480p: null as number | null,
@@ -5880,7 +5879,7 @@ const closeCreateModal = () => {
   createForm.video_price_480p = null;
   createForm.video_price_720p = null;
   createForm.video_price_1080p = null;
-  createForm.video_model_prices = createVideoModelPricesForm();
+  createForm.video_model_prices = createVideoModelPricesForm(undefined, createForm.platform);
   createForm.long_context_pricing_enabled = true;
   createForm.model_pricing = [];
   createForm.web_search_price_per_call = null;
@@ -6129,6 +6128,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.video_price_1080p = group.video_price_1080p;
   editForm.video_model_prices = createVideoModelPricesForm(
     group.video_model_prices,
+    group.platform,
   );
   editForm.web_search_price_per_call = group.web_search_price_per_call ?? null;
   editForm.search_price_per_1k = group.search_price_per_1k ?? null;
@@ -6214,7 +6214,7 @@ const closeEditModal = () => {
   editForm.video_price_480p = null;
   editForm.video_price_720p = null;
   editForm.video_price_1080p = null;
-  editForm.video_model_prices = createVideoModelPricesForm();
+  editForm.video_model_prices = createVideoModelPricesForm(undefined, editForm.platform);
   editForm.long_context_pricing_enabled = true;
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
@@ -6655,6 +6655,12 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
+    createForm.video_model_prices = createVideoModelPricesForm(undefined, newVal);
+    if (newVal !== "grok") {
+      createForm.video_price_480p = null;
+      createForm.video_price_720p = null;
+      createForm.video_price_1080p = null;
+    }
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }
