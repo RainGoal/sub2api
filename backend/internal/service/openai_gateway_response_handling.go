@@ -258,6 +258,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var streamEarlyErr error
 	terminalFailurePending := false
 	failureDelivered := false
+	timeoutProbe := &openAIProviderTimeoutProbe{}
 	suppressCurrentEvent := false
 	var bareErrorPayload []byte
 	bareErrorAccountSideEffectsPending := false
@@ -383,6 +384,23 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				failureDelivered = true
 			}
 		}
+		if account != nil && account.Platform == PlatformOpenAI &&
+			usage.CacheReadInputTokens == 1000 && usage.OutputTokens == 1000 && timeoutProbe.Matched() {
+			if !clientDisconnected {
+				if !clientOutputStarted && !c.Writer.Written() {
+					c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+						"type": "upstream_error", "message": openAIProviderTimeoutMessage,
+					}})
+				} else {
+					sendErrorEvent(openAIProviderTimeoutMessage)
+					if !clientDisconnected {
+						_, _ = writePendingString("data: [DONE]\n\n")
+						_ = flushBuffered()
+					}
+				}
+			}
+			return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+		}
 		if sawTerminalEvent && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
 		}
@@ -489,6 +507,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				firstTokenMs = &ms
 			}
 			dataBytes := []byte(data)
+			if account != nil && account.Platform == PlatformOpenAI {
+				timeoutProbe.Observe(data)
+			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
 				(eventType == "response.completed" || eventType == "response.done") {
@@ -1617,6 +1638,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("parse response: invalid json response")
 	}
 	usage := &usageValue
+	if isOpenAIProviderTimeout(account, *usage, body) {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAIProviderTimeoutMessage)
+	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
 
 	// Replace model in response if needed
@@ -1739,6 +1763,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)
+	}
+	if isOpenAIProviderTimeout(account, *usage, []byte(bodyText)) {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAIProviderTimeoutMessage)
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

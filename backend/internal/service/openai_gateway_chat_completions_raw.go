@@ -283,6 +283,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
+	timeoutProbe := &openAIProviderTimeoutProbe{}
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 
@@ -323,6 +324,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
+			if account != nil && account.Platform == PlatformOpenAI && trimmedPayload != "[DONE]" {
+				timeoutProbe.Observe(payload)
+			}
 			if c != nil && c.Request != nil {
 				MarkFirstSSEData(c.Request.Context(), trimmedPayload)
 			}
@@ -353,14 +357,32 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		if !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 			logger.L().Warn("openai chat_completions raw: stream read error",
-				zap.Error(err),
+				zap.Error(scanErr),
 				zap.String("request_id", requestID),
 			)
 		}
-	} else if !clientDisconnected && !clientOutputStarted {
+	}
+
+	if account != nil && account.Platform == PlatformOpenAI &&
+		usage.CacheReadInputTokens == 1000 && usage.OutputTokens == 1000 && timeoutProbe.Matched() {
+		if !clientDisconnected {
+			if !clientOutputStarted && !c.Writer.Written() {
+				writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", openAIProviderTimeoutMessage)
+			} else {
+				writeStreamHeaders()
+				_, _ = c.Writer.WriteString(buildChatStreamErrorSSE("upstream_timeout", openAIProviderTimeoutMessage))
+				_, _ = c.Writer.WriteString("data: [DONE]\n\n")
+				c.Writer.Flush()
+			}
+		}
+		return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+	}
+
+	if scanErr == nil && !clientDisconnected && !clientOutputStarted {
 		if refusalDetector.IsSilentRefusal() {
 			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
 		}
@@ -469,6 +491,10 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	var usage OpenAIUsage
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsedUsage
+	}
+	if isOpenAIProviderTimeout(account, usage, respBody) {
+		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", openAIProviderTimeoutMessage)
+		return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
 	}
 	responseModel := gjson.GetBytes(respBody, "model").String()
 	if requiresBillableGrokChatUsage(account, billingModel, upstreamModel, responseModel) && !hasBillableGrokChatUsage(usage) {

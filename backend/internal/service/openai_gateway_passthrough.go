@@ -1746,6 +1746,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	responseFailedPending := false
 	var bareErrorPayload []byte
 	bareErrorAccountSideEffectsPending := false
+	timeoutProbe := &openAIProviderTimeoutProbe{}
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// pendingLines 在首个可见输出前保留前导事件，确保无输出失败仍可安全 failover。
 	pendingLines := make([]string, 0, 8)
@@ -1825,6 +1826,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
+			if account != nil && account.Platform == PlatformOpenAI && trimmedData != "[DONE]" {
+				timeoutProbe.Observe(data)
+			}
 			if c != nil && c.Request != nil {
 				MarkFirstSSEData(c.Request.Context(), trimmedData)
 			}
@@ -2027,6 +2031,22 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 	}
 	ensureResponseFailedTerminal()
+	if account != nil && account.Platform == PlatformOpenAI &&
+		usage.CacheReadInputTokens == 1000 && usage.OutputTokens == 1000 && timeoutProbe.Matched() {
+		if !clientDisconnected {
+			if !clientOutputStarted && !c.Writer.Written() {
+				c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+					"type": "upstream_error", "message": openAIProviderTimeoutMessage,
+				}})
+			} else {
+				c.Header("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE(responseID, originalModel, nil, openAIProviderTimeoutMessage))
+				_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+				c.Writer.Flush()
+			}
+		}
+		return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+	}
 	if err := documentScanner.Err(); err != nil {
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
@@ -2131,6 +2151,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		// 兜底：尝试从 SSE 文本中解析 usage
 		usage = s.parseSSEUsageFromBody(string(body))
 	}
+	if isOpenAIProviderTimeout(account, *usage, body) {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAIProviderTimeoutMessage)
+	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -2214,6 +2237,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)
+	}
+	if isOpenAIProviderTimeout(account, *usage, []byte(bodyText)) {
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAIProviderTimeoutMessage)
 	}
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

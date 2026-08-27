@@ -525,6 +525,11 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
+	if payload, marshalErr := json.Marshal(finalResponse); marshalErr == nil &&
+		isOpenAIProviderTimeout(account, usage, payload) {
+		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", openAIProviderTimeoutMessage)
+		return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, "response.completed", false)
 	}
