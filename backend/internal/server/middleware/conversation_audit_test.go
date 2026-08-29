@@ -266,6 +266,8 @@ func TestConversationAuditRouteManifest(t *testing.T) {
 		{http.MethodPost, "/v1/images/generations", true},
 		{http.MethodPost, "/v1/videos", true},
 		{http.MethodPost, "/v1/alpha/search", true},
+		{http.MethodPost, "/v1/live", true},
+		{http.MethodPost, "/backend-api/codex/realtime/calls", true},
 		{http.MethodGet, "/v1/models", false},
 		{http.MethodGet, "/v1/usage", false},
 		{http.MethodGet, "/v1/sub2api/billing", false},

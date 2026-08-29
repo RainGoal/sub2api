@@ -34,6 +34,18 @@ func TestExtractRequestProtocolShapes(t *testing.T) {
 	}
 }
 
+func TestExtractRequestBatchImagesPreservesPromptsAndOmitsReferences(t *testing.T) {
+	body := `{"request":{"items":[{"prompt":"first prompt"},{"prompt":"second prompt","reference_images":[{"data":"QUJDRA=="}]}]}}`
+	result, err := ExtractRequest("openai_images", []byte(body), 1<<20)
+
+	require.NoError(t, err)
+	require.Len(t, result.Payload.Messages, 2)
+	require.Equal(t, "first prompt", result.Payload.Messages[0].Content[0].Text)
+	require.Equal(t, "second prompt", result.Payload.Messages[1].Content[0].Text)
+	require.Equal(t, "media_omitted", result.Payload.Messages[1].Content[1].Type)
+	require.NotContains(t, string(mustJSON(t, result.Payload)), "QUJDRA")
+}
+
 func TestExtractRequestPreservesToolsAndOmitsMedia(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,QUJDRA=="}}]},{"role":"assistant","tool_calls":[{"function":{"name":"search","arguments":"{\"q\":\"term\"}"}}]}]}`
 	result, err := ExtractRequest("openai_chat_completions", []byte(body), 1<<20)

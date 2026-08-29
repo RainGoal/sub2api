@@ -147,6 +147,9 @@ func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKe
 		}
 		model, moderationBody = parsed.Model, parsed.ModerationBody()
 	}
+	if len(moderationBody) > 0 {
+		middleware2.CaptureConversationAuditRequest(c, "openai_images", model, moderationBody)
+	}
 	if len(moderationBody) == 0 {
 		c.Set(securityAuditCompletedContextKey, true)
 		return true

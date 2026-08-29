@@ -109,6 +109,17 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "request_id is required")
 		return
 	}
+	if endpoint.IsGenerationRequest() {
+		auditProtocol := "openai_images"
+		if strings.HasPrefix(string(endpoint), "videos_") {
+			auditProtocol = "video"
+		}
+		auditBody := requestInfo.ModerationBody()
+		if len(auditBody) == 0 {
+			auditBody = body
+		}
+		middleware2.CaptureConversationAuditRequest(c, auditProtocol, requestModel, auditBody)
+	}
 
 	reqLog = reqLog.With(zap.String("model", requestModel))
 	setOpsRequestContext(c, requestModel, false)

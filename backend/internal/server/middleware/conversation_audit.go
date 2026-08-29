@@ -475,9 +475,19 @@ func classifyConversationAuditRoute(method, path string) (conversationAuditRoute
 			protocol: "grok_realtime", endpoint: "/v1/realtime", websocket: true,
 		}, true
 	}
+	if method == http.MethodPost && strings.HasSuffix(path, "/realtime/calls") {
+		return conversationAuditRoute{
+			protocol: "openai_live", endpoint: "/v1/realtime/calls",
+		}, true
+	}
 	if method == http.MethodGet && strings.Contains(path, "/live/") {
 		return conversationAuditRoute{
 			protocol: "openai_live", endpoint: "/v1/live/:call_id", websocket: true,
+		}, true
+	}
+	if method == http.MethodPost && strings.HasSuffix(path, "/live") {
+		return conversationAuditRoute{
+			protocol: "openai_live", endpoint: "/v1/live",
 		}, true
 	}
 	if method == http.MethodGet && strings.HasSuffix(path, "/responses") {
@@ -509,6 +519,8 @@ func classifyConversationAuditRoute(method, path string) (conversationAuditRoute
 		return conversationAuditRoute{protocol: "openai_images", endpoint: "/v1/images/generations"}, true
 	case strings.Contains(path, "/images/edits"):
 		return conversationAuditRoute{protocol: "openai_images", endpoint: "/v1/images/edits"}, true
+	case strings.Contains(path, "/images/batches") && !strings.Contains(path, "/cancel"):
+		return conversationAuditRoute{protocol: "openai_images", endpoint: "/v1/images/batches"}, true
 	case strings.Contains(path, "/videos") && !strings.Contains(path, "/content"):
 		return conversationAuditRoute{protocol: "video", endpoint: "/v1/videos"}, true
 	case strings.HasSuffix(path, "/tts"), strings.HasSuffix(path, "/stt"):

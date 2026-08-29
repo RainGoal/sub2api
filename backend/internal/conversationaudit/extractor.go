@@ -70,6 +70,9 @@ func ExtractRequest(protocol string, body []byte, maxBytes int) (ExtractResult, 
 		payload.Messages = append(payload.Messages, geminiContents(root["content"])...)
 	case "embeddings":
 		payload.Messages = append(payload.Messages, messageFromValue("user", root["input"])...)
+	case "openai_images":
+		payload.Messages = append(payload.Messages, extractReadableOptions(root)...)
+		payload.Messages = append(payload.Messages, batchImagePromptMessages(root)...)
 	default:
 		payload.Messages = append(payload.Messages, extractReadableOptions(root)...)
 		if len(payload.Messages) == 0 {
@@ -303,6 +306,32 @@ func extractReadableOptions(root map[string]any) []Message {
 		return nil
 	}
 	return []Message{{Role: "user", Content: content}}
+}
+
+func batchImagePromptMessages(root map[string]any) []Message {
+	request, ok := root["request"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := request["items"].([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]Message, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		content := contentItems(object["prompt"])
+		if references, ok := object["reference_images"].([]any); ok && len(references) > 0 {
+			content = append(content, ContentItem{Type: "media_omitted", MediaType: "image"})
+		}
+		if len(content) > 0 {
+			result = append(result, Message{Role: "user", Content: content})
+		}
+	}
+	return result
 }
 
 func normalizeRole(role string) string {
