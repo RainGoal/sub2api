@@ -77,6 +77,7 @@ type Config struct {
 	Ops                     OpsConfig                     `mapstructure:"ops"`
 	JWT                     JWTConfig                     `mapstructure:"jwt"`
 	Totp                    TotpConfig                    `mapstructure:"totp"`
+	ConversationAudit       ConversationAuditConfig       `mapstructure:"conversation_audit"`
 	WebAuthn                WebAuthnConfig                `mapstructure:"webauthn"`
 	LinuxDo                 LinuxDoConnectConfig          `mapstructure:"linuxdo_connect"`
 	WeChat                  WeChatConnectConfig           `mapstructure:"wechat_connect"`
@@ -2264,6 +2265,12 @@ func setDefaults() {
 
 	// TOTP
 	viper.SetDefault("totp.encryption_key", "")
+
+	// Conversation Audit encryption keys are deployment-owned secrets. They are
+	// intentionally separate from administrator settings and have no generated
+	// fallback because retained payloads must survive restarts and key rotation.
+	viper.SetDefault("conversation_audit.active_key_id", "")
+	viper.SetDefault("conversation_audit.keyring", "")
 
 	// Default
 	// Admin credentials are created via the setup flow (web wizard / CLI / AUTO_SETUP).

@@ -114,6 +114,10 @@ services:
       # Generate a secure key: openssl rand -hex 32
       - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
 
+      # Conversation Audit deployment-owned encryption keyring (optional)
+      - CONVERSATION_AUDIT_ACTIVE_KEY_ID=${CONVERSATION_AUDIT_ACTIVE_KEY_ID:-}
+      - CONVERSATION_AUDIT_KEYRING=${CONVERSATION_AUDIT_KEYRING:-}
+
       # =======================================================================
       # Timezone Configuration
       # This affects ALL time operations in the application:

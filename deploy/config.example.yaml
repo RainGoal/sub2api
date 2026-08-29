@@ -927,6 +927,22 @@ totp:
   encryption_key: ""
 
 # =============================================================================
+# Conversation Audit Encryption (Optional)
+# 会话审计加密配置（可选）
+# =============================================================================
+# This keyring is deployment-owned and is never stored in administrator settings.
+# Leave both values empty while Conversation Audit is disabled. Before enabling,
+# generate a 32-byte key with `openssl rand -hex 32` and use a stable key ID.
+# Rotation keeps old entries for reads and changes active_key_id for new writes.
+# 密钥环由部署环境持有，不会写入管理员设置。会话审计关闭时可保持为空；启用前请
+# 生成 32 字节密钥。轮换时保留旧密钥用于读取，并切换 active_key_id。
+conversation_audit:
+  active_key_id: ""
+  # Format: key-id=64-hex-or-base64,key-id-2=64-hex-or-base64
+  # 格式：密钥ID=64位十六进制或Base64,另一个密钥ID=...
+  keyring: ""
+
+# =============================================================================
 # LinuxDo Connect OAuth Login (SSO)
 # LinuxDo Connect OAuth 登录（用于 Sub2API 用户登录）
 # =============================================================================
