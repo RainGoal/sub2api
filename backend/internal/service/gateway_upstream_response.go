@@ -666,6 +666,10 @@ func (u *ClaudeUsage) hasObservedTokens() bool {
 // 不变式：UpstreamFailoverError 必须保持 result=nil——failover 重试成功后按成功请求
 // 计费，若同时返回部分 usage 会造成双重计费，此处显式拦截兜底。
 func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult *streamingResult, model, upstreamModel string, startTime time.Time, err error) *ForwardResult {
+	// [provider-semantic-timeout] 语义超时的 usage 是上游伪造的占位值，不能入账。
+	if errors.Is(err, errProviderSemanticTimeout) {
+		return nil
+	}
 	if streamResult == nil || !streamResult.usage.hasObservedTokens() {
 		return nil
 	}
@@ -719,6 +723,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 	scanner := bufio.NewScanner(resp.Body)
 	// 设置更大的buffer以处理长行
 	maxLineSize := defaultMaxLineSize
@@ -861,6 +867,10 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		if eventName == "error" {
 			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
 		}
+		// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(dataLine)
+		}
 
 		if dataLine == "" {
 			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
@@ -1001,10 +1011,23 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		return []string{block}, string(newData), usagePatch, nil
 	}
 
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（流读结束 / 终局事件后）判定，正常长响应中途累计到 1000 不受影响。
+	semanticTimeoutGuard := func() (*streamingResult, error, bool) {
+		if !providerSemanticTimeoutHitClaude(account, usage) {
+			return nil, nil, false
+		}
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.anthropic.stream", originalModel, timeoutCapture.Snapshot(), usage)), true
+	}
+
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if result, err, hit := semanticTimeoutGuard(); hit {
+					return result, err
+				}
 				// 上游完成，返回结果
 				if !sawTerminalEvent {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
@@ -1013,6 +1036,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 			if ev.err != nil {
 				if sawTerminalEvent {
+					if result, err, hit := semanticTimeoutGuard(); hit {
+						return result, err
+					}
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 				}
 				// 检测 context 取消（客户端断开会导致 context 取消，进而影响上游读取）
@@ -1421,6 +1447,12 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 				body = newBody
 			}
 		}
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, &response.Usage) {
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.anthropic.nonstream", originalModel, string(body), &response.Usage))
 	}
 
 	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。

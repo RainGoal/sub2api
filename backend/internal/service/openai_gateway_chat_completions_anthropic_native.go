@@ -136,9 +136,9 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, billingModel)
 
 	if clientStream {
-		return s.handleCCStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, includeUsage)
+		return s.handleCCStreamingFromNativeAnthropic(resp, c, account, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, includeUsage)
 	}
-	return s.handleCCBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
+	return s.handleCCBufferedFromNativeAnthropic(resp, c, account, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
 }
 
 // handleCCBufferedFromNativeAnthropic reads Anthropic SSE events, assembles the
@@ -146,6 +146,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -163,6 +164,8 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
 	streamInterval := s.anthropicNativeStreamInterval()
@@ -220,6 +223,10 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		if !ok {
 			continue
 		}
+		// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -259,6 +266,12 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	if finalResp == nil {
 		writeChatCompletionsError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, &usage) {
+		return nil, rejectChatCompletionsSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("openai.chat_completions.native_anthropic_buffered", originalModel, timeoutCapture.Snapshot(), &usage))
 	}
 
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
@@ -303,6 +316,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -331,6 +345,8 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -381,6 +397,16 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			)
 		}
 		return resultWithUsage(), fmt.Errorf("stream data interval timeout")
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（终局事件 / 流读结束）判定。
+	semanticTimeoutGuard := func() (*OpenAIForwardResult, error, bool) {
+		if !providerSemanticTimeoutHitClaude(account, &usage) {
+			return nil, nil, false
+		}
+		return nil, rejectChatCompletionsSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("openai.chat_completions.native_anthropic_stream", originalModel, timeoutCapture.Snapshot(), &usage)), true
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
@@ -462,6 +488,10 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		if !ok {
 			continue
 		}
+		// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -469,11 +499,17 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		}
 
 		if processAnthropicEvent(&event) {
+			if result, err, hit := semanticTimeoutGuard(); hit {
+				return result, err
+			}
 			return resultWithUsage(), nil
 		}
 	}
 
 	// Finalize both state machines（客户端已断开时仍执行，保证 usage 汇总完整）。
+	if result, err, hit := semanticTimeoutGuard(); hit {
+		return result, err
+	}
 	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
 	for _, resEvt := range finalResEvents {
 		ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)

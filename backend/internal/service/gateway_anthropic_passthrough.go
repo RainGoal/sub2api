@@ -419,6 +419,8 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	var firstTokenMs *int
 	clientDisconnected := false
 	sawTerminalEvent := false
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -501,10 +503,23 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 	inPartialEvent := false
 
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（流读结束 / 终局事件后）判定。
+	semanticTimeoutGuard := func() (*streamingResult, error, bool) {
+		if !providerSemanticTimeoutHitClaude(account, usage) {
+			return nil, nil, false
+		}
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.anthropic.passthrough_stream", model, timeoutCapture.Snapshot(), usage)), true
+	}
+
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if result, err, hit := semanticTimeoutGuard(); hit {
+					return result, err
+				}
 				if !clientDisconnected {
 					// 兜底补刷，确保最后一个未以空行结尾的事件也能及时送达客户端。
 					flusher.Flush()
@@ -522,6 +537,9 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 			if ev.err != nil {
 				if sawTerminalEvent {
+					if result, err, hit := semanticTimeoutGuard(); hit {
+						return result, err
+					}
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
 				}
 				if clientDisconnected {
@@ -540,6 +558,10 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
+				// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+				if providerSemanticTimeoutAccount(account) {
+					timeoutCapture.Observe(trimmed)
+				}
 				if c != nil && c.Request != nil {
 					MarkFirstSSEData(c.Request.Context(), trimmed)
 				}
@@ -881,6 +903,11 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, usage) {
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.anthropic.passthrough_nonstream", gjson.GetBytes(body, "model").String(), string(body), usage))
+	}
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {

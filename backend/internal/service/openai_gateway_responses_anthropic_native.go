@@ -138,9 +138,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	}
 
 	if clientStream {
-		return s.handleResponsesStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
+		return s.handleResponsesStreamingFromNativeAnthropic(resp, c, account, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
 	}
-	return s.handleResponsesBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
+	return s.handleResponsesBufferedFromNativeAnthropic(resp, c, account, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, clientToolMapping)
 }
 
 // handleResponsesBufferedFromNativeAnthropic reads Anthropic SSE events, assembles
@@ -148,6 +148,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -166,6 +167,8 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
 	streamInterval := s.anthropicNativeStreamInterval()
@@ -225,6 +228,10 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		if !ok {
 			continue
 		}
+		// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -264,6 +271,12 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	if finalResp == nil {
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, &usage) {
+		return nil, rejectResponsesSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("openai.responses.native_anthropic_buffered", originalModel, timeoutCapture.Snapshot(), &usage))
 	}
 
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
@@ -312,6 +325,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -338,6 +352,8 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	var firstTokenMs *int
 	firstChunk := true
 	clientDisconnected := false
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -456,6 +472,10 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		if !ok {
 			continue
 		}
+		// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -463,6 +483,13 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		}
 
 		processAnthropicEvent(&event)
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（流读结束）判定。
+	if providerSemanticTimeoutHitClaude(account, &usage) {
+		return nil, rejectResponsesSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("openai.responses.native_anthropic_stream", originalModel, timeoutCapture.Snapshot(), &usage))
 	}
 
 	// Finalize state machine（客户端已断开时仍推进，保证 usage 汇总完整；仅在

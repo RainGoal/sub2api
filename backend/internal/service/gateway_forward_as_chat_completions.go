@@ -195,9 +195,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime, includeUsage)
+		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, includeUsage)
 	} else {
-		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime)
 	}
 
 	return result, handleErr
@@ -230,6 +230,7 @@ func extractCCReasoningEffortFromBody(body []byte, modelCandidates ...string) *s
 func (s *GatewayService) handleCCBufferedFromAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
@@ -246,6 +247,8 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -261,6 +264,9 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		payload, ok := extractOpenAISSEDataLine(scanner.Text())
 		if !ok {
 			continue
+		}
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
 		}
 		if c != nil && c.Request != nil {
 			MarkFirstSSEData(c.Request.Context(), payload)
@@ -321,6 +327,12 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
 
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, &usage) {
+		return nil, rejectChatCompletionsSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.cc_from_anthropic.buffered", originalModel, timeoutCapture.Snapshot(), &usage))
+	}
+
 	// Update usage from accumulated delta
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
 		finalResp.Usage = apicompat.AnthropicUsage{
@@ -369,6 +381,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 func (s *GatewayService) handleCCStreamingFromAnthropic(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
@@ -396,6 +409,8 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -415,6 +430,16 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			Duration:        time.Since(startTime),
 			FirstTokenMs:    firstTokenMs,
 		}
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（终局事件 / 流读结束）判定。
+	semanticTimeoutGuard := func() (*ForwardResult, error, bool) {
+		if !providerSemanticTimeoutHitClaude(account, &usage) {
+			return nil, nil, false
+		}
+		return nil, rejectChatCompletionsSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.cc_from_anthropic.stream", originalModel, timeoutCapture.Snapshot(), &usage)), true
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
@@ -475,6 +500,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		if !ok {
 			continue
 		}
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 		if c != nil && c.Request != nil {
 			MarkFirstSSEData(c.Request.Context(), payload)
 		}
@@ -485,6 +513,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		}
 
 		if processAnthropicEvent(&event) {
+			if result, err, hit := semanticTimeoutGuard(); hit {
+				return result, err
+			}
 			return resultWithUsage(), nil
 		}
 	}
@@ -499,6 +530,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	// Finalize both state machines
+	if result, err, hit := semanticTimeoutGuard(); hit {
+		return result, err
+	}
 	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
 	for _, resEvt := range finalResEvents {
 		ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)

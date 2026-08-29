@@ -258,7 +258,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var streamEarlyErr error
 	terminalFailurePending := false
 	failureDelivered := false
-	timeoutProbe := &openAIProviderTimeoutProbe{}
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 	suppressCurrentEvent := false
 	var bareErrorPayload []byte
 	bareErrorAccountSideEffectsPending := false
@@ -384,22 +385,23 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				failureDelivered = true
 			}
 		}
-		if account != nil && account.Platform == PlatformOpenAI &&
-			usage.CacheReadInputTokens == 1000 && usage.OutputTokens == 1000 && timeoutProbe.Matched() {
-			if !clientDisconnected {
-				if !clientOutputStarted && !c.Writer.Written() {
+		// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+		if providerSemanticTimeoutHitOpenAI(account, *usage) {
+			return nil, rejectProviderSemanticTimeout(c, account,
+				providerSemanticTimeoutOpenAIReport("openai.responses.stream", originalModel, timeoutCapture.Snapshot(), *usage),
+				func() {
 					c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
-						"type": "upstream_error", "message": openAIProviderTimeoutMessage,
+						"type": "upstream_error", "message": providerSemanticTimeoutMessage,
 					}})
-				} else {
-					sendErrorEvent(openAIProviderTimeoutMessage)
+				},
+				func() {
+					sendErrorEvent(providerSemanticTimeoutMessage)
 					if !clientDisconnected {
 						_, _ = writePendingString("data: [DONE]\n\n")
 						_ = flushBuffered()
 					}
-				}
-			}
-			return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+				},
+			)
 		}
 		if sawTerminalEvent && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
@@ -507,8 +509,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				firstTokenMs = &ms
 			}
 			dataBytes := []byte(data)
-			if account != nil && account.Platform == PlatformOpenAI {
-				timeoutProbe.Observe(data)
+			if providerSemanticTimeoutAccount(account) {
+				timeoutCapture.Observe(data)
 			}
 			eventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			if codexFailureTerminal && sawBareError && !sawResponseFailed &&
@@ -1638,8 +1640,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("parse response: invalid json response")
 	}
 	usage := &usageValue
-	if isOpenAIProviderTimeout(account, *usage, body) {
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAIProviderTimeoutMessage)
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitOpenAI(account, *usage) {
+		return nil, rejectProviderSemanticTimeoutWithWriter(c, account,
+			providerSemanticTimeoutOpenAIReport("openai.responses.json", originalModel, string(body), *usage),
+			func() { _ = s.writeOpenAINonStreamingProtocolError(resp, c, providerSemanticTimeoutMessage) })
 	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
 
@@ -1764,8 +1769,11 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		}
 		body = []byte(bodyText)
 	}
-	if isOpenAIProviderTimeout(account, *usage, []byte(bodyText)) {
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, openAIProviderTimeoutMessage)
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitOpenAI(account, *usage) {
+		return nil, rejectProviderSemanticTimeoutWithWriter(c, account,
+			providerSemanticTimeoutOpenAIReport("openai.responses.sse_to_json", originalModel, bodyText, *usage),
+			func() { _ = s.writeOpenAINonStreamingProtocolError(resp, c, providerSemanticTimeoutMessage) })
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)

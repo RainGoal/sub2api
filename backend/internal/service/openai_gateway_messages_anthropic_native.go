@@ -226,6 +226,11 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, usage) {
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("openai.messages.native_anthropic_buffered", originalModel, string(body), usage))
+	}
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {
@@ -304,6 +309,8 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 	var firstTokenMs *int
 	clientDisconnected := false
 	sawTerminalEvent := false
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -386,10 +393,23 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 	}
 	inPartialEvent := false
 
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（流读结束 / 终局事件后）判定。
+	semanticTimeoutGuard := func() (*OpenAIForwardResult, error, bool) {
+		if !providerSemanticTimeoutHitClaude(account, usage) {
+			return nil, nil, false
+		}
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("openai.messages.native_anthropic_stream", originalModel, timeoutCapture.Snapshot(), usage)), true
+	}
+
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if result, err, hit := semanticTimeoutGuard(); hit {
+					return result, err
+				}
 				if !clientDisconnected {
 					flusher.Flush()
 				}
@@ -401,6 +421,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			}
 			if ev.err != nil {
 				if sawTerminalEvent {
+					if result, err, hit := semanticTimeoutGuard(); hit {
+						return result, err
+					}
 					return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), nil
 				}
 				if clientDisconnected {
@@ -422,6 +445,10 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
+				// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+				if providerSemanticTimeoutAccount(account) {
+					timeoutCapture.Observe(trimmed)
+				}
 				if c != nil && c.Request != nil {
 					MarkFirstSSEData(c.Request.Context(), trimmed)
 				}

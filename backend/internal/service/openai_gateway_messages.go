@@ -619,10 +619,11 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
-	if payload, marshalErr := json.Marshal(finalResponse); marshalErr == nil &&
-		isOpenAIProviderTimeout(account, usage, payload) {
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", openAIProviderTimeoutMessage)
-		return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitOpenAI(account, usage) {
+		body, _ := json.Marshal(finalResponse)
+		return nil, rejectAnthropicSemanticTimeout(c, account,
+			providerSemanticTimeoutOpenAIReport("openai.messages.buffered", originalModel, string(body), usage))
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, "response.completed", false)
@@ -918,7 +919,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	var streamFailoverErr error
 	var streamNonFailoverErr error
 	terminalEventType := ""
-	timeoutProbe := &openAIProviderTimeoutProbe{}
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 	searchCount := 0
 	streamSearchSeen := make(map[string]struct{})
 	countSearch := account != nil && account.IsGrok()
@@ -987,8 +989,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 		observer.ObserveOpenAI([]byte(payload), event.Type)
-		if account != nil && account.Platform == PlatformOpenAI {
-			timeoutProbe.Observe(payload)
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
 		}
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
 
@@ -1109,18 +1111,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if streamFailoverErr != nil {
 			return resultWithUsage(), streamFailoverErr
 		}
-		if account != nil && account.Platform == PlatformOpenAI &&
-			usage.CacheReadInputTokens == 1000 && usage.OutputTokens == 1000 && timeoutProbe.Matched() {
-			if !clientDisconnected {
-				if !clientOutputStarted && !c.Writer.Written() {
-					writeAnthropicError(c, http.StatusBadGateway, "api_error", openAIProviderTimeoutMessage)
-				} else {
-					writeStreamHeaders()
-					_, _ = fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE("api_error", openAIProviderTimeoutMessage))
-					c.Writer.Flush()
-				}
-			}
-			return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+		// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+		if providerSemanticTimeoutHitOpenAI(account, usage) {
+			return nil, rejectAnthropicSemanticTimeout(c, account,
+				providerSemanticTimeoutOpenAIReport("openai.messages.stream", originalModel, timeoutCapture.Snapshot(), usage))
 		}
 		if streamNonFailoverErr != nil {
 			return resultWithUsage(), streamNonFailoverErr

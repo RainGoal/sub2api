@@ -142,6 +142,14 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	// [provider-semantic-timeout] 兜底：任何未接入协议化 502 的出口（WS/图片等）
+	// 也不得为上游伪造的 1000/1000 占位 usage 扣费。可整体移除。
+	if providerSemanticTimeoutHitOpenAI(input.Account, result.Usage) {
+		logProviderSemanticTimeoutBillingSkip(input.Account, result.Model, result.RequestID,
+			result.Usage.InputTokens, result.Usage.OutputTokens,
+			result.Usage.CacheReadInputTokens, result.Usage.CacheCreationInputTokens)
+		return nil
+	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}

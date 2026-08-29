@@ -201,9 +201,9 @@ func (s *GatewayService) ForwardAsResponses(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		result, handleErr = s.handleResponsesStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
 	} else {
-		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, account, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
 	}
 
 	return result, handleErr
@@ -347,6 +347,7 @@ func parseAnthropicSSEField(line, field string) (string, bool) {
 func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
@@ -365,6 +366,8 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -381,6 +384,9 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		payload, ok := parseAnthropicSSEField(dataLine, "data")
 		if !ok {
 			continue
+		}
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
 		}
 		if c != nil && c.Request != nil {
 			MarkFirstSSEData(c.Request.Context(), payload)
@@ -448,6 +454,12 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
 
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitClaude(account, &usage) {
+		return nil, rejectResponsesSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.responses_from_anthropic.buffered", originalModel, timeoutCapture.Snapshot(), &usage))
+	}
+
 	// Update usage from accumulated delta
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
 		finalResp.Usage = apicompat.AnthropicUsage{
@@ -498,6 +510,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 func (s *GatewayService) handleResponsesStreamingResponse(
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 	reasoningEffort *string,
@@ -521,6 +534,8 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -540,6 +555,16 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			Duration:        time.Since(startTime),
 			FirstTokenMs:    firstTokenMs,
 		}
+	}
+
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	// 只在 usage 终局化（终局事件 / 流读结束）判定。
+	semanticTimeoutGuard := func() (*ForwardResult, error, bool) {
+		if !providerSemanticTimeoutHitClaude(account, &usage) {
+			return nil, nil, false
+		}
+		return nil, rejectResponsesSemanticTimeout(c, account,
+			providerSemanticTimeoutClaudeReport("gateway.responses_from_anthropic.stream", originalModel, timeoutCapture.Snapshot(), &usage)), true
 	}
 
 	// processEvent handles a single parsed Anthropic SSE event.
@@ -627,6 +652,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		if !ok {
 			continue
 		}
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 		if c != nil && c.Request != nil {
 			MarkFirstSSEData(c.Request.Context(), payload)
 		}
@@ -642,6 +670,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		}
 
 		if processEvent(&event) {
+			if result, err, hit := semanticTimeoutGuard(); hit {
+				return result, err
+			}
 			return resultWithUsage(), nil
 		}
 	}
@@ -653,6 +684,10 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 				zap.String("request_id", requestID),
 			)
 		}
+	}
+
+	if result, err, hit := semanticTimeoutGuard(); hit {
+		return result, err
 	}
 
 	return finalizeStream()

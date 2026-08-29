@@ -242,6 +242,8 @@ type ccStreamScanState struct {
 	// 非 nil 时调用方必须跳过 finalize 并返回 usage-incomplete 错误，避免
 	// 把上游截断伪装成正常收尾。
 	Err error
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	Capture providerSemanticTimeoutCapture
 }
 
 // scanCCStream 驱动两条 CC 回退路径共享的 SSE 读循环：提取 data 行、在 [DONE]
@@ -251,6 +253,7 @@ type ccStreamScanState struct {
 func (s *OpenAIGatewayService) scanCCStream(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	logPrefix string,
 	requestID string,
 	startTime time.Time,
@@ -282,6 +285,10 @@ func (s *OpenAIGatewayService) scanCCStream(
 
 		if u := extractCCStreamUsage(payload); u != nil {
 			st.Usage = *u
+		}
+		// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+		if providerSemanticTimeoutAccount(account) {
+			st.Capture.Observe(payload)
 		}
 
 		var chunk apicompat.ChatCompletionsChunk

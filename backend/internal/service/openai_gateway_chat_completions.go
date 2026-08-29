@@ -525,10 +525,11 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
-	if payload, marshalErr := json.Marshal(finalResponse); marshalErr == nil &&
-		isOpenAIProviderTimeout(account, usage, payload) {
-		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", openAIProviderTimeoutMessage)
-		return nil, fmt.Errorf("openai provider timeout: %s", openAIProviderTimeoutMessage)
+	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+	if providerSemanticTimeoutHitOpenAI(account, usage) {
+		body, _ := json.Marshal(finalResponse)
+		return nil, rejectChatCompletionsSemanticTimeout(c, account,
+			providerSemanticTimeoutOpenAIReport("openai.chat_completions.buffered", originalModel, string(body), usage))
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, "response.completed", false)
@@ -648,6 +649,8 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	// [provider-semantic-timeout] 仅用于命中时记录上游原始内容，不参与判定。
+	timeoutCapture := &providerSemanticTimeoutCapture{}
 	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
@@ -720,6 +723,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
 		s.parseSSEUsageBytesWithType([]byte(payload), event.Type, &usage)
+		if providerSemanticTimeoutAccount(account) {
+			timeoutCapture.Observe(payload)
+		}
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
 		if isTerminalEvent {
@@ -867,6 +873,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		if streamNonFailoverErr != nil {
 			return resultWithUsage(), streamNonFailoverErr
+		}
+		// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
+		if providerSemanticTimeoutHitOpenAI(account, usage) {
+			return nil, rejectChatCompletionsSemanticTimeout(c, account,
+				providerSemanticTimeoutOpenAIReport("openai.chat_completions.stream", originalModel, timeoutCapture.Snapshot(), usage))
 		}
 		if finalChunks := apicompat.FinalizeResponsesChatStream(state); len(finalChunks) > 0 && !clientDisconnected {
 			for _, chunk := range finalChunks {

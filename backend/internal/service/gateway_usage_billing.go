@@ -620,6 +620,15 @@ type recordUsageOpts struct {
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	// [provider-semantic-timeout] 兜底：任何未接入协议化 502 的出口（WS/图片等）
+	// 也不得为上游伪造的 1000/1000 占位 usage 扣费。可整体移除。
+	if input != nil && input.Result != nil &&
+		providerSemanticTimeoutHitClaude(input.Account, &input.Result.Usage) {
+		logProviderSemanticTimeoutBillingSkip(input.Account, input.Result.Model, input.Result.RequestID,
+			input.Result.Usage.InputTokens, input.Result.Usage.OutputTokens,
+			input.Result.Usage.CacheReadInputTokens, input.Result.Usage.CacheCreationInputTokens)
+		return nil
+	}
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,
