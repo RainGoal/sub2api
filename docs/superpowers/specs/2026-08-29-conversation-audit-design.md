@@ -9,9 +9,9 @@
 
 Add an optional, independently removable conversation audit module that stores the
 readable content of authenticated model requests and the final client-visible
-responses. The module records successful, failed, timed-out, interrupted, and
-degraded requests without changing gateway responses, billing, scheduling, or the
-existing security audit systems.
+responses. The module records successful, failed, timed-out, cancelled, partial,
+unknown-outcome, and degraded captures without changing gateway responses, billing,
+scheduling, or the existing security audit systems.
 
 The deployment serves more than 100,000 requests per day and may have roughly
 1,000 concurrent streaming connections. To bound database and runtime costs, audit
@@ -22,8 +22,9 @@ by default.
 ## Goals
 
 1. Record readable request and response conversations for every classified model
-   route after API key authentication succeeds, including later authorization,
-   validation, local, and upstream failures.
+   route after an API key credential resolves to a stable identity, including later
+   key-state, IP, user, group, subscription, quota, balance, validation, local, and
+   upstream failures.
 2. Preserve the response as it was visible to the client after protocol conversion
    and response rewriting.
 3. Support OpenAI, Claude, Gemini, SSE, and Responses WebSocket traffic without
@@ -83,6 +84,8 @@ The backend implementation is a vertical module under
   encryption/decryption.
 - `WorkerPool`: a bounded set of workers for encoding and PostgreSQL writes. There is
   no audit goroutine or Zstd encoder per client connection.
+- `LeaseManager`: owns one central active-session registry and renews durable capture
+  leases in batches; there is no heartbeat goroutine per connection.
 - `Repository`: raw SQL access for the partitioned audit table, keyset listing,
   details, and safe deletion.
 - `RetentionManager`: creates future partitions, marks abandoned captures, and drops
@@ -124,9 +127,11 @@ but the boundary must retain these ownership rules:
 
 1. A route-coverage manifest classifies the request as a model execution, streaming
    continuation, or explicit exclusion.
-2. After API key authentication succeeds, a gateway middleware starts a metadata-only
-   audit session before group authorization, composite target selection, semantic
-   body validation, account selection, billing checks, or upstream side effects.
+2. In both standard and Google API-key middleware, immediately after `GetByKey`
+   succeeds and the resolved identity is stored for operations fallback, a shared
+   hook starts a metadata-only audit session. It runs before key-state, IP, user,
+   group, subscription, quota, balance, composite target, semantic body validation,
+   account selection, billing, or upstream checks.
 3. Downstream middleware and handlers attach group, account, effective model, and
    other metadata when those values become available. Failure before any of them is
    known still produces a valid record with nullable fields.
@@ -141,14 +146,21 @@ but the boundary must retain these ownership rules:
    terminal metadata to the worker pool without replacing the original error.
 8. Workers upsert by application-generated audit ID and immutable `created_at`, so
    request and response writes are safe if they complete out of order.
-9. Records left in `capturing` after a bounded stale interval are marked
-   `interrupted` by the retention manager.
+9. The central lease manager registers active `(created_at, audit_id)` pairs, renews
+   them every 30 seconds in bounded batches, and extends `lease_expires_at` to two
+   minutes in the future. Initial and terminal writes also carry the owner instance
+   ID and current lease state.
+10. Under an advisory lock, the retention manager finalizes only `capturing` rows
+   whose durable lease expired. A later valid terminal job from the same owner may
+   refine the unknown outcome before its write deadline, but no update may return a
+   finalized row to `capturing`.
 
-Authentication failures, health checks, admin APIs, and requests rejected by
-middleware before API key identity is established do not create conversation records.
-This explicitly includes the current pre-authentication body-size rejection path,
-even when the request supplied a key that was never validated. Existing operations
-logging continues to handle those requests.
+Missing/unknown API keys, lookup overload/failure, health checks, admin APIs, and
+requests rejected before stable API key identity is established do not create
+conversation records. This explicitly includes the current pre-lookup body-size
+rejection path, even when the request supplied a key that was never validated.
+Known but disabled or otherwise unauthorized keys are recorded. Existing operations
+logging continues to handle all of those requests.
 
 ## Canonical Payloads
 
@@ -284,12 +296,17 @@ other heuristics.
 
 Create a new PostgreSQL table `conversation_audit_records` partitioned by UTC
 `created_at` day. It has no foreign keys and adds no columns to core tables.
+A compact `conversation_audit_delete_tombstones` table contains only
+`(created_at, audit_id, deleted_at)` for manually deleted rows and has a composite
+primary key. It has no payload or foreign key and prevents any late worker from
+recreating a deleted record.
 
 ### Metadata columns
 
 - `audit_id UUID` generated by the application; `(created_at, audit_id)` is the
   partition-compatible primary key.
-- `created_at`, `completed_at`, and `updated_at`.
+- `created_at`, `completed_at`, `updated_at`, `owner_instance_id`, and
+  `lease_expires_at`.
 - `request_id` and nullable `session_id`.
 - User, API key, group, and account IDs plus short display-name snapshots.
 - Protocol, inbound endpoint, requested model, effective model, and stream/WS mode.
@@ -297,7 +314,8 @@ Create a new PostgreSQL table `conversation_audit_records` partitioned by UTC
   `capture_status`.
 - Request/response original, stored, compressed, and encrypted byte counts.
 - Request/response truncation flags and omitted counts.
-- Payload codec version, encryption key ID, and optional stable degraded reason.
+- Per-side payload codec version and encryption key ID, plus an optional stable
+  degraded reason.
 - `request_payload BYTEA` and `response_payload BYTEA`.
 
 `record_state` is `capturing` or `finalized`. Finalized `outcome_status` values are:
@@ -306,7 +324,9 @@ Create a new PostgreSQL table `conversation_audit_records` partitioned by UTC
 - `error`: a local or upstream error response.
 - `timeout`: timeout before a complete response.
 - `partial`: some client-visible output was sent before disconnection or failure.
-- `interrupted`: the process stopped or a capture was abandoned before finalization.
+- `cancelled`: the client or request context cancelled before any output was sent.
+- `unknown`: the owner lease expired or capture detached before the client outcome
+  could be observed.
 
 `capture_status` independently describes audit fidelity:
 
@@ -316,10 +336,14 @@ Create a new PostgreSQL table `conversation_audit_records` partitioned by UTC
 - `degraded`: resource exhaustion, unsupported content, or an audit failure caused
   partial or unavailable payloads.
 
-This separation preserves a successful client outcome when capture is degraded.
+An owner-lease expiry finalizes as `outcome_status=unknown`,
+`capture_status=degraded`, and reason `owner_lease_expired`; it never invents a
+client failure. This separation preserves a successful client outcome when capture
+is degraded.
 Request and response jobs use exactly
-`ON CONFLICT (created_at, audit_id) DO UPDATE`; `created_at` is immutable and carried
-by every job. Updates may only advance known fields and must not move a finalized row
+`ON CONFLICT (created_at, audit_id) DO UPDATE`; both insert and update execute only
+when no matching delete tombstone exists. `created_at` is immutable and carried by
+every job. Updates may only advance known fields and must not move a finalized row
 back to `capturing`.
 
 ### Payload encoding
@@ -330,8 +354,8 @@ The exact order is mandatory:
 versioned canonical JSON -> Zstd fast compression -> AES-256-GCM -> BYTEA
 ```
 
-The binary envelope stores a codec version, bounded key ID, and raw
-nonce/ciphertext/tag bytes. It is not Base64 encoded. The implementation may adapt
+Each request and response envelope stores its own codec version, bounded key ID, and
+raw nonce/ciphertext/tag bytes. It is not Base64 encoded. The implementation may adapt
 the existing AES-GCM primitive, but it does not use the current string/Base64
 `SecretEncryptor` API.
 
@@ -339,10 +363,15 @@ Payload keys are a deployment-owned persistent keyring, not administrator settin
 and not an auto-generated per-process TOTP key. Every instance must receive the same
 key IDs and 32-byte keys through secret-backed configuration. One key ID is active
 for new writes; retained keys remain decrypt-only. Rotation adds a new key and makes
-it active without rewriting old rows. An old key may be removed only after no
-retained row references it; otherwise detail reads report payload unavailable.
+it active without rewriting old rows. Request and response jobs select their active
+key independently, persist `request_key_id`/`response_key_id`, and may use different
+keys across a rotation. An old key may be removed only after neither key-ID column in
+any retained partition references it; otherwise detail reads report payload
+unavailable.
 Enabling fails when the active key is absent, invalid, duplicated, or unavailable.
-Keys and plaintext are never persisted in ordinary settings or logs.
+Keys and plaintext are never persisted in ordinary settings or logs. AES-GCM
+additional authenticated data binds ciphertext to `audit_id`, `created_at`, payload
+side, codec version, and key ID so payloads cannot be swapped between rows or sides.
 
 Decompression is attempted only after successful authenticated decryption, and
 decoded size is bounded to prevent decompression bombs.
@@ -358,6 +387,8 @@ decoded size is bounded to prevent decompression bombs.
 - No default partition silently accumulates unbounded data.
 - Request and response jobs have an absolute two-minute persistence deadline. Once
   expired they are discarded and cannot write or retry later.
+- Tombstones are removed only after the corresponding daily data partition no longer
+  exists, so their lifetime covers every possible late capture write.
 
 ### Indexes
 
@@ -435,8 +466,9 @@ preserve degraded metadata, but its own exhaustion must also remain non-blocking
 | Database outage persists | release payload, increment loss/degraded metrics, gateway unchanged |
 | Partition missing | audit write failure/degradation; trigger partition health alert |
 | Client disconnect after output | preserve collected output and mark `partial` |
+| Client/context cancellation before output | mark `cancelled`; after output mark `partial` |
 | Timeout before complete response | mark `timeout`, or `partial` if output was sent |
-| Process crash | stale `capturing` records later become `interrupted` |
+| Process crash or expired owner lease | finalize as outcome `unknown`, capture `degraded`; a later valid owner finish may refine it before the write deadline |
 | Payload decryption failure in admin detail | return stable admin error without logging payload |
 | Module panic | recover at audit boundary; original response and billing remain unchanged |
 
@@ -491,16 +523,27 @@ HTTP caches.
 
 - Single deletion uses partition date and audit ID. Only finalized records with
   `completed_at` at least five minutes old are eligible; this is longer than the
-  two-minute asynchronous write deadline, so a deleted row cannot be recreated by a
-  late upsert.
+  normal asynchronous write deadline and avoids deleting an actively settling row.
+  In the same transaction, deletion inserts a tombstone before removing the row;
+  every later upsert checks that tombstone, which is the authoritative no-resurrection
+  guarantee.
 - Filter deletion requires an explicit valid time range no longer than 31 days. The
   24-hour rule also applies when filtering by protocol, endpoint, or model.
 - Preview returns matched count, normalized filters, a high-water mark, and a
   short-lived confirmation token bound to the current administrator.
+- Preview uses a five-second request deadline and three-second PostgreSQL statement
+  timeout. Timeout returns no confirmation token.
 - Confirmation deletes only rows at or below the preview high-water mark.
 - Preview counts stop at 5,001 and return `count=5000, has_more=true` when capped.
-  One confirmation deletes at most 5,000 eligible rows in batches of 500 with a
-  ten-second statement timeout; larger sets require another preview/confirmation.
+  One confirmation deletes at most 5,000 eligible rows in batches of 500 inside one
+  transaction with a ten-second end-to-end request deadline. Any batch error or
+  timeout rolls back the entire transaction, so partial success is never returned.
+  Each batch inserts its tombstones before deleting rows. Larger sets require another
+  preview/confirmation.
+- A confirmation token remains retryable until expiry and always carries the same
+  normalized filters and high-water mark. Retrying after an unknown commit is
+  idempotent: already-deleted rows stay absent and the response reports the remaining
+  deleted count, which may be zero.
 - A whole-day filter may drop a partition only when it covers the complete partition,
   has no additional row filter, and the partition ended before the current UTC day.
   The current or future partition is never dropped by an admin deletion.
@@ -549,8 +592,8 @@ Runtime and metrics must expose, at minimum:
 - current buffered bytes and configured budget;
 - payload and reserved metadata queue depth/capacity;
 - worker active count and processing latency;
-- completed, error, timeout, partial, and interrupted outcome counts, plus complete,
-  truncated, metadata-only, and degraded capture counts;
+- completed, error, timeout, cancelled, partial, and unknown outcome counts, plus
+  complete, truncated, metadata-only, and degraded capture counts;
 - queue-full, budget-full, extractor-unsupported, encode-failed, and write-failed
   counts;
 - request/response original, stored, compressed, and encrypted bytes;
@@ -618,7 +661,8 @@ depth, P50/P95/P99 latency, error rate, and raw repeated-run results.
 - Detail decrypt/decompress and independent payload availability.
 - Safe single and preview/confirm filtered deletion, write-deadline expiry, and proof
   that deleted rows cannot be resurrected by late jobs.
-- Stale `capturing` transition to `interrupted`.
+- Owner lease renewal/expiry and stale `capturing` transition to
+  `unknown`/`degraded`, including a late valid owner finish.
 - Database, partition, and encryption failure isolation, persistent keyring restart,
   rotation, retained-key reads, and premature key removal.
 
@@ -632,11 +676,14 @@ depth, P50/P95/P99 latency, error rate, and raw repeated-run results.
 - All current protocol and cross-protocol forwarding paths.
 - A route-manifest test classifies every gateway method/path and fails closed for new
   unclassified routes.
-- A parameterized failure matrix covers memory exhaustion, queue saturation, codec
-  failure, database outage, missing partition, worker panic, shutdown/drain, and
-  stale capture recovery. Every case asserts unchanged client bytes/status/headers,
-  account scheduling, billing amount, balance, usage rows, and existing prompt/security
-  audit behavior.
+- A parameterized failure matrix covers disabled no-op behavior, extractor
+  rejection/unsupported content, memory exhaustion, queue saturation,
+  compression/encryption failure, transient and persistent database outage, missing
+  partition, panic in synchronous `Begin`/`Observe`/`Finish`, worker panic,
+  shutdown/drain, lease-renewal failure, and stale capture recovery. Every case
+  asserts unchanged client bytes/status/headers, account scheduling, billing amount,
+  balance, usage rows, and existing prompt/security audit behavior. Admin-only detail
+  decryption failures are verified separately and never enter the gateway matrix.
 
 ### Frontend tests
 
@@ -687,7 +734,8 @@ or delete existing records; retention continues according to configuration.
 4. Remove `internal/conversationaudit/` and its small optional recorder mount points,
    or leave the generic no-op boundary if another observer uses it.
 5. Add a new forward migration to drop conversation audit partitions, the parent
-   table, and its setting. Never edit the original applied migration.
+   table, delete tombstones, and its setting. Never edit the original applied
+   migration.
 
 No core user, API key, group, account, usage, billing, payment, or security audit
 schema requires rollback.
@@ -695,7 +743,8 @@ schema requires rollback.
 ## Approved Decisions
 
 - Store readable structured conversations, not raw HTTP protocol bodies.
-- Record success, failure, timeout, and interrupted requests.
+- Record success, failure, timeout, cancellation, partial output, and process-unknown
+  outcomes.
 - Default retention is seven days and administrators can change it or manually
   delete records.
 - Request and response each default to a 1 MiB canonical payload cap.
