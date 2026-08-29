@@ -1,6 +1,6 @@
 # Conversation Audit Design
 
-- Status: Awaiting final written-spec review
+- Status: Approved for implementation planning
 - Date: 2026-08-29
 - Target branch: `feat/my-sub`
 - Scope: Sub2API backend gateway and embedded admin frontend
