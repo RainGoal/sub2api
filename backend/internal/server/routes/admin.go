@@ -125,11 +125,28 @@ func RegisterAdminRoutes(
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
 
+		// 独立会话请求与响应审计
+		registerConversationAuditRoutes(admin, h)
+
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerConversationAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	audit := admin.Group("/conversation-audit")
+	{
+		audit.GET("/config", h.Admin.ConversationAudit.GetConfig)
+		audit.PUT("/config", h.Admin.ConversationAudit.UpdateConfig)
+		audit.GET("/runtime", h.Admin.ConversationAudit.GetRuntime)
+		audit.GET("/records", h.Admin.ConversationAudit.ListRecords)
+		audit.GET("/records/:date/:id", h.Admin.ConversationAudit.GetRecord)
+		audit.DELETE("/records/:date/:id", h.Admin.ConversationAudit.DeleteRecord)
+		audit.POST("/delete-preview", h.Admin.ConversationAudit.DeletePreview)
+		audit.POST("/delete-by-filter", h.Admin.ConversationAudit.DeleteByFilter)
 	}
 }
 
