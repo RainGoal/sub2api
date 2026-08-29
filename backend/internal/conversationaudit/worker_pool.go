@@ -83,16 +83,26 @@ func (p *WorkerPool) start(workers int) {
 
 func (p *WorkerPool) Submit(job *WriteJob) error {
 	if p == nil || job == nil || !p.accepting.Load() {
+		if p != nil && job != nil && job.reservedBytes > 0 {
+			p.budget.Release(job.reservedBytes)
+			job.reservedBytes = 0
+		}
 		return ErrWorkerPoolStopped
 	}
 	job.normalize(p.now())
-	reserved := int64(job.CanonicalStats.StoredBytes)
-	if job.Canonical == nil {
-		reserved = 0
+	reserved := job.reservedBytes
+	required := int64(0)
+	if job.Canonical != nil {
+		required = int64(job.CanonicalStats.StoredBytes)
 	}
-	if !p.budget.TryReserve(reserved) {
-		p.metrics.BudgetFull.Add(1)
-		return ErrMemoryBudgetFull
+	if reserved < required {
+		if !p.budget.TryReserve(required - reserved) {
+			p.metrics.BudgetFull.Add(1)
+			p.budget.Release(reserved)
+			job.reservedBytes = 0
+			return ErrMemoryBudgetFull
+		}
+		reserved = required
 	}
 	job.reservedBytes = reserved
 	channel := p.queue
@@ -207,10 +217,13 @@ func (p *WorkerPool) processSafely(ctx context.Context, job *WriteJob) {
 		}
 		job.Record.Payload = &StoredPayload{
 			Side: job.Side, CodecVersion: encoded.CodecVersion, KeyID: encoded.KeyID, Data: encoded.Data,
-			OriginalBytes: encoded.OriginalBytes, StoredBytes: int64(job.CanonicalStats.StoredBytes),
+			OriginalBytes: int64(job.CanonicalStats.OriginalBytes), StoredBytes: int64(job.CanonicalStats.StoredBytes),
 			CompressedBytes: encoded.CompressedBytes, EncryptedBytes: encoded.EncryptedBytes,
 			Truncated: job.CanonicalStats.Truncated, OmittedMessages: job.CanonicalStats.OmittedMessages,
 			OmittedBytes: job.CanonicalStats.OmittedBytes,
+		}
+		if job.Record.Payload.OriginalBytes == 0 {
+			job.Record.Payload.OriginalBytes = encoded.OriginalBytes
 		}
 	}
 	for attempt := 0; attempt < 3; attempt++ {

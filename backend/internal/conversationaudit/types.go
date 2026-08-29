@@ -129,6 +129,7 @@ type Recorder interface {
 
 type Session interface {
 	Annotate(MetadataPatch)
+	SetRequestBody(protocol string, body []byte)
 	SetRequest(CanonicalConversation)
 	Observe(ResponseEvent)
 	Finish(FinishResult)
@@ -143,6 +144,7 @@ func NoopRecorder() Recorder { return noopRecorder{} }
 
 func (noopRecorder) Begin(context.Context, BeginInput) Session { return sharedNoopSession }
 func (noopSession) Annotate(MetadataPatch)                     {}
+func (noopSession) SetRequestBody(string, []byte)              {}
 func (noopSession) SetRequest(CanonicalConversation)           {}
 func (noopSession) Observe(ResponseEvent)                      {}
 func (noopSession) Finish(FinishResult)                        {}

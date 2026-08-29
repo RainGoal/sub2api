@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,7 @@ type PayloadCodec struct {
 	decoder    *zstd.Decoder
 	random     io.Reader
 	maxDecoded int
+	closeOnce  sync.Once
 }
 
 func NewPayloadCodec(keys KeyProvider, maxDecoded int, concurrency ...int) (*PayloadCodec, error) {
@@ -85,12 +87,14 @@ func (c *PayloadCodec) Close() {
 	if c == nil {
 		return
 	}
-	if c.encoder != nil {
-		c.encoder.Close()
-	}
-	if c.decoder != nil {
-		c.decoder.Close()
-	}
+	c.closeOnce.Do(func() {
+		if c.encoder != nil {
+			c.encoder.Close()
+		}
+		if c.decoder != nil {
+			c.decoder.Close()
+		}
+	})
 }
 
 func (c *PayloadCodec) Encode(identity RecordIdentity, side PayloadSide, payload CanonicalConversation) (EncodedPayload, error) {

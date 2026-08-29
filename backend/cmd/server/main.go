@@ -158,6 +158,13 @@ func runMainServer() {
 			log.Printf("Plugin manager started in degraded state: %v", err)
 		}
 	}
+	if app.ConversationAudit != nil {
+		if err := app.ConversationAudit.Start(context.Background()); err != nil {
+			// Conversation Audit always degrades independently so gateway traffic and
+			// administrator access remain available when its storage is unavailable.
+			log.Printf("Conversation Audit started in degraded state: %v", err)
+		}
+	}
 	if app.PromptAudit != nil {
 		if err := app.PromptAudit.Start(context.Background()); err != nil {
 			// Startup continues so unrelated APIs stay up. Fail-closed (unavailable)
