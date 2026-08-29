@@ -1023,7 +1023,13 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 
 	serverErrCh := make(chan error, 1)
 	resultCh := make(chan *OpenAIForwardResult, 1)
+	clientWriteCh := make(chan []byte, 1)
 	hooks := &OpenAIWSIngressHooks{
+		AfterClientWrite: func(turn int, payload []byte, _ bool) {
+			if turn == 1 {
+				clientWriteCh <- append([]byte(nil), payload...)
+			}
+		},
 		AfterTurn: func(_ int, result *OpenAIForwardResult, turnErr error) {
 			if turnErr == nil && result != nil {
 				resultCh <- result
@@ -1086,6 +1092,12 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
 	require.Equal(t, "resp_passthrough_turn_1", gjson.GetBytes(event, "response.id").String())
 	require.Equal(t, "completed", gjson.GetBytes(event, "response.output.0.status").String())
+	select {
+	case auditedEvent := <-clientWriteCh:
+		require.JSONEq(t, string(event), string(auditedEvent))
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for client-visible websocket audit hook")
+	}
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	select {

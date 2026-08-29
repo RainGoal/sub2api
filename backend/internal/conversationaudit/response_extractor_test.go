@@ -70,6 +70,17 @@ func TestExtractResponseSegmentsHandlesSplitSSEFrames(t *testing.T) {
 	require.Contains(t, canonicalText(result.Payload), "split frame")
 }
 
+func TestExtractResponseSegmentsHandlesWebSocketJSONEvents(t *testing.T) {
+	result, err := ExtractResponseSegments("responses_websocket", [][]byte{
+		[]byte(`{"type":"response.created","response":{"id":"resp_1"}}`),
+		[]byte(`{"type":"response.output_text.delta","delta":"websocket "}`),
+		[]byte(`{"type":"response.output_text.delta","delta":"answer"}`),
+		[]byte(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`),
+	}, 1<<20)
+	require.NoError(t, err)
+	require.Contains(t, canonicalText(result.Payload), "websocket answer")
+}
+
 func TestExtractResponseOmitsVectorsAndBase64Media(t *testing.T) {
 	result, err := ExtractResponse("embeddings", []byte(`{"data":[{"embedding":[0.1,0.2]},{"b64_json":"aGVsbG8="},{"url":"https://example.test/image.png"}]}`), 1<<20)
 	require.NoError(t, err)

@@ -450,8 +450,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 			if eventBytes != nil {
 				writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
-				_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+				writeErr := clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
 				cancel()
+				if writeErr == nil && hooks != nil && hooks.AfterClientWrite != nil {
+					hooks.AfterClientWrite(turn, eventBytes, true)
+				}
 			}
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
 				coderws.StatusPolicyViolation,
@@ -476,11 +479,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}, nil
 	}
 
-	writeClientMessage := func(message []byte) error {
+	writeClientMessage := func(turn int, message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
 		message = restoreCodexToolNamesFromContext(c, message)
-		return clientConn.Write(writeCtx, coderws.MessageText, message)
+		if err := clientConn.Write(writeCtx, coderws.MessageText, message); err != nil {
+			return err
+		}
+		if hooks != nil && hooks.AfterClientWrite != nil {
+			eventType := strings.TrimSpace(gjson.GetBytes(message, "type").String())
+			terminal := openAIWSPassthroughIsTerminalOutput(message) || eventType == "error"
+			hooks.AfterClientWrite(turn, message, terminal)
+		}
+		return nil
 	}
 
 	readClientMessage := func() ([]byte, error) {
@@ -647,7 +658,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				currentBridgePayload.imageInputSize,
 				grokCacheIdentity,
 				turn,
-				writeClientMessage,
+				func(message []byte) error { return writeClientMessage(turn, message) },
 			)
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
@@ -1118,7 +1129,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				}
 				replayCollector.AddEvent(eventType, upstreamMessage)
-				if err := writeClientMessage(upstreamMessage); err != nil {
+				if err := writeClientMessage(turn, upstreamMessage); err != nil {
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)

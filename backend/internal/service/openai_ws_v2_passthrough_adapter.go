@@ -29,6 +29,7 @@ type openAIWSClientFrameConn struct {
 	// model identifier they supplied for the current turn.
 	restoreResponseModel func([]byte) []byte
 	restoreToolNames     func([]byte) []byte
+	afterSuccessfulWrite func(msgType coderws.MessageType, payload []byte)
 }
 
 // openAIWSPolicyEnforcingFrameConn wraps a client-side FrameConn and runs
@@ -642,7 +643,13 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 			payload = c.restoreToolNames(payload)
 		}
 	}
-	return c.conn.Write(ctx, msgType, payload)
+	if err := c.conn.Write(ctx, msgType, payload); err != nil {
+		return err
+	}
+	if c.afterSuccessfulWrite != nil {
+		c.afterSuccessfulWrite(msgType, payload)
+	}
+	return nil
 }
 
 func (c *openAIWSClientFrameConn) Close() error {
@@ -957,6 +964,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 		restoreToolNames: func(payload []byte) []byte {
 			return restoreCodexToolNamesFromContext(c, payload)
+		},
+		afterSuccessfulWrite: func(msgType coderws.MessageType, payload []byte) {
+			if msgType != coderws.MessageText || hooks == nil || hooks.AfterClientWrite == nil {
+				return
+			}
+			terminalOutput := openAIWSPassthroughIsTerminalOutput(payload)
+			turnNo := int(completedTurns.Load()) + 1
+			if terminalOutput && completedTurns.Load() > 0 {
+				turnNo = int(completedTurns.Load())
+			}
+			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			hooks.AfterClientWrite(turnNo, payload, terminalOutput || eventType == "error")
 		},
 	}
 	policyClientConn := &openAIWSPolicyEnforcingFrameConn{

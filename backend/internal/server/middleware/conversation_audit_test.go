@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/conversationaudit"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -129,6 +131,48 @@ func TestConversationAuditWriterPreservesClientResponse(t *testing.T) {
 	require.Equal(t, conversationaudit.TransportSSE, recorder.session.patches[len(recorder.session.patches)-1].TransportMode)
 }
 
+func TestConversationAuditCapturesIndependentWebSocketTurn(t *testing.T) {
+	recorder := &conversationAuditRecorderStub{enabled: true}
+	c, _ := newConversationAuditTestContext(http.MethodGet, "/v1/responses")
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestID, strings.Repeat("r", 128)))
+	finishConnection := beginConversationAudit(c, recorder, conversationAuditTestAPIKey())
+	require.NotNil(t, finishConnection)
+	require.Empty(t, recorder.begin)
+
+	request := []byte(`{"type":"response.create","model":"gpt-test","input":"hello"}`)
+	BeginConversationAuditTurn(c, 1, "responses_websocket", "gpt-test", request)
+	AnnotateConversationAuditTurn(c, 1, 42, "account", "gpt-upstream")
+	ObserveConversationAuditTurn(c, 1, []byte(`{"type":"response.output_text.delta","delta":"answer"}`), false)
+	FinishConversationAuditTurn(c, 1, true, "gpt-upstream", "")
+	ObserveConversationAuditTurn(c, 1, []byte(`{"type":"response.completed","response":{"id":"resp_1"}}`), true)
+	finishConnection()
+
+	require.Len(t, recorder.begin, 1)
+	require.LessOrEqual(t, len(recorder.begin[0].RequestID), conversationAuditRequestIDMaxBytes)
+	require.True(t, strings.HasSuffix(recorder.begin[0].RequestID, ":turn:1"))
+	require.Equal(t, conversationaudit.TransportWebSocket, recorder.begin[0].TransportMode)
+	require.Equal(t, request, recorder.session.requestBody)
+	require.Contains(t, string(recorder.session.responseBody), "answer")
+	require.Len(t, recorder.session.finish, 1)
+	require.Equal(t, conversationaudit.OutcomeCompleted, recorder.session.finish[0].OutcomeStatus)
+	require.Equal(t, http.StatusSwitchingProtocols, recorder.session.finish[0].HTTPStatus)
+}
+
+func TestConversationAuditFinalizesInterruptedWebSocketTurnAsPartial(t *testing.T) {
+	recorder := &conversationAuditRecorderStub{enabled: true}
+	c, _ := newConversationAuditTestContext(http.MethodGet, "/v1/responses")
+	finishConnection := beginConversationAudit(c, recorder, conversationAuditTestAPIKey())
+	require.NotNil(t, finishConnection)
+
+	BeginConversationAuditTurn(c, 2, "responses_websocket", "gpt-test", []byte(`{"input":"hello"}`))
+	ObserveConversationAuditTurn(c, 2, []byte(`{"type":"response.output_text.delta","delta":"partial"}`), false)
+	finishConnection()
+
+	require.Len(t, recorder.session.finish, 1)
+	require.Equal(t, conversationaudit.OutcomePartial, recorder.session.finish[0].OutcomeStatus)
+	require.Equal(t, "websocket_connection_closed", recorder.session.finish[0].ErrorCode)
+}
+
 func TestConversationAuditCapturesLocalErrorAndCancellation(t *testing.T) {
 	t.Run("local error", func(t *testing.T) {
 		recorder := &conversationAuditRecorderStub{enabled: true}
@@ -207,6 +251,9 @@ func TestConversationAuditRouteManifest(t *testing.T) {
 		{http.MethodPost, "/v1/responses/input_tokens", false},
 		{http.MethodGet, "/v1/images/tasks/task-id", false},
 		{http.MethodGet, "/v1/videos/job-id/content", false},
+		{http.MethodGet, "/v1/responses", true},
+		{http.MethodGet, "/backend-api/codex/responses", true},
+		{http.MethodGet, "/v1/responses/input_tokens", false},
 		{http.MethodGet, "/v1/realtime", false},
 	}
 	for _, tt := range tests {

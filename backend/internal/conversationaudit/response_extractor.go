@@ -19,6 +19,10 @@ func ExtractResponseSegments(protocol string, segments [][]byte, maxBytes int) (
 	payload := CanonicalConversation{Version: CanonicalVersion, Messages: []Message{}}
 	if looksLikeSSESegments(segments) {
 		extractSSEResponse(protocol, segments, &payload)
+	} else if normalizeProtocol(protocol) == "responses_websocket" {
+		if err := extractWebSocketResponse(protocol, segments, &payload); err != nil {
+			return ExtractResult{Reason: "response_decode_failed"}, fmt.Errorf("decode conversation audit websocket response: %w", err)
+		}
 	} else {
 		var document any
 		decoder := json.NewDecoder(responseSegmentsReader(segments))
@@ -55,9 +59,7 @@ func looksLikeSSESegments(segments [][]byte) bool {
 }
 
 func extractSSEResponse(protocol string, segments [][]byte, payload *CanonicalConversation) {
-	var text strings.Builder
-	items := make([]ContentItem, 0, 8)
-	sawTextDelta := false
+	stream := responseStreamAccumulator{items: make([]ContentItem, 0, 8)}
 	scanner := bufio.NewScanner(responseSegmentsReader(segments))
 	scanner.Buffer(make([]byte, 4096), MaxPayloadMaxBytes*2)
 	for scanner.Scan() {
@@ -73,53 +75,85 @@ func extractSSEResponse(protocol string, segments [][]byte, payload *CanonicalCo
 		if err := json.Unmarshal(data, &root); err != nil {
 			continue
 		}
-		if errValue := canonicalErrorFromValue(root["error"]); errValue != nil {
-			payload.Error = errValue
-		}
-		eventType := strings.ToLower(stringValue(root["type"]))
-		if strings.Contains(eventType, "reasoning") || strings.Contains(eventType, "thinking") {
-			continue
-		}
-		switch eventType {
-		case "response.output_text.delta", "response.refusal.delta":
-			if delta := stringValue(root["delta"]); delta != "" {
-				text.WriteString(delta)
-				sawTextDelta = true
-			}
-		case "content_block_delta":
-			if delta, ok := root["delta"].(map[string]any); ok {
-				deltaType := strings.ToLower(stringValue(delta["type"]))
-				if deltaType == "input_json_delta" {
-					items = append(items, ContentItem{Type: "tool_call", Arguments: stringValue(delta["partial_json"])})
-				} else if !strings.Contains(deltaType, "thinking") {
-					text.WriteString(stringValue(delta["text"]))
-				}
-			}
-		case "response.function_call_arguments.delta":
-			if delta := stringValue(root["delta"]); delta != "" {
-				items = append(items, ContentItem{Type: "tool_call", Arguments: delta, ID: stringValue(root["item_id"])})
-			}
-		case "response.output_item.done", "content_block_start":
-			value := firstNonNil(root["item"], root["content_block"])
-			items = append(items, responseOutputItems(value)...)
-		case "response.completed", "response.failed", "response.incomplete":
-			if response, ok := root["response"].(map[string]any); ok {
-				if payload.Error == nil {
-					payload.Error = canonicalErrorFromValue(response["error"])
-				}
-				if !sawTextDelta {
-					appendResponseRootMessages(protocol, response, payload)
-				}
-			}
-		default:
-			appendChatOrGeminiDelta(root, &text, &items)
-		}
+		stream.add(protocol, root, payload)
 	}
-	if text.Len() > 0 {
-		items = append([]ContentItem{{Type: "text", Text: text.String()}}, items...)
+	stream.finish(payload)
+}
+
+func extractWebSocketResponse(protocol string, segments [][]byte, payload *CanonicalConversation) error {
+	decoder := json.NewDecoder(responseSegmentsReader(segments))
+	decoder.UseNumber()
+	stream := responseStreamAccumulator{items: make([]ContentItem, 0, 8)}
+	for {
+		var root map[string]any
+		if err := decoder.Decode(&root); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		stream.add(protocol, root, payload)
 	}
-	if len(items) > 0 {
-		payload.Messages = append(payload.Messages, Message{Role: "assistant", Content: items})
+	stream.finish(payload)
+	return nil
+}
+
+type responseStreamAccumulator struct {
+	text         strings.Builder
+	items        []ContentItem
+	sawTextDelta bool
+}
+
+func (a *responseStreamAccumulator) add(protocol string, root map[string]any, payload *CanonicalConversation) {
+	if errValue := canonicalErrorFromValue(root["error"]); errValue != nil {
+		payload.Error = errValue
+	}
+	eventType := strings.ToLower(stringValue(root["type"]))
+	if strings.Contains(eventType, "reasoning") || strings.Contains(eventType, "thinking") {
+		return
+	}
+	switch eventType {
+	case "response.output_text.delta", "response.refusal.delta":
+		if delta := stringValue(root["delta"]); delta != "" {
+			a.text.WriteString(delta)
+			a.sawTextDelta = true
+		}
+	case "content_block_delta":
+		if delta, ok := root["delta"].(map[string]any); ok {
+			deltaType := strings.ToLower(stringValue(delta["type"]))
+			if deltaType == "input_json_delta" {
+				a.items = append(a.items, ContentItem{Type: "tool_call", Arguments: stringValue(delta["partial_json"])})
+			} else if !strings.Contains(deltaType, "thinking") {
+				a.text.WriteString(stringValue(delta["text"]))
+			}
+		}
+	case "response.function_call_arguments.delta":
+		if delta := stringValue(root["delta"]); delta != "" {
+			a.items = append(a.items, ContentItem{Type: "tool_call", Arguments: delta, ID: stringValue(root["item_id"])})
+		}
+	case "response.output_item.done", "content_block_start":
+		value := firstNonNil(root["item"], root["content_block"])
+		a.items = append(a.items, responseOutputItems(value)...)
+	case "response.completed", "response.failed", "response.incomplete", "response.done":
+		if response, ok := root["response"].(map[string]any); ok {
+			if payload.Error == nil {
+				payload.Error = canonicalErrorFromValue(response["error"])
+			}
+			if !a.sawTextDelta {
+				appendResponseRootMessages(protocol, response, payload)
+			}
+		}
+	default:
+		appendChatOrGeminiDelta(root, &a.text, &a.items)
+	}
+}
+
+func (a *responseStreamAccumulator) finish(payload *CanonicalConversation) {
+	if a.text.Len() > 0 {
+		a.items = append([]ContentItem{{Type: "text", Text: a.text.String()}}, a.items...)
+	}
+	if len(a.items) > 0 {
+		payload.Messages = append(payload.Messages, Message{Role: "assistant", Content: a.items})
 	}
 }
 
