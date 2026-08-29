@@ -108,6 +108,7 @@ ON CONFLICT (created_at, audit_id) DO UPDATE SET
 	account_name=CASE WHEN EXCLUDED.account_name<>'' THEN EXCLUDED.account_name ELSE conversation_audit_records.account_name END,
 	requested_model=CASE WHEN EXCLUDED.requested_model<>'' THEN EXCLUDED.requested_model ELSE conversation_audit_records.requested_model END,
 	effective_model=CASE WHEN EXCLUDED.effective_model<>'' THEN EXCLUDED.effective_model ELSE conversation_audit_records.effective_model END,
+	transport_mode=CASE WHEN EXCLUDED.record_state='finalized' THEN EXCLUDED.transport_mode ELSE conversation_audit_records.transport_mode END,
 	http_status=COALESCE(EXCLUDED.http_status, conversation_audit_records.http_status),
 	error_code=CASE WHEN EXCLUDED.error_code<>'' THEN EXCLUDED.error_code ELSE conversation_audit_records.error_code END,
 	record_state=CASE WHEN conversation_audit_records.record_state='finalized' THEN 'finalized' ELSE EXCLUDED.record_state END,

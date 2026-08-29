@@ -2,7 +2,6 @@ package conversationaudit
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -12,6 +11,8 @@ import (
 )
 
 const disableCaptureGrace = 30 * time.Second
+
+const responseSegmentBytes = 32 << 10
 
 type RuntimeState struct {
 	Enabled               bool       `json:"enabled"`
@@ -408,13 +409,18 @@ type captureSession struct {
 	config  ActiveConfig
 	ref     CaptureRef
 
-	mu               sync.Mutex
-	record           RecordWrite
-	response         CanonicalConversation
-	responseReserved int64
-	hasRequest       bool
-	degradedReason   string
-	finished         bool
+	mu                sync.Mutex
+	record            RecordWrite
+	response          CanonicalConversation
+	responseSegments  [][]byte
+	responseBytes     int
+	responseProtocol  string
+	responseReserved  int64
+	responseTruncated bool
+	responseStopped   bool
+	hasRequest        bool
+	degradedReason    string
+	finished          bool
 }
 
 func (s *captureSession) Annotate(patch MetadataPatch) {
@@ -437,8 +443,14 @@ func (s *captureSession) Annotate(patch MetadataPatch) {
 		if patch.AccountName != "" {
 			s.record.AccountName = patch.AccountName
 		}
+		if patch.RequestedModel != "" {
+			s.record.RequestedModel = patch.RequestedModel
+		}
 		if patch.EffectiveModel != "" {
 			s.record.EffectiveModel = patch.EffectiveModel
+		}
+		if patch.TransportMode != "" {
+			s.record.TransportMode = patch.TransportMode
 		}
 	}
 	s.mu.Unlock()
@@ -499,10 +511,9 @@ func (s *captureSession) Observe(event ResponseEvent) {
 	if s == nil {
 		return
 	}
-	encoded, _ := json.Marshal(event)
-	reserve := int64(len(encoded))
+	reserve := responseEventBytes(event)
 	s.mu.Lock()
-	if s.finished || s.degradedReason != "" {
+	if s.finished || s.responseStopped {
 		s.mu.Unlock()
 		return
 	}
@@ -519,6 +530,74 @@ func (s *captureSession) Observe(event ResponseEvent) {
 	if event.Error != nil {
 		value := *event.Error
 		s.response.Error = &value
+	}
+	s.mu.Unlock()
+}
+
+func (s *captureSession) ObserveResponseBytes(protocol string, body []byte) {
+	if s == nil || len(body) == 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.finished || s.responseStopped {
+		s.mu.Unlock()
+		return
+	}
+	limit := responseRawLimit(s.config.ResponseMaxBytes)
+	remaining := limit - s.responseBytes
+	if remaining <= 0 {
+		s.responseTruncated = true
+		s.responseStopped = true
+		s.mu.Unlock()
+		return
+	}
+	if len(body) > remaining {
+		body = body[:remaining]
+		s.responseTruncated = true
+		s.responseStopped = true
+	}
+	pool := s.service.currentPool()
+	if pool == nil {
+		s.responseStopped = true
+		if s.degradedReason == "" {
+			s.degradedReason = "worker_pool_unavailable"
+		}
+		s.mu.Unlock()
+		return
+	}
+	for len(body) > 0 {
+		var segment []byte
+		if len(s.responseSegments) > 0 {
+			segment = s.responseSegments[len(s.responseSegments)-1]
+		}
+		if len(segment) == cap(segment) {
+			capacity := responseSegmentBytes
+			if available := limit - s.responseBytes; capacity > available {
+				capacity = available
+			}
+			if capacity <= 0 || !pool.budget.TryReserve(int64(capacity)) {
+				s.responseStopped = true
+				if s.degradedReason == "" {
+					s.degradedReason = "memory_budget_full"
+				}
+				break
+			}
+			segment = make([]byte, 0, capacity)
+			s.responseSegments = append(s.responseSegments, segment)
+			s.responseReserved += int64(capacity)
+		}
+		space := cap(segment) - len(segment)
+		count := len(body)
+		if count > space {
+			count = space
+		}
+		segment = append(segment, body[:count]...)
+		s.responseSegments[len(s.responseSegments)-1] = segment
+		s.responseBytes += count
+		body = body[count:]
+	}
+	if s.responseProtocol == "" {
+		s.responseProtocol = protocol
 	}
 	s.mu.Unlock()
 }
@@ -551,10 +630,13 @@ func (s *captureSession) finish(result FinishResult, forcedReason string) {
 		s.degradedReason = forcedReason
 	}
 	response := s.response
+	responseSegments := s.responseSegments
+	responseProtocol := s.responseProtocol
+	responseTruncated := s.responseTruncated
 	reserved := s.responseReserved
 	s.responseReserved = 0
 	record := cloneRecordWrite(s.record)
-	hasResponse := len(response.Messages) > 0 || response.Error != nil
+	hasResponse := len(responseSegments) > 0 || len(response.Messages) > 0 || response.Error != nil
 	hasRequest := s.hasRequest
 	degraded := s.degradedReason
 	s.mu.Unlock()
@@ -589,7 +671,16 @@ func (s *captureSession) finish(result FinishResult, forcedReason string) {
 		}
 	}
 	job := &WriteJob{Record: record, reservedBytes: reserved}
-	if hasResponse {
+	if len(responseSegments) > 0 {
+		job.Side = PayloadSideResponse
+		job.RawSegments = responseSegments
+		job.Protocol = responseProtocol
+		job.MaxBytes = s.config.ResponseMaxBytes
+		job.RawTruncated = responseTruncated
+		if responseTruncated && job.Record.CaptureStatus != CaptureDegraded {
+			job.Record.CaptureStatus = CaptureTruncated
+		}
+	} else if hasResponse {
 		limited, stats, err := LimitCanonical(response, PayloadSideResponse, s.config.ResponseMaxBytes)
 		if err == nil {
 			job.Side, job.Canonical, job.CanonicalStats = PayloadSideResponse, &limited, stats
@@ -607,6 +698,24 @@ func (s *captureSession) finish(result FinishResult, forcedReason string) {
 		return
 	}
 	_ = pool.Submit(job)
+}
+
+func responseRawLimit(maxBytes int) int {
+	if maxBytes <= 0 {
+		return 0
+	}
+	return maxBytes + maxBytes/2
+}
+
+func responseEventBytes(event ResponseEvent) int64 {
+	var size int64
+	for _, item := range event.Message.Content {
+		size += int64(len(item.Type) + len(item.Text) + len(item.Name) + len(item.Arguments) + len(item.Content) + len(item.URL) + 64)
+	}
+	if event.Error != nil {
+		size += int64(len(event.Error.Code) + len(event.Error.Message) + 64)
+	}
+	return size
 }
 
 func (s *captureSession) markDegraded(reason string) {

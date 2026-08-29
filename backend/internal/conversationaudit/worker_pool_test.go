@@ -137,3 +137,29 @@ func TestWorkerPoolRecoversWorkerPanic(t *testing.T) {
 	defer cancel()
 	require.NoError(t, pool.Shutdown(ctx))
 }
+
+func TestWorkerPoolExtractsRawResponseBeforePersistence(t *testing.T) {
+	repository := &workerTestRepository{started: make(chan struct{})}
+	budget := NewMemoryBudget(1 << 20)
+	pool, err := NewWorkerPool(repository, newWorkerTestCodec(t), budget, 1, 4)
+	require.NoError(t, err)
+	job := workerTestJob()
+	job.Side = PayloadSideResponse
+	job.Canonical = nil
+	job.CanonicalStats = CanonicalStats{}
+	job.RawPayload = []byte(`{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}`)
+	job.Protocol = "openai_responses"
+	job.MaxBytes = 1 << 20
+	require.NoError(t, pool.Submit(job))
+	require.Eventually(t, func() bool { return pool.Metrics().Completed.Load() == 1 }, time.Second, 10*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, pool.Shutdown(ctx))
+	repository.mu.Lock()
+	require.Len(t, repository.writes, 1)
+	require.NotNil(t, repository.writes[0].Payload)
+	require.Equal(t, PayloadSideResponse, repository.writes[0].Payload.Side)
+	repository.mu.Unlock()
+	require.Zero(t, budget.Used())
+}

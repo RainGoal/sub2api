@@ -104,7 +104,9 @@ type MetadataPatch struct {
 	GroupName      string
 	AccountID      *int64
 	AccountName    string
+	RequestedModel string
 	EffectiveModel string
+	TransportMode  TransportMode
 }
 
 type ResponseEvent struct {
@@ -132,6 +134,7 @@ type Session interface {
 	SetRequestBody(protocol string, body []byte)
 	SetRequest(CanonicalConversation)
 	Observe(ResponseEvent)
+	ObserveResponseBytes(protocol string, body []byte)
 	Finish(FinishResult)
 }
 
@@ -147,4 +150,5 @@ func (noopSession) Annotate(MetadataPatch)                     {}
 func (noopSession) SetRequestBody(string, []byte)              {}
 func (noopSession) SetRequest(CanonicalConversation)           {}
 func (noopSession) Observe(ResponseEvent)                      {}
+func (noopSession) ObserveResponseBytes(string, []byte)        {}
 func (noopSession) Finish(FinishResult)                        {}
