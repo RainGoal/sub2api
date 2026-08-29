@@ -6,6 +6,7 @@ import ops from './ops'
 import settings from './settings'
 import audit from './audit'
 import promptAudit from './promptAudit'
+import conversationAudit from './conversationAudit'
 import plugins from './plugins'
 
 export default {
@@ -17,5 +18,6 @@ export default {
   ...settings,
   ...audit,
   ...promptAudit,
+  ...conversationAudit,
   ...plugins,
 }
