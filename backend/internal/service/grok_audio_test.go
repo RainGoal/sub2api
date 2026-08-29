@@ -81,6 +81,12 @@ func TestGrokRealtimeEventHasAudio(t *testing.T) {
 	require.True(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.output_audio.delta","audio":"abc"}`)))
 }
 
+func TestRealtimeRelayHookPanicsAreIsolated(t *testing.T) {
+	require.NotPanics(t, func() {
+		runRealtimeRelayHook(func([]byte) { panic("audit failed") }, []byte(`{"type":"response.done"}`))
+	})
+}
+
 func TestForwardGrokVoice_RejectsUnknownEndpoint(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	_, err := svc.ForwardGrokVoice(context.Background(), nil, &Account{Platform: PlatformGrok}, "unknown", []byte(`{}`), "application/json")

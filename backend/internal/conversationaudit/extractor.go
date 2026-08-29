@@ -49,6 +49,16 @@ func ExtractRequest(protocol string, body []byte, maxBytes int) (ExtractResult, 
 			payload.Messages = append(payload.Messages, messageFromValue("system", instructions)...)
 		}
 		payload.Messages = append(payload.Messages, responseInputMessages(container["input"])...)
+		payload.Messages = append(payload.Messages, responseInputMessages(root["item"])...)
+		eventType := strings.ToLower(stringValue(root["type"]))
+		switch {
+		case strings.Contains(eventType, "input_audio_transcription"):
+			payload.Messages = append(payload.Messages, messageFromValue("user", root["transcript"])...)
+		case eventType == "input_audio_buffer.append":
+			payload.Messages = append(payload.Messages, Message{Role: "user", Content: []ContentItem{{
+				Type: "media_omitted", MediaType: "audio", EncodedBytes: encodedMediaBytes(root),
+			}}})
+		}
 	case "gemini":
 		if system, ok := root["systemInstruction"]; ok {
 			payload.Messages = append(payload.Messages, geminiMessage("system", system)...)
@@ -83,7 +93,7 @@ func normalizeProtocol(protocol string) string {
 		return "anthropic_messages"
 	case "openai_responses", "responses":
 		return "openai_responses"
-	case "responses_websocket":
+	case "responses_websocket", "grok_realtime", "openai_live":
 		return "responses_websocket"
 	case "gemini", "gemini_generate_content":
 		return "gemini"
@@ -351,7 +361,7 @@ func hasMediaValue(value map[string]any) bool {
 }
 
 func encodedMediaBytes(value map[string]any) int64 {
-	for _, key := range []string{"data", "image", "audio", "video", "url"} {
+	for _, key := range []string{"data", "image", "audio", "video", "url", "delta"} {
 		if candidate, ok := value[key]; ok {
 			return encodedValueBytes(candidate)
 		}

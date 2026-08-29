@@ -173,6 +173,28 @@ func TestConversationAuditFinalizesInterruptedWebSocketTurnAsPartial(t *testing.
 	require.Equal(t, "websocket_connection_closed", recorder.session.finish[0].ErrorCode)
 }
 
+func TestConversationAuditRealtimeTrackerCapturesClientVisibleTurn(t *testing.T) {
+	recorder := &conversationAuditRecorderStub{enabled: true}
+	c, _ := newConversationAuditTestContext(http.MethodGet, "/v1/realtime")
+	finishConnection := beginConversationAudit(c, recorder, conversationAuditTestAPIKey())
+	require.NotNil(t, finishConnection)
+
+	audit := NewRealtimeConversationAudit(c, "grok_realtime", "grok-voice-latest", "session-1", 42, "voice-account")
+	require.NotNil(t, audit)
+	audit.ObserveClientEvent([]byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}`))
+	audit.ObserveServerEvent([]byte(`{"type":"response.audio_transcript.delta","delta":"hi there"}`))
+	audit.ObserveServerEvent([]byte(`{"type":"response.done","response":{"status":"completed"}}`))
+	finishConnection()
+
+	require.Len(t, recorder.begin, 1)
+	require.Equal(t, "session-1", recorder.begin[0].SessionID)
+	require.Equal(t, "grok_realtime", recorder.begin[0].Protocol)
+	require.Contains(t, string(recorder.session.requestBody), "hello")
+	require.Contains(t, string(recorder.session.responseBody), "hi there")
+	require.Len(t, recorder.session.finish, 1)
+	require.Equal(t, conversationaudit.OutcomeCompleted, recorder.session.finish[0].OutcomeStatus)
+}
+
 func TestConversationAuditCapturesLocalErrorAndCancellation(t *testing.T) {
 	t.Run("local error", func(t *testing.T) {
 		recorder := &conversationAuditRecorderStub{enabled: true}
@@ -254,12 +276,15 @@ func TestConversationAuditRouteManifest(t *testing.T) {
 		{http.MethodGet, "/v1/responses", true},
 		{http.MethodGet, "/backend-api/codex/responses", true},
 		{http.MethodGet, "/v1/responses/input_tokens", false},
-		{http.MethodGet, "/v1/realtime", false},
+		{http.MethodGet, "/v1/realtime", true},
+		{http.MethodGet, "/v1/live/call_123", true},
 	}
 	for _, tt := range tests {
 		_, captured := classifyConversationAuditRoute(tt.method, tt.path)
 		require.Equalf(t, tt.captured, captured, "%s %s", tt.method, tt.path)
 	}
+	_, captured := classifyConversationAuditFullPath(http.MethodGet, "/backend-api/codex/:call_id")
+	require.True(t, captured)
 }
 
 func TestConversationAuditPanicsNeverChangeGatewayResponse(t *testing.T) {

@@ -129,8 +129,19 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
+	audit := middleware2.NewRealtimeConversationAudit(
+		c, "grok_realtime", model, service.ExtractClientSessionID(c),
+		selection.Account.ID, selection.Account.Name,
+	)
+	var auditHooks *service.RealtimeRelayHooks
+	if audit != nil {
+		auditHooks = &service.RealtimeRelayHooks{
+			AfterUpstreamWrite: audit.ObserveClientEvent,
+			AfterClientWrite:   audit.ObserveServerEvent,
+		}
+	}
 	started := time.Now()
-	audioObserved, proxyErr := h.gatewayService.ProxyGrokRealtimeConn(c.Request.Context(), c, conn, upstream)
+	audioObserved, proxyErr := h.gatewayService.ProxyGrokRealtimeConn(c.Request.Context(), c, conn, upstream, auditHooks)
 	elapsed := time.Since(started)
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))

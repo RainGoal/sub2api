@@ -69,3 +69,15 @@ func TestExtractRequestNonJSONSTTIsMetadataOnly(t *testing.T) {
 	require.Equal(t, "media_omitted", result.Payload.Messages[0].Content[0].Type)
 	require.NotContains(t, string(mustJSON(t, result)), "binary-media-canary")
 }
+
+func TestExtractRequestNormalizesRealtimeTextAndOmitsAudio(t *testing.T) {
+	textResult, err := ExtractRequest("grok_realtime", []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"realtime prompt"}]}}`), 1<<20)
+	require.NoError(t, err)
+	require.Contains(t, string(mustJSON(t, textResult.Payload)), "realtime prompt")
+
+	audioResult, err := ExtractRequest("openai_live", []byte(`{"type":"input_audio_buffer.append","audio":"QUJDRA=="}`), 1<<20)
+	require.NoError(t, err)
+	require.Equal(t, "media_omitted", audioResult.Payload.Messages[0].Content[0].Type)
+	require.EqualValues(t, 4, audioResult.Payload.Messages[0].Content[0].EncodedBytes)
+	require.NotContains(t, string(mustJSON(t, audioResult.Payload)), "QUJDRA")
+}

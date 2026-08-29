@@ -134,7 +134,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 		return false, err
 	}
 	defer func() { _ = upstream.Close() }()
-	return s.ProxyGrokRealtimeConn(ctx, c, client, upstream)
+	return s.ProxyGrokRealtimeConn(ctx, c, client, upstream, nil)
 }
 
 type GrokRealtimeUpstream struct{ conn openAIWSClientConn }
@@ -197,7 +197,13 @@ func (s *OpenAIGatewayService) HandleGrokRealtimeUpstreamError(ctx context.Conte
 	s.handleGrokAccountUpstreamError(ctx, account, statusCode, nil, body)
 }
 
-func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin.Context, client *coderws.Conn, upstream *GrokRealtimeUpstream) (bool, error) {
+func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(
+	ctx context.Context,
+	c *gin.Context,
+	client *coderws.Conn,
+	upstream *GrokRealtimeUpstream,
+	hooks *RealtimeRelayHooks,
+) (bool, error) {
 	if s == nil || client == nil || upstream == nil || upstream.conn == nil {
 		return false, fmt.Errorf("realtime connection is required")
 	}
@@ -222,6 +228,9 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 			if writeErr := client.Write(ctx, coderws.MessageText, msg); writeErr != nil {
 				errCh <- writeErr
 				return
+			}
+			if hooks != nil && hooks.AfterClientWrite != nil {
+				runRealtimeRelayHook(hooks.AfterClientWrite, msg)
 			}
 		}
 	}()
@@ -248,6 +257,9 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 			if writeErr := conn.WriteJSON(ctx, raw); writeErr != nil {
 				errCh <- writeErr
 				return
+			}
+			if hooks != nil && hooks.AfterUpstreamWrite != nil {
+				runRealtimeRelayHook(hooks.AfterUpstreamWrite, msg)
 			}
 		}
 	}()
