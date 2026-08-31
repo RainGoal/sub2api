@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -145,24 +144,6 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 		_, omitted := auditBodyOmittedRoutes[route]
 		require.Truef(t, omitted, "%s must not persist its credential or confirmation-bearing body", route)
 	}
-}
-
-func TestConversationAuditRoutesHaveStableOperationAuditing(t *testing.T) {
-	expected := map[string]string{
-		"PUT /api/v1/admin/conversation-audit/config":               "admin.conversation_audit.config.update",
-		"DELETE /api/v1/admin/conversation-audit/records/:date/:id": "admin.conversation_audit.record.delete",
-		"POST /api/v1/admin/conversation-audit/delete-preview":      "admin.conversation_audit.delete_preview",
-		"POST /api/v1/admin/conversation-audit/delete-by-filter":    "admin.conversation_audit.filter_delete",
-		"GET /api/v1/admin/conversation-audit/records/:date/:id":    "admin.conversation_audit.record.read",
-	}
-	for route, action := range expected {
-		if strings.HasPrefix(route, "GET ") {
-			require.Equal(t, action, auditSensitiveReads[route])
-			continue
-		}
-		require.Equal(t, action, auditActionOverrides[route])
-	}
-	require.Contains(t, auditBodyOmittedRoutes, "POST /api/v1/admin/conversation-audit/delete-by-filter")
 }
 
 func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {

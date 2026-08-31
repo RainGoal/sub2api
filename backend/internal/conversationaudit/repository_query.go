@@ -17,11 +17,6 @@ const (
 	maxListLimit       = 100
 )
 
-var (
-	ErrTimeRangeRequired = errors.New("conversation audit time range is required")
-	ErrQueryLimit        = errors.New("conversation audit query limit exceeded")
-)
-
 type ListFilter struct {
 	Start           time.Time
 	End             time.Time
@@ -100,7 +95,40 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]RecordMetad
 	}
 	where := []string{"created_at >= $1", "created_at < $2"}
 	args := []any{filter.Start.UTC(), filter.End.UTC()}
-	where, args = appendListFilterPredicates(where, args, filter)
+	add := func(predicate string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf(predicate, len(args)))
+	}
+	if filter.UserID != nil {
+		add("user_id = $%d", *filter.UserID)
+	}
+	if filter.GroupID != nil {
+		add("group_id = $%d", *filter.GroupID)
+	}
+	if filter.APIKeyID != nil {
+		add("api_key_id = $%d", *filter.APIKeyID)
+	}
+	if filter.SessionID != "" {
+		add("session_id = $%d", bounded(filter.SessionID, 256))
+	}
+	if filter.RequestID != "" {
+		add("request_id = $%d", bounded(filter.RequestID, 128))
+	}
+	if filter.OutcomeStatus != "" {
+		add("outcome_status = $%d", string(filter.OutcomeStatus))
+	}
+	if filter.CaptureStatus != "" {
+		add("capture_status = $%d", string(filter.CaptureStatus))
+	}
+	if filter.Protocol != "" {
+		add("protocol = $%d", bounded(filter.Protocol, 64))
+	}
+	if filter.InboundEndpoint != "" {
+		add("inbound_endpoint = $%d", bounded(filter.InboundEndpoint, 256))
+	}
+	if filter.RequestedModel != "" {
+		add("requested_model = $%d", bounded(filter.RequestedModel, 256))
+	}
 	if filter.Cursor != nil {
 		args = append(args, NormalizeCreatedAt(filter.Cursor.CreatedAt), filter.Cursor.AuditID)
 		where = append(where, fmt.Sprintf("(created_at, audit_id) < ($%d, $%d)", len(args)-1, len(args)))
@@ -149,44 +177,6 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]RecordMetad
 	return items, next, nil
 }
 
-func appendListFilterPredicates(where []string, args []any, filter ListFilter) ([]string, []any) {
-	add := func(predicate string, value any) {
-		args = append(args, value)
-		where = append(where, fmt.Sprintf(predicate, len(args)))
-	}
-	if filter.UserID != nil {
-		add("user_id = $%d", *filter.UserID)
-	}
-	if filter.GroupID != nil {
-		add("group_id = $%d", *filter.GroupID)
-	}
-	if filter.APIKeyID != nil {
-		add("api_key_id = $%d", *filter.APIKeyID)
-	}
-	if filter.SessionID != "" {
-		add("session_id = $%d", bounded(filter.SessionID, 256))
-	}
-	if filter.RequestID != "" {
-		add("request_id = $%d", bounded(filter.RequestID, 128))
-	}
-	if filter.OutcomeStatus != "" {
-		add("outcome_status = $%d", string(filter.OutcomeStatus))
-	}
-	if filter.CaptureStatus != "" {
-		add("capture_status = $%d", string(filter.CaptureStatus))
-	}
-	if filter.Protocol != "" {
-		add("protocol = $%d", bounded(filter.Protocol, 64))
-	}
-	if filter.InboundEndpoint != "" {
-		add("inbound_endpoint = $%d", bounded(filter.InboundEndpoint, 256))
-	}
-	if filter.RequestedModel != "" {
-		add("requested_model = $%d", bounded(filter.RequestedModel, 256))
-	}
-	return where, args
-}
-
 func (r *Repository) Detail(ctx context.Context, day time.Time, auditID uuid.UUID) (RecordDetail, error) {
 	if r == nil || r.db == nil || auditID == uuid.Nil {
 		return RecordDetail{}, ErrRecordNotFound
@@ -221,17 +211,17 @@ func (r *Repository) Detail(ctx context.Context, day time.Time, auditID uuid.UUI
 
 func validateListFilter(filter ListFilter) error {
 	if filter.Start.IsZero() || filter.End.IsZero() || !filter.End.After(filter.Start) {
-		return ErrTimeRangeRequired
+		return errors.New("conversation audit time range is required")
 	}
 	window := filter.End.Sub(filter.Start)
 	if window > maxListWindow {
-		return ErrQueryLimit
+		return errors.New("conversation audit time range exceeds 31 days")
 	}
 	if (filter.Protocol != "" || filter.InboundEndpoint != "" || filter.RequestedModel != "") && window > maxUnindexedWindow {
-		return ErrQueryLimit
+		return errors.New("conversation audit unindexed filter range exceeds 24 hours")
 	}
 	if filter.Limit < 0 || filter.Limit > maxListLimit {
-		return ErrQueryLimit
+		return errors.New("conversation audit list limit exceeds 100")
 	}
 	if filter.Cursor != nil && (filter.Cursor.AuditID == uuid.Nil || filter.Cursor.CreatedAt.IsZero()) {
 		return ErrInvalidCursor
