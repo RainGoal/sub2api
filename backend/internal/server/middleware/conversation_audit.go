@@ -3,10 +3,8 @@ package middleware
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/conversationaudit"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -17,25 +15,11 @@ import (
 
 const conversationAuditContextKey = "sub2api.conversation_audit"
 
-const conversationAuditRequestIDMaxBytes = 128
-
 type conversationAuditState struct {
-	recorder  effectiveConversationAuditRecorder
-	baseInput conversationaudit.BeginInput
-	basePatch conversationaudit.MetadataPatch
 	session   conversationaudit.Session
 	protocol  string
 	errorCode string
-	turns     map[int]*conversationAuditTurn
 	mu        sync.Mutex
-}
-
-type conversationAuditTurn struct {
-	session          conversationaudit.Session
-	protocol         string
-	responseObserved bool
-	terminalObserved bool
-	pendingFinish    *conversationaudit.FinishResult
 }
 
 type conversationAuditResponseWriter struct {
@@ -50,9 +34,8 @@ type effectiveConversationAuditRecorder interface {
 }
 
 type conversationAuditRoute struct {
-	protocol  string
-	endpoint  string
-	websocket bool
+	protocol string
+	endpoint string
 }
 
 func beginConversationAudit(c *gin.Context, recorder conversationaudit.Recorder, apiKey *service.APIKey) func() {
@@ -87,10 +70,16 @@ func beginConversationAudit(c *gin.Context, recorder conversationaudit.Recorder,
 			userName = strings.TrimSpace(apiKey.User.Email)
 		}
 	}
-	baseInput := conversationaudit.BeginInput{
-		RequestID: requestID, SessionID: service.ExtractClientSessionID(c),
-		UserID: userID, UserName: userName, APIKeyID: apiKey.ID, APIKeyName: apiKey.Name,
-		Protocol: route.protocol, InboundEndpoint: route.endpoint, TransportMode: conversationaudit.TransportHTTP,
+	var session conversationaudit.Session
+	safelyRunConversationAudit(func() {
+		session = effective.Begin(c.Request.Context(), conversationaudit.BeginInput{
+			RequestID: requestID, SessionID: service.ExtractClientSessionID(c),
+			UserID: userID, UserName: userName, APIKeyID: apiKey.ID, APIKeyName: apiKey.Name,
+			Protocol: route.protocol, InboundEndpoint: route.endpoint, TransportMode: conversationaudit.TransportHTTP,
+		})
+	})
+	if session == nil {
+		return nil
 	}
 	patch := conversationaudit.MetadataPatch{}
 	if apiKey.GroupID != nil {
@@ -100,20 +89,9 @@ func beginConversationAudit(c *gin.Context, recorder conversationaudit.Recorder,
 	if apiKey.Group != nil {
 		patch.GroupName = apiKey.Group.Name
 	}
-	state := &conversationAuditState{
-		recorder: effective, baseInput: baseInput, basePatch: patch, protocol: route.protocol,
-	}
-	c.Set(conversationAuditContextKey, state)
-	if route.websocket {
-		return func() { finishPendingConversationAuditTurns(c, state) }
-	}
-	var session conversationaudit.Session
-	safelyRunConversationAudit(func() { session = effective.Begin(c.Request.Context(), baseInput) })
-	if session == nil {
-		return nil
-	}
-	state.session = session
 	safelyRunConversationAudit(func() { session.Annotate(patch) })
+	state := &conversationAuditState{session: session, protocol: route.protocol}
+	c.Set(conversationAuditContextKey, state)
 	c.Writer = &conversationAuditResponseWriter{ResponseWriter: c.Writer, state: state}
 
 	return func() {
@@ -123,152 +101,6 @@ func beginConversationAudit(c *gin.Context, recorder conversationaudit.Recorder,
 			panic(recovered)
 		}
 	}
-}
-
-// BeginConversationAuditTurn starts one independently persisted WebSocket turn.
-// It is deliberately best-effort and never returns an error into the gateway path.
-func BeginConversationAuditTurn(c *gin.Context, turn int, protocol, requestedModel string, body []byte) {
-	state := conversationAuditStateFromContext(c)
-	if state == nil || state.recorder == nil || turn <= 0 {
-		return
-	}
-	safelyRunConversationAudit(func() {
-		state.mu.Lock()
-		if state.turns != nil {
-			if _, exists := state.turns[turn]; exists {
-				state.mu.Unlock()
-				return
-			}
-		}
-		input := state.baseInput
-		input.RequestID = conversationAuditTurnRequestID(input.RequestID, turn)
-		input.Protocol = strings.TrimSpace(protocol)
-		input.RequestedModel = strings.TrimSpace(requestedModel)
-		input.TransportMode = conversationaudit.TransportWebSocket
-		state.mu.Unlock()
-		if input.Protocol == "" {
-			return
-		}
-		session := state.recorder.Begin(c.Request.Context(), input)
-		if session == nil {
-			return
-		}
-		session.Annotate(state.basePatch)
-		session.SetRequestBody(input.Protocol, body)
-		state.mu.Lock()
-		if state.turns == nil {
-			state.turns = make(map[int]*conversationAuditTurn, 1)
-		}
-		if _, exists := state.turns[turn]; exists {
-			state.mu.Unlock()
-			session.Finish(conversationaudit.FinishResult{
-				OutcomeStatus: conversationaudit.OutcomeUnknown, CaptureStatus: conversationaudit.CaptureDegraded,
-				DegradedReason: "duplicate_websocket_turn",
-			})
-			return
-		}
-		state.turns[turn] = &conversationAuditTurn{session: session, protocol: input.Protocol}
-		state.mu.Unlock()
-	})
-}
-
-// AnnotateConversationAuditTurn adds routing data once account selection is known.
-func AnnotateConversationAuditTurn(c *gin.Context, turn int, accountID int64, accountName, effectiveModel string) {
-	state := conversationAuditStateFromContext(c)
-	if state == nil || turn <= 0 {
-		return
-	}
-	safelyRunConversationAudit(func() {
-		state.mu.Lock()
-		entry := state.turns[turn]
-		state.mu.Unlock()
-		if entry == nil {
-			return
-		}
-		patch := conversationaudit.MetadataPatch{
-			AccountName: strings.TrimSpace(accountName), EffectiveModel: strings.TrimSpace(effectiveModel),
-		}
-		if accountID > 0 {
-			patch.AccountID = &accountID
-		}
-		entry.session.Annotate(patch)
-	})
-}
-
-// ObserveConversationAuditTurn buffers only frames that were written to the client.
-// Parsing and canonicalization remain in the bounded audit worker pool.
-func ObserveConversationAuditTurn(c *gin.Context, turn int, payload []byte, terminal bool) {
-	state := conversationAuditStateFromContext(c)
-	if state == nil || turn <= 0 || len(payload) == 0 {
-		return
-	}
-	safelyRunConversationAudit(func() {
-		state.mu.Lock()
-		entry := state.turns[turn]
-		if entry != nil {
-			entry.responseObserved = true
-			entry.terminalObserved = entry.terminalObserved || terminal
-		}
-		state.mu.Unlock()
-		if entry != nil {
-			entry.session.ObserveResponseBytes(entry.protocol, payload)
-		}
-		if entry == nil || !terminal {
-			return
-		}
-		state.mu.Lock()
-		pending := entry.pendingFinish
-		if pending != nil && state.turns[turn] == entry {
-			delete(state.turns, turn)
-		}
-		state.mu.Unlock()
-		if pending != nil {
-			entry.session.Finish(*pending)
-		}
-	})
-}
-
-// FinishConversationAuditTurn finalizes a WebSocket turn without exposing audit
-// failures to transport, scheduling, usage, or billing behavior.
-func FinishConversationAuditTurn(c *gin.Context, turn int, completed bool, effectiveModel, errorCode string) {
-	state := conversationAuditStateFromContext(c)
-	if state == nil || turn <= 0 {
-		return
-	}
-	safelyRunConversationAudit(func() {
-		state.mu.Lock()
-		entry := state.turns[turn]
-		state.mu.Unlock()
-		if entry == nil {
-			return
-		}
-		if effectiveModel = strings.TrimSpace(effectiveModel); effectiveModel != "" {
-			entry.session.Annotate(conversationaudit.MetadataPatch{EffectiveModel: effectiveModel})
-		}
-		outcome := conversationaudit.OutcomeCompleted
-		if !completed {
-			outcome = conversationaudit.OutcomeError
-			if entry.responseObserved {
-				outcome = conversationaudit.OutcomePartial
-			}
-		}
-		finish := conversationaudit.FinishResult{
-			OutcomeStatus: outcome, HTTPStatus: http.StatusSwitchingProtocols, ErrorCode: strings.TrimSpace(errorCode),
-		}
-		state.mu.Lock()
-		if state.turns[turn] != entry {
-			state.mu.Unlock()
-			return
-		}
-		if !entry.terminalObserved {
-			entry.pendingFinish = &finish
-			state.mu.Unlock()
-			return
-		}
-		delete(state.turns, turn)
-		state.mu.Unlock()
-		entry.session.Finish(finish)
-	})
 }
 
 // CaptureConversationAuditRequest shares a body already read by the gateway.
@@ -340,7 +172,7 @@ func (w *conversationAuditResponseWriter) observe(body []byte) {
 }
 
 func finishConversationAudit(c *gin.Context, state *conversationAuditState, panicked bool) {
-	if state == nil || state.session == nil {
+	if state == nil {
 		return
 	}
 	safelyRunConversationAudit(func() {
@@ -395,45 +227,6 @@ func finishConversationAudit(c *gin.Context, state *conversationAuditState, pani
 	})
 }
 
-func finishPendingConversationAuditTurns(c *gin.Context, state *conversationAuditState) {
-	if state == nil {
-		return
-	}
-	safelyRunConversationAudit(func() {
-		state.mu.Lock()
-		turns := make([]*conversationAuditTurn, 0, len(state.turns))
-		for turn, entry := range state.turns {
-			turns = append(turns, entry)
-			delete(state.turns, turn)
-		}
-		state.mu.Unlock()
-		for _, entry := range turns {
-			outcome := conversationaudit.OutcomeError
-			errorCode := "websocket_connection_closed"
-			if entry.responseObserved {
-				outcome = conversationaudit.OutcomePartial
-			}
-			if c != nil && c.Request != nil {
-				switch c.Request.Context().Err() {
-				case context.DeadlineExceeded:
-					if !entry.responseObserved {
-						outcome = conversationaudit.OutcomeTimeout
-					}
-					errorCode = context.DeadlineExceeded.Error()
-				case context.Canceled:
-					if !entry.responseObserved {
-						outcome = conversationaudit.OutcomeCancelled
-					}
-					errorCode = context.Canceled.Error()
-				}
-			}
-			entry.session.Finish(conversationaudit.FinishResult{
-				OutcomeStatus: outcome, HTTPStatus: http.StatusSwitchingProtocols, ErrorCode: errorCode,
-			})
-		}
-	})
-}
-
 func conversationAuditStateFromContext(c *gin.Context) *conversationAuditState {
 	if c == nil {
 		return nil
@@ -453,28 +246,11 @@ func safelyRunConversationAudit(run func()) {
 	}
 }
 
-func conversationAuditTurnRequestID(base string, turn int) string {
-	suffix := ":turn:" + strconv.Itoa(turn)
-	base = strings.TrimSpace(strings.ToValidUTF8(base, ""))
-	if len(base)+len(suffix) > conversationAuditRequestIDMaxBytes {
-		base = base[:conversationAuditRequestIDMaxBytes-len(suffix)]
-		for !utf8.ValidString(base) {
-			base = base[:len(base)-1]
-		}
-	}
-	return base + suffix
-}
-
 func classifyConversationAuditRoute(method, path string) (conversationAuditRoute, bool) {
-	path = strings.ToLower(strings.TrimRight(strings.TrimSpace(path), "/"))
-	if method == http.MethodGet && strings.HasSuffix(path, "/responses") {
-		return conversationAuditRoute{
-			protocol: "responses_websocket", endpoint: "/v1/responses", websocket: true,
-		}, true
-	}
 	if method != http.MethodPost {
 		return conversationAuditRoute{}, false
 	}
+	path = strings.ToLower(strings.TrimRight(strings.TrimSpace(path), "/"))
 	switch {
 	case strings.Contains(path, "/messages/count_tokens"):
 		return conversationAuditRoute{}, false

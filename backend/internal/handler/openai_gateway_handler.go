@@ -1913,7 +1913,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	)
 	setOpsRequestContext(c, reqModel, true)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
-	middleware2.BeginConversationAuditTurn(c, 1, "responses_websocket", reqModel, firstMessage)
 
 	if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage, "first_turn"); decision != nil && !decision.AllowNextStage {
 		writeSecurityAuditWSError(ctx, wsConn, decision)
@@ -2247,7 +2246,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.String("schedule_layer", scheduleDecision.Layer),
 			zap.Int("candidate_count", scheduleDecision.CandidateCount),
 		)
-		middleware2.AnnotateConversationAuditTurn(c, 1, account.ID, account.Name, wsForwardModel)
 
 		maxReasoningEffort, reasoningEffortMappings, _ := openAIReasoningEffortPolicyForRequest(c, apiKey)
 		var requestPayloadHash string
@@ -2283,8 +2281,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings: reasoningEffortMappings,
 			TurnStarted:             recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
-				middleware2.BeginConversationAuditTurn(c, turn, "responses_websocket", originalModel, payload)
-				middleware2.AnnotateConversationAuditTurn(c, turn, account.ID, account.Name, originalModel)
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				setCyberTurnBody(turn, payload)
@@ -2306,9 +2302,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}
 				return nil
-			},
-			AfterClientWrite: func(turn int, payload []byte, terminal bool) {
-				middleware2.ObserveConversationAuditTurn(c, turn, payload, terminal)
 			},
 			MapRequestModel: func(turn int, originalModel string) (string, error) {
 				model := strings.TrimSpace(originalModel)
@@ -2375,26 +2368,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
-				if turnErr == nil || result != nil {
-					defer func() {
-						completed := turnErr == nil && result != nil && result.SucceededForScheduling()
-						effectiveModel := ""
-						errorCode := "websocket_turn_error"
-						if result != nil {
-							effectiveModel = strings.TrimSpace(result.UpstreamModel)
-							if effectiveModel == "" {
-								effectiveModel = strings.TrimSpace(result.Model)
-							}
-							if terminal := strings.TrimSpace(result.UpstreamTerminalEvent); terminal != "" {
-								errorCode = terminal
-							}
-						}
-						if completed {
-							errorCode = ""
-						}
-						middleware2.FinishConversationAuditTurn(c, turn, completed, effectiveModel, errorCode)
-					}()
-				}
 				turnStart := getTurnStart(turn)
 				cyberBlockBody := takeCyberTurnBody(turn)
 				// F1: cyber 标记按 turn 生命周期清理——defer 保证任意早返回路径都执行；

@@ -263,10 +263,7 @@ type OpenAIWSIngressHooks struct {
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
-	// AfterClientWrite receives the exact text frame after all client-facing
-	// model/tool rewrites, and only after the WebSocket write succeeds.
-	AfterClientWrite func(turn int, payload []byte, terminal bool)
-	AfterTurn        func(turn int, result *OpenAIForwardResult, turnErr error)
+	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {
