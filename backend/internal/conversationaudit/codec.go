@@ -77,7 +77,7 @@ func NewPayloadCodec(keys KeyProvider, maxDecoded int, concurrency ...int) (*Pay
 		zstd.WithDecoderMaxWindow(uint64(maxDecoded)),
 	)
 	if err != nil {
-		encoder.Close()
+		_ = encoder.Close()
 		return nil, fmt.Errorf("create conversation audit zstd decoder: %w", err)
 	}
 	return &PayloadCodec{keys: keys, encoder: encoder, decoder: decoder, random: rand.Reader, maxDecoded: maxDecoded}, nil
@@ -89,7 +89,7 @@ func (c *PayloadCodec) Close() {
 	}
 	c.closeOnce.Do(func() {
 		if c.encoder != nil {
-			c.encoder.Close()
+			_ = c.encoder.Close()
 		}
 		if c.decoder != nil {
 			c.decoder.Close()

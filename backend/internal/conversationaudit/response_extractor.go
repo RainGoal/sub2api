@@ -118,14 +118,14 @@ func (a *responseStreamAccumulator) add(protocol string, root map[string]any, pa
 	case "response.output_text.delta", "response.refusal.delta", "response.text.delta",
 		"response.audio_transcript.delta", "response.output_audio_transcript.delta":
 		if delta := stringValue(root["delta"]); delta != "" {
-			a.text.WriteString(delta)
+			_, _ = a.text.WriteString(delta)
 			a.sawTextDelta = true
 		}
 	case "response.output_text.done", "response.text.done", "response.audio_transcript.done",
 		"response.output_audio_transcript.done":
 		if !a.sawTextDelta {
 			if text := stringValue(firstNonNil(root["text"], root["transcript"])); text != "" {
-				a.text.WriteString(text)
+				_, _ = a.text.WriteString(text)
 			}
 		}
 	case "conversation.item.input_audio_transcription.completed", "conversation.item.input_audio_transcription.done",
@@ -139,7 +139,7 @@ func (a *responseStreamAccumulator) add(protocol string, root map[string]any, pa
 			if deltaType == "input_json_delta" {
 				a.items = append(a.items, ContentItem{Type: "tool_call", Arguments: stringValue(delta["partial_json"])})
 			} else if !strings.Contains(deltaType, "thinking") {
-				a.text.WriteString(stringValue(delta["text"]))
+				_, _ = a.text.WriteString(stringValue(delta["text"]))
 			}
 		}
 	case "response.function_call_arguments.delta":
@@ -197,7 +197,7 @@ func appendChatOrGeminiDelta(root map[string]any, text *strings.Builder, items *
 		for _, choice := range choices {
 			entry, _ := choice.(map[string]any)
 			delta, _ := entry["delta"].(map[string]any)
-			text.WriteString(stringValue(delta["content"]))
+			_, _ = text.WriteString(stringValue(delta["content"]))
 			if calls, ok := delta["tool_calls"].([]any); ok {
 				for _, call := range calls {
 					callObject, _ := call.(map[string]any)
@@ -216,7 +216,7 @@ func appendChatOrGeminiDelta(root map[string]any, text *strings.Builder, items *
 			content, _ := entry["content"].(map[string]any)
 			for _, item := range contentItems(content["parts"]) {
 				if item.Type == "text" {
-					text.WriteString(item.Text)
+					_, _ = text.WriteString(item.Text)
 				}
 			}
 		}

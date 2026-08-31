@@ -490,7 +490,3 @@ func partitionDay(name string) (time.Time, bool) {
 	value, err := time.ParseInLocation("20060102", strings.TrimPrefix(name, prefix), time.UTC)
 	return value, err == nil
 }
-
-func partitionName(day time.Time) string {
-	return fmt.Sprintf("conversation_audit_records_%s", utcDay(day).Format("20060102"))
-}

@@ -27,23 +27,23 @@ type seedanceVideoBaseOnlyRepo struct {
 
 func (r *seedanceVideoLeaseProbeRepo) RescheduleWithLease(ctx context.Context, stateID, status string, dueAt time.Time, lastError string, leaseUntil time.Time) error {
 	r.rescheduleLease = leaseUntil
-	return r.seedanceVideoTaskMemoryRepo.Reschedule(ctx, stateID, status, dueAt, lastError)
+	return r.Reschedule(ctx, stateID, status, dueAt, lastError)
 }
 
 func (r *seedanceVideoLeaseProbeRepo) MarkSettledWithLease(ctx context.Context, stateID string, actualCost float64, leaseUntil time.Time) error {
 	r.settledLease = leaseUntil
-	return r.seedanceVideoTaskMemoryRepo.MarkSettled(ctx, stateID, actualCost)
+	return r.MarkSettled(ctx, stateID, actualCost)
 }
 
 func (r *seedanceVideoLeaseProbeRepo) MarkReleasedWithLease(ctx context.Context, stateID string, leaseUntil time.Time) error {
 	r.releasedLease = leaseUntil
-	return r.seedanceVideoTaskMemoryRepo.MarkReleased(ctx, stateID)
+	return r.MarkReleased(ctx, stateID)
 }
 
 func (r *seedanceVideoLeaseProbeRepo) MarkReleasedWithStatusWithLease(ctx context.Context, stateID, status string, leaseUntil time.Time) error {
 	r.releasedStatusLease = leaseUntil
 	r.releasedStatus = status
-	return r.seedanceVideoTaskMemoryRepo.MarkReleasedWithStatus(ctx, stateID, status)
+	return r.MarkReleasedWithStatus(ctx, stateID, status)
 }
 
 func seedanceVideoLeaseProbePending(stateID string, leaseUntil time.Time) *SeedanceVideoPendingBilling {

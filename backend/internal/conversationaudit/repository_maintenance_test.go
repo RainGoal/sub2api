@@ -106,8 +106,8 @@ func TestRepositoryDeleteByScopeLocksTombstonesAndDeletesAtomically(t *testing.T
 	scope := DeleteScope{
 		Filter:            ListFilter{Start: now.Add(-24 * time.Hour), End: now},
 		EligibilityCutoff: now.Add(-deleteEligibilityAge),
-		HighWater:         RecordCursor{CreatedAt: newer.CreatedAt, AuditID: newer.AuditID},
-		LowWater:          RecordCursor{CreatedAt: older.CreatedAt, AuditID: older.AuditID},
+		HighWater:         RecordCursor(newer),
+		LowWater:          RecordCursor(older),
 	}
 
 	mock.ExpectBegin()

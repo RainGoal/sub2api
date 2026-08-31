@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -229,25 +228,4 @@ func bounded(value string, limit int) string {
 		return value
 	}
 	return truncateUTF8(value, limit)
-}
-
-func nullableTime(value *time.Time) any {
-	if value == nil {
-		return nil
-	}
-	return value.UTC()
-}
-
-func nullableInt(value *int64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
-}
-
-func wrapRepositoryError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("conversation audit %s: %w", operation, err)
 }

@@ -157,11 +157,5 @@ func validateStoredConfig(config storedConfig) error {
 }
 
 func activeFromStored(config storedConfig) ActiveConfig {
-	return ActiveConfig{
-		Enabled: config.Enabled, RetentionDays: config.RetentionDays,
-		RequestMaxBytes: config.RequestMaxBytes, ResponseMaxBytes: config.ResponseMaxBytes,
-		MemoryBudgetBytes: config.MemoryBudgetBytes, WorkerCount: config.WorkerCount,
-		QueueCapacity: config.QueueCapacity, ConfigVersion: config.ConfigVersion,
-		UpdatedAt: config.UpdatedAt, UpdatedBy: config.UpdatedBy,
-	}
+	return ActiveConfig(config)
 }
