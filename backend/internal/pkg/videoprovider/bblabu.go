@@ -74,7 +74,7 @@ func (bblabuDriver) buildURL(baseURL string, operation Operation, taskID string)
 			path += "/content"
 		}
 	case OperationCancel:
-		return "", fmt.Errorf("video provider %s does not support task cancellation", ProviderBBLabuV1)
+		return "", fmt.Errorf("%w: video provider %s does not support task cancellation", ErrVideoTaskCancellationUnsupported, ProviderBBLabuV1)
 	default:
 		return "", fmt.Errorf("unsupported video operation %q", operation)
 	}
@@ -143,7 +143,7 @@ func normalizeBBLabuStatus(status string) Status {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "queued", "pending":
 		return StatusPending
-	case "in_progress", "running", "processing":
+	case "in_progress", "running", "processing", "cancel_requested":
 		return StatusRunning
 	case "settling":
 		return StatusSettling

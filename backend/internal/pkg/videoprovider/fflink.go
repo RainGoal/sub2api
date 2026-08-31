@@ -146,7 +146,7 @@ func normalizeFFLinkStatus(status string) Status {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "pending", "queued":
 		return StatusPending
-	case "running", "in_progress", "processing":
+	case "running", "in_progress", "processing", "cancel_requested":
 		return StatusRunning
 	case "settling":
 		return StatusSettling

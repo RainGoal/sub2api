@@ -194,12 +194,42 @@ func (r *seedanceVideoTaskRepository) ClaimSettlement(ctx context.Context, taskI
 	if lease <= 0 {
 		lease = 30 * time.Second
 	}
+	// Claiming settlement only acquires the accounting lease. The terminal
+	// provider status is written by MarkSettled/MarkReleasedWithStatus after the
+	// corresponding money operation succeeds, so a failed release cannot be
+	// accidentally converted into a completed task.
 	result, err := r.db.ExecContext(ctx, `
 UPDATE custom_seedance_video_tasks
 SET settlement_status = 'processing', lease_until = $4, updated_at = NOW()
 WHERE provider_task_id = $1 AND user_id = $2 AND api_key_id = $3
   AND (settlement_status = 'pending'
-       OR (settlement_status = 'processing' AND lease_until <= NOW()))`,
+       OR (settlement_status = 'processing' AND lease_until <= NOW()))
+  AND LOWER(TRIM(COALESCE(upstream_status, ''))) <> 'cancel_requested'`,
+		strings.TrimSpace(taskID), userID, apiKeyID, time.Now().Add(lease))
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+func (r *seedanceVideoTaskRepository) ClaimCancellation(ctx context.Context, taskID string, userID, apiKeyID int64, lease time.Duration) (bool, error) {
+	if r == nil || r.db == nil || strings.TrimSpace(taskID) == "" || userID <= 0 || apiKeyID <= 0 {
+		return false, errors.New("seedance video cancellation claim is invalid")
+	}
+	if lease <= 0 {
+		lease = 30 * time.Second
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET settlement_status = 'processing', upstream_status = 'cancel_requested',
+    lease_until = $4, updated_at = NOW()
+WHERE provider_task_id = $1 AND user_id = $2 AND api_key_id = $3
+  AND (settlement_status = 'pending'
+       OR (settlement_status = 'processing' AND lease_until IS NOT NULL AND lease_until <= NOW()
+           AND LOWER(TRIM(COALESCE(upstream_status, ''))) = 'cancel_requested'))
+  AND LOWER(TRIM(COALESCE(upstream_status, ''))) NOT IN
+      ('completed', 'succeeded', 'success', 'failed', 'error', 'canceled', 'cancelled')`,
 		strings.TrimSpace(taskID), userID, apiKeyID, time.Now().Add(lease))
 	if err != nil {
 		return false, err
@@ -226,6 +256,30 @@ WHERE state_id = $1 AND settlement_status NOT IN ('settled', 'released')`,
 	return seedanceVideoTaskMutationResult(result, err)
 }
 
+// RescheduleWithLease only lets the worker that acquired leaseUntil release
+// the processing claim. The timestamp equality prevents an expired worker
+// from mutating a lease that another worker has since renewed; the clock check
+// also rejects a write after the original lease has elapsed but before a new
+// claim is visible.
+func (r *seedanceVideoTaskRepository) RescheduleWithLease(ctx context.Context, stateID, upstreamStatus string, dueAt time.Time, lastError string, leaseUntil time.Time) error {
+	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" || leaseUntil.IsZero() {
+		return errors.New("seedance video task lease-aware reschedule is invalid")
+	}
+	if dueAt.IsZero() {
+		dueAt = time.Now()
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET upstream_status = CASE WHEN $2 = '' THEN upstream_status ELSE $2 END,
+    settlement_status = 'pending', next_poll_at = $3, lease_until = NULL,
+    retry_count = retry_count + CASE WHEN $4 = '' THEN 0 ELSE 1 END,
+    last_error_message = $4, updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'processing'
+  AND lease_until = $5 AND lease_until > NOW()`,
+		stateID, strings.ToLower(strings.TrimSpace(upstreamStatus)), dueAt, strings.TrimSpace(lastError), leaseUntil)
+	return seedanceVideoTaskMutationResult(result, err)
+}
+
 func (r *seedanceVideoTaskRepository) MarkSettled(ctx context.Context, stateID string, actualCost float64) error {
 	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" {
 		return errors.New("seedance video task settlement is invalid")
@@ -238,6 +292,21 @@ WHERE state_id = $1 AND settlement_status = 'processing'`, stateID, actualCost)
 	return seedanceVideoTaskMutationResult(result, err)
 }
 
+// MarkSettledWithLease atomically completes billing only while the caller's
+// processing lease is still current.
+func (r *seedanceVideoTaskRepository) MarkSettledWithLease(ctx context.Context, stateID string, actualCost float64, leaseUntil time.Time) error {
+	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" || leaseUntil.IsZero() {
+		return errors.New("seedance video task lease-aware settlement is invalid")
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET settlement_status = 'settled', upstream_status = 'completed', actual_cost = $2,
+    lease_until = NULL, settled_at = NOW(), updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'processing'
+  AND lease_until = $3 AND lease_until > NOW()`, stateID, actualCost, leaseUntil)
+	return seedanceVideoTaskMutationResult(result, err)
+}
+
 func (r *seedanceVideoTaskRepository) MarkReleased(ctx context.Context, stateID string) error {
 	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" {
 		return errors.New("seedance video task release is invalid")
@@ -246,6 +315,75 @@ func (r *seedanceVideoTaskRepository) MarkReleased(ctx context.Context, stateID 
 UPDATE custom_seedance_video_tasks
 SET settlement_status = 'released', lease_until = NULL, settled_at = NOW(), updated_at = NOW()
 WHERE state_id = $1 AND settlement_status NOT IN ('settled', 'released')`, stateID)
+	return seedanceVideoTaskMutationResult(result, err)
+}
+
+// MarkReleasedWithLease atomically closes a failed/canceled task while the
+// caller still owns its processing lease.
+func (r *seedanceVideoTaskRepository) MarkReleasedWithLease(ctx context.Context, stateID string, leaseUntil time.Time) error {
+	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" || leaseUntil.IsZero() {
+		return errors.New("seedance video task lease-aware release is invalid")
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET settlement_status = 'released', lease_until = NULL, settled_at = NOW(), updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'processing'
+  AND lease_until = $2 AND lease_until > NOW()`, stateID, leaseUntil)
+	return seedanceVideoTaskMutationResult(result, err)
+}
+
+// MarkReleasedWithStatus records the terminal provider status atomically with
+// the accounting release. It is kept as an optional repository extension so
+// existing lightweight implementations can continue to use MarkReleased.
+func (r *seedanceVideoTaskRepository) MarkReleasedWithStatus(ctx context.Context, stateID, upstreamStatus string) error {
+	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" {
+		return errors.New("seedance video task release is invalid")
+	}
+	upstreamStatus = strings.ToLower(strings.TrimSpace(upstreamStatus))
+	if upstreamStatus == "" {
+		return r.MarkReleased(ctx, stateID)
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET settlement_status = 'released', upstream_status = $2, lease_until = NULL,
+    settled_at = NOW(), updated_at = NOW()
+WHERE state_id = $1 AND settlement_status NOT IN ('settled', 'released')`, stateID, upstreamStatus)
+	return seedanceVideoTaskMutationResult(result, err)
+}
+
+// MarkReleasedWithStatusWithLease records the terminal provider-neutral status
+// and closes billing in one owner-checked mutation.
+func (r *seedanceVideoTaskRepository) MarkReleasedWithStatusWithLease(ctx context.Context, stateID, upstreamStatus string, leaseUntil time.Time) error {
+	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" || leaseUntil.IsZero() {
+		return errors.New("seedance video task lease-aware release is invalid")
+	}
+	upstreamStatus = strings.ToLower(strings.TrimSpace(upstreamStatus))
+	if upstreamStatus == "" {
+		return r.MarkReleasedWithLease(ctx, stateID, leaseUntil)
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET settlement_status = 'released', upstream_status = $2, lease_until = NULL,
+    settled_at = NOW(), updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'processing'
+  AND lease_until = $3 AND lease_until > NOW()`, stateID, upstreamStatus, leaseUntil)
+	return seedanceVideoTaskMutationResult(result, err)
+}
+
+// MarkReleaseIntentWithLease persists the terminal provider status without
+// closing the accounting row. The owner can then retry the balance release and
+// final released mutation after a transient failure; recovery will recognize
+// this intent and will never poll/settle the provider task again.
+func (r *seedanceVideoTaskRepository) MarkReleaseIntentWithLease(ctx context.Context, stateID, upstreamStatus string, leaseUntil time.Time) error {
+	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" || strings.TrimSpace(upstreamStatus) == "" || leaseUntil.IsZero() {
+		return errors.New("seedance video release intent is invalid")
+	}
+	result, err := r.db.ExecContext(ctx, `
+UPDATE custom_seedance_video_tasks
+SET upstream_status = $2, updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'processing'
+  AND lease_until = $3 AND lease_until > NOW()`,
+		stateID, strings.ToLower(strings.TrimSpace(upstreamStatus)), leaseUntil)
 	return seedanceVideoTaskMutationResult(result, err)
 }
 

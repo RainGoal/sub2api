@@ -117,9 +117,31 @@ func TestSeedanceVideoTaskRepositorySettlementMutations(t *testing.T) {
 		WithArgs("state-1", 8.4).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.MarkSettled(ctx, "state-1", 8.4))
 
+	mock.ExpectExec(`(?s)SET settlement_status = 'processing', lease_until = \$4.*settlement_status = 'pending'`).
+		WithArgs("task-1", int64(7), int64(8), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	claimed, err := repo.ClaimSettlement(ctx, "task-1", 7, 8, time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	mock.ExpectExec(`(?s)SET settlement_status = 'processing', upstream_status = 'cancel_requested'.*settlement_status = 'pending'`).
+		WithArgs("task-2", int64(7), int64(8), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	cancellationRepo, ok := repo.(service.SeedanceVideoTaskCancellationRepository)
+	require.True(t, ok)
+	claimed, err = cancellationRepo.ClaimCancellation(ctx, "task-2", 7, 8, time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
 	mock.ExpectExec(`(?s)SET settlement_status = 'released'`).
 		WithArgs("state-2").WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.MarkReleased(ctx, "state-2"))
+
+	mock.ExpectExec(`(?s)SET settlement_status = 'released', upstream_status = \$2`).
+		WithArgs("state-3", "canceled").WillReturnResult(sqlmock.NewResult(0, 1))
+	releaseRepo, ok := repo.(service.SeedanceVideoTaskReleaseStatusRepository)
+	require.True(t, ok)
+	require.NoError(t, releaseRepo.MarkReleasedWithStatus(ctx, "state-3", "canceled"))
 
 	mock.ExpectExec(`(?s)SET settlement_status = 'released'`).
 		WithArgs("missing").WillReturnResult(sqlmock.NewResult(0, 0))

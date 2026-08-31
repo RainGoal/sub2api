@@ -3,10 +3,16 @@ package videoprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 )
+
+// ErrVideoTaskCancellationUnsupported identifies a provider capability gap.
+// Callers can map it to a stable API error without parsing provider-specific
+// error text.
+var ErrVideoTaskCancellationUnsupported = errors.New("video task cancellation unsupported")
 
 type ID string
 
@@ -101,7 +107,7 @@ type Driver interface {
 
 func IsPending(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "queued", "pending", "in_progress", "running", "processing", "settling":
+	case "queued", "pending", "in_progress", "running", "processing", "settling", "cancel_requested":
 		return true
 	default:
 		return false

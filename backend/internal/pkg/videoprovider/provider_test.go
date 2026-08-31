@@ -42,6 +42,7 @@ func TestBBLabuDriverContract(t *testing.T) {
 		BaseURL: DefaultBBLabuBaseURL, APIKey: "test-key", Operation: OperationCancel, TaskID: "task-1",
 	})
 	require.ErrorContains(t, err, "does not support task cancellation")
+	require.ErrorIs(t, err, ErrVideoTaskCancellationUnsupported)
 
 	request, _, err := ParseCreateRequest([]byte(`{
 		"model":"seedance-2.0","prompt":"waves","duration":10,"resolution":"4k",

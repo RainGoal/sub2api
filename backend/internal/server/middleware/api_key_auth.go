@@ -36,9 +36,9 @@ func ProvideAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscript
 //   - 鉴权（Authentication）：验证 Key 有效性、用户状态、IP 限制 —— 始终执行
 //   - 计费执行（Billing Enforcement）：过期/配额/订阅/余额检查 —— skipBilling 时整块跳过
 //
-// /v1/usage、/v1/sub2api/billing 端点与异步生图任务查询只需鉴权，不需要计费执行。
+// /v1/usage、/v1/sub2api/billing 端点与异步生图/Seedance 视频任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
-// 异步生图查询允许已耗尽额度的 Key 拉取自身任务结果。
+// 异步生图/Seedance 视频查询允许已耗尽额度的 Key 拉取自身任务结果，视频还可取消未完成任务。
 func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, recorder conversationaudit.Recorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
@@ -177,10 +177,17 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
-		// Async image task polling only reads data that already belongs to the
+		// Async task lookups only read data that already belongs to the
 		// authenticated key and must remain available after the completed
-		// generation consumes the key's remaining balance.
-		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
+		// generation consumes the key's remaining balance. Seedance cancellation
+		// is also non-billable and uses the same ownership checks in its handler.
+		groupPlatform := ""
+		if apiKey.Group != nil {
+			groupPlatform = apiKey.Group.Platform
+		}
+		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest ||
+			isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path) ||
+			isSeedanceVideoTaskRead(c.Request.Method, c.Request.URL.Path, groupPlatform)
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
@@ -349,6 +356,23 @@ func isAsyncImageTaskRead(method, path string) bool {
 		return false
 	}
 	return strings.HasPrefix(path, "/v1/images/tasks/") || strings.HasPrefix(path, "/images/tasks/")
+}
+
+// isSeedanceVideoTaskRead identifies Seedance task lookups and cancellation
+// routes. These operations do not create new billable work; the concrete
+// handlers still enforce task ownership after basic API key authentication.
+func isSeedanceVideoTaskRead(method, path, platform string) bool {
+	if platform != service.PlatformSeedance {
+		return false
+	}
+	switch method {
+	case http.MethodGet:
+		return strings.HasPrefix(path, "/v1/videos/") || strings.HasPrefix(path, "/videos/")
+	case http.MethodDelete:
+		return strings.HasPrefix(path, "/v1/videos/jobs/") || strings.HasPrefix(path, "/videos/jobs/")
+	default:
+		return false
+	}
 }
 
 // GetAPIKeyFromContext 从上下文中获取API key

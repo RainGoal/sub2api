@@ -92,8 +92,17 @@ func TestForwardSeedanceVideoCreateUsesBblabuCanonicalEndpoint(t *testing.T) {
 	require.Equal(t, PlatformSeedance, result.VideoProvider)
 	require.Zero(t, result.VideoCount)
 	require.Empty(t, recorder.Body.String())
-	require.NoError(t, svc.CommitSeedanceVideoResponse(c, result))
-	require.JSONEq(t, `{"task_id":"task-123","status":"queued"}`, recorder.Body.String())
+	response := BuildSeedanceVideoResponse(result, SeedanceVideoResponseMeta{
+		ID: "task-123", Model: "Seedance-2.0", Resolution: "720p", Duration: 10,
+	})
+	require.Equal(t, "task-123", response.ID)
+	require.Equal(t, "video", response.Object)
+	require.Equal(t, SeedanceVideoResponseStatusQueued, response.Status)
+	require.Equal(t, "seedance-2.0", response.Model)
+	require.Equal(t, "720p", response.Resolution)
+	require.Equal(t, 10, response.Duration)
+	require.Nil(t, response.ContentURL)
+	require.Nil(t, response.Error)
 }
 
 func TestForwardSeedanceVideoUsesFFLinkCreateAndCancelContract(t *testing.T) {
@@ -164,6 +173,23 @@ func TestForwardSeedanceVideoStatusParsesCompletedBillingFields(t *testing.T) {
 	require.Equal(t, "720p", result.VideoResolution)
 	require.Equal(t, 30, result.VideoDurationSeconds)
 	require.Equal(t, 12, result.VideoReferenceInputSeconds)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestFetchSeedanceVideoStatusOversizedBodyDoesNotWriteThroughNilContext(t *testing.T) {
+	upstream := &seedanceVideoUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader("toolong")),
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.UpstreamResponseReadMaxBytes = 3
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+
+	result, err := svc.FetchSeedanceVideoStatus(context.Background(), seedanceVideoTestAccount(), string(videoprovider.ProviderBBLabuV1), "task-oversized")
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrUpstreamResponseBodyTooLarge)
 }
 
 func TestForwardSeedanceVideoCreateRejectsSuccessfulResponseWithoutTaskID(t *testing.T) {
@@ -224,6 +250,23 @@ func TestForwardSeedanceVideoContentKeepsTaskAffinityProtocolAndRange(t *testing
 	require.Equal(t, 1, result.VideoCount)
 }
 
+func TestForwardSeedanceVideoContentRejectsNonTerminalStatusBeforeFetchingBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &seedanceVideoUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"task-running","status":"running"}`)),
+	}}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+
+	result, err := svc.ForwardSeedanceVideo(context.Background(), nil, seedanceVideoTestAccount(),
+		string(videoprovider.ProviderBBLabuV1), SeedanceVideoEndpointContent, "task-running", nil)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrSeedanceVideoContentNotReady)
+	require.Len(t, upstream.requests, 1)
+}
+
 func TestSeedanceVideoURLRejectsUnsafeTaskIDAndQueryBaseURL(t *testing.T) {
 	driver, err := videoprovider.Resolve(string(videoprovider.ProviderBBLabuV1))
 	require.NoError(t, err)
@@ -254,6 +297,11 @@ type seedanceVideoCache struct {
 type seedanceVideoTaskMemoryRepo struct {
 	tasks   map[string]*SeedanceVideoPendingBilling
 	bindErr error
+}
+
+type seedanceVideoReleaseFailOnceRepo struct {
+	*seedanceVideoTaskMemoryRepo
+	failRelease bool
 }
 
 func (r *seedanceVideoTaskMemoryRepo) Create(_ context.Context, pending *SeedanceVideoPendingBilling) error {
@@ -315,15 +363,50 @@ func (r *seedanceVideoTaskMemoryRepo) ClaimDue(_ context.Context, now time.Time,
 	return tasks, nil
 }
 
-func (r *seedanceVideoTaskMemoryRepo) ClaimSettlement(_ context.Context, taskID string, userID, apiKeyID int64, _ time.Duration) (bool, error) {
+func (r *seedanceVideoTaskMemoryRepo) ClaimSettlement(_ context.Context, taskID string, userID, apiKeyID int64, lease time.Duration) (bool, error) {
 	for _, pending := range r.tasks {
 		if pending.TaskID == taskID && pending.UserID == userID && pending.APIKeyID == apiKeyID {
 			if pending.SettlementStatus != SeedanceVideoSettlementPending {
 				return false, nil
 			}
+			if strings.EqualFold(strings.TrimSpace(pending.UpstreamStatus), SeedanceVideoCancellationRequestedStatus) {
+				return false, nil
+			}
+			if lease <= 0 {
+				lease = 30 * time.Second
+			}
 			pending.SettlementStatus = SeedanceVideoSettlementProcessing
+			leaseUntil := time.Now().Add(lease)
+			pending.LeaseUntil = &leaseUntil
 			return true, nil
 		}
+	}
+	return false, ErrSeedanceVideoTaskNotFound
+}
+
+func (r *seedanceVideoTaskMemoryRepo) ClaimCancellation(_ context.Context, taskID string, userID, apiKeyID int64, lease time.Duration) (bool, error) {
+	for _, pending := range r.tasks {
+		if pending.TaskID != taskID || pending.UserID != userID || pending.APIKeyID != apiKeyID {
+			continue
+		}
+		leaseExpiredCancellation := pending.SettlementStatus == SeedanceVideoSettlementProcessing &&
+			pending.LeaseUntil != nil && !pending.LeaseUntil.After(time.Now()) &&
+			strings.EqualFold(strings.TrimSpace(pending.UpstreamStatus), SeedanceVideoCancellationRequestedStatus)
+		if pending.SettlementStatus != SeedanceVideoSettlementPending && !leaseExpiredCancellation {
+			return false, nil
+		}
+		switch NormalizeSeedanceVideoStatus(pending.UpstreamStatus) {
+		case SeedanceVideoResponseStatusCompleted, SeedanceVideoResponseStatusFailed, SeedanceVideoResponseStatusCanceled:
+			return false, nil
+		}
+		pending.SettlementStatus = SeedanceVideoSettlementProcessing
+		pending.UpstreamStatus = SeedanceVideoCancellationRequestedStatus
+		if lease <= 0 {
+			lease = 30 * time.Second
+		}
+		leaseUntil := time.Now().Add(lease)
+		pending.LeaseUntil = &leaseUntil
+		return true, nil
 	}
 	return false, ErrSeedanceVideoTaskNotFound
 }
@@ -356,6 +439,87 @@ func (r *seedanceVideoTaskMemoryRepo) MarkReleased(_ context.Context, stateID st
 	}
 	pending.SettlementStatus = SeedanceVideoSettlementReleased
 	return nil
+}
+
+func (r *seedanceVideoTaskMemoryRepo) MarkReleasedWithStatus(_ context.Context, stateID, status string) error {
+	pending := r.tasks[stateID]
+	if pending == nil {
+		return ErrSeedanceVideoTaskNotFound
+	}
+	pending.UpstreamStatus = status
+	pending.SettlementStatus = SeedanceVideoSettlementReleased
+	return nil
+}
+
+func (r *seedanceVideoTaskMemoryRepo) RescheduleWithLease(_ context.Context, stateID, status string, dueAt time.Time, lastError string, leaseUntil time.Time) error {
+	pending, err := r.pendingForLease(stateID, leaseUntil)
+	if err != nil {
+		return err
+	}
+	pending.UpstreamStatus = status
+	pending.SettlementStatus = SeedanceVideoSettlementPending
+	pending.NextPollAt = dueAt
+	pending.LastError = lastError
+	pending.LeaseUntil = nil
+	return nil
+}
+
+func (r *seedanceVideoTaskMemoryRepo) MarkSettledWithLease(_ context.Context, stateID string, _ float64, leaseUntil time.Time) error {
+	pending, err := r.pendingForLease(stateID, leaseUntil)
+	if err != nil {
+		return err
+	}
+	pending.SettlementStatus = SeedanceVideoSettlementSettled
+	pending.LeaseUntil = nil
+	return nil
+}
+
+func (r *seedanceVideoTaskMemoryRepo) MarkReleasedWithLease(_ context.Context, stateID string, leaseUntil time.Time) error {
+	pending, err := r.pendingForLease(stateID, leaseUntil)
+	if err != nil {
+		return err
+	}
+	pending.SettlementStatus = SeedanceVideoSettlementReleased
+	pending.LeaseUntil = nil
+	return nil
+}
+
+func (r *seedanceVideoTaskMemoryRepo) MarkReleasedWithStatusWithLease(_ context.Context, stateID, status string, leaseUntil time.Time) error {
+	pending, err := r.pendingForLease(stateID, leaseUntil)
+	if err != nil {
+		return err
+	}
+	pending.UpstreamStatus = status
+	pending.SettlementStatus = SeedanceVideoSettlementReleased
+	pending.LeaseUntil = nil
+	return nil
+}
+
+func (r *seedanceVideoTaskMemoryRepo) MarkReleaseIntentWithLease(_ context.Context, stateID, status string, leaseUntil time.Time) error {
+	pending, err := r.pendingForLease(stateID, leaseUntil)
+	if err != nil {
+		return err
+	}
+	pending.UpstreamStatus = status
+	return nil
+}
+
+func (r *seedanceVideoReleaseFailOnceRepo) MarkReleasedWithStatusWithLease(ctx context.Context, stateID, status string, leaseUntil time.Time) error {
+	if r.failRelease {
+		r.failRelease = false
+		return errors.New("simulated terminal release write failure")
+	}
+	return r.seedanceVideoTaskMemoryRepo.MarkReleasedWithStatusWithLease(ctx, stateID, status, leaseUntil)
+}
+
+func (r *seedanceVideoTaskMemoryRepo) pendingForLease(stateID string, leaseUntil time.Time) (*SeedanceVideoPendingBilling, error) {
+	pending := r.tasks[stateID]
+	if pending == nil || pending.SettlementStatus != SeedanceVideoSettlementProcessing ||
+		pending.LeaseUntil == nil || pending.LeaseUntil.IsZero() || leaseUntil.IsZero() ||
+		!pending.LeaseUntil.Equal(leaseUntil) || !leaseUntil.After(time.Now()) {
+		return nil, ErrSeedanceVideoTaskNotFound
+	}
+	return pending, nil
 }
 
 type seedanceVideoAPIKeyRepo struct {
@@ -561,6 +725,145 @@ func TestStoreSeedanceVideoPendingBillingFailsClosedWhenDatabaseBindFails(t *tes
 	require.ErrorContains(t, err, "database unavailable")
 }
 
+func TestStoreSeedanceVideoPendingBillingPreservesTerminalUpstreamStatus(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	pending := SeedanceVideoPendingBilling{
+		StateID: "state:terminal", HoldID: "seedance:hold:terminal", UserID: 7, APIKeyID: 8,
+		AccountID: 20, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: videoprovider.ModelSeedance25,
+		Resolution: "720p", DurationSeconds: 10, UpstreamStatus: string(videoprovider.StatusFailed),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-terminal", pending.UserID, pending.APIKeyID, pending))
+
+	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-terminal", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.Equal(t, string(videoprovider.StatusFailed), stored.UpstreamStatus)
+}
+
+func TestReleaseSeedanceVideoTaskWithStatusPersistsCanceledState(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	pending := SeedanceVideoPendingBilling{
+		StateID: "state:canceled", HoldID: "seedance:hold:canceled", UserID: 7, APIKeyID: 8,
+		AccountID: 20, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: videoprovider.ModelSeedance25,
+		Resolution: "720p", DurationSeconds: 10,
+	}
+	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID, pending))
+	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.ReleaseSeedanceVideoTaskWithStatus(context.Background(), stored, string(videoprovider.StatusCanceled)))
+	released, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.Equal(t, SeedanceVideoSettlementReleased, released.SettlementStatus)
+	require.Equal(t, string(videoprovider.StatusCanceled), released.UpstreamStatus)
+}
+
+func TestClaimSeedanceVideoCancellationSerializesWithCompletion(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	pending := SeedanceVideoPendingBilling{
+		StateID: "state:cancel-claim", HoldID: "seedance:hold:cancel-claim", UserID: 7, APIKeyID: 8,
+		AccountID: 20, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: videoprovider.ModelSeedance25,
+		Resolution: "720p", DurationSeconds: 10, UpstreamStatus: string(videoprovider.StatusRunning),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID, pending))
+
+	claimed, err := svc.ClaimSeedanceVideoCancellation(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimed, err = svc.ClaimSeedanceVideoBilling(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.False(t, claimed)
+
+	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.Equal(t, SeedanceVideoSettlementProcessing, stored.SettlementStatus)
+	require.Equal(t, SeedanceVideoCancellationRequestedStatus, stored.UpstreamStatus)
+}
+
+func TestClaimSeedanceVideoCancellationDoesNotStealExpiredProcessingLease(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{tasks: map[string]*SeedanceVideoPendingBilling{}}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	expired := time.Now().Add(-time.Minute)
+	repo.tasks["state:processing"] = &SeedanceVideoPendingBilling{
+		StateID: "state:processing", TaskID: "task-processing", UserID: 7, APIKeyID: 8,
+		SettlementStatus: SeedanceVideoSettlementProcessing, UpstreamStatus: SeedanceVideoResponseStatusInProgress,
+		LeaseUntil: &expired,
+	}
+
+	claimed, err := svc.ClaimSeedanceVideoCancellation(context.Background(), "task-processing", 7, 8)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Equal(t, SeedanceVideoSettlementProcessing, repo.tasks["state:processing"].SettlementStatus)
+	require.Equal(t, SeedanceVideoResponseStatusInProgress, repo.tasks["state:processing"].UpstreamStatus)
+}
+
+func TestClaimSeedanceVideoCancellationCanRetryExpiredCancellationIntent(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{tasks: map[string]*SeedanceVideoPendingBilling{}}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	expired := time.Now().Add(-time.Minute)
+	repo.tasks["state:cancel-retry"] = &SeedanceVideoPendingBilling{
+		StateID: "state:cancel-retry", TaskID: "task-cancel-retry", UserID: 7, APIKeyID: 8,
+		SettlementStatus: SeedanceVideoSettlementProcessing, UpstreamStatus: SeedanceVideoCancellationRequestedStatus,
+		LeaseUntil: &expired,
+	}
+
+	claimed, err := svc.ClaimSeedanceVideoCancellation(context.Background(), "task-cancel-retry", 7, 8)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Equal(t, SeedanceVideoSettlementProcessing, repo.tasks["state:cancel-retry"].SettlementStatus)
+	require.Equal(t, SeedanceVideoCancellationRequestedStatus, repo.tasks["state:cancel-retry"].UpstreamStatus)
+}
+
+func TestClaimSeedanceVideoBillingSkipsCancellationIntent(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	pending := SeedanceVideoPendingBilling{
+		StateID: "state:cancel-intent", HoldID: "seedance:hold:cancel-intent", UserID: 7, APIKeyID: 8,
+		AccountID: 20, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: videoprovider.ModelSeedance25,
+		Resolution: "720p", DurationSeconds: 10, UpstreamStatus: SeedanceVideoCancellationRequestedStatus,
+		SettlementStatus: SeedanceVideoSettlementPending,
+	}
+	repo.tasks = map[string]*SeedanceVideoPendingBilling{pending.StateID: &pending}
+	pending.TaskID = "task-cancel-intent"
+
+	claimed, err := svc.ClaimSeedanceVideoBilling(context.Background(), pending.TaskID, pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Equal(t, SeedanceVideoSettlementPending, pending.SettlementStatus)
+}
+
+func TestClaimSeedanceVideoBillingPreservesObservedFailureStatus(t *testing.T) {
+	repo := &seedanceVideoTaskMemoryRepo{}
+	svc := &OpenAIGatewayService{seedanceVideoTaskRepo: repo}
+	pending := SeedanceVideoPendingBilling{
+		StateID: "state:failed-claim", HoldID: "seedance:hold:failed-claim", UserID: 7, APIKeyID: 8,
+		AccountID: 20, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: videoprovider.ModelSeedance25,
+		Resolution: "720p", DurationSeconds: 10, UpstreamStatus: string(videoprovider.StatusFailed),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID, pending))
+
+	claimed, err := svc.ClaimSeedanceVideoBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID)
+	require.NoError(t, err)
+	require.Equal(t, SeedanceVideoSettlementProcessing, stored.SettlementStatus)
+	require.Equal(t, string(videoprovider.StatusFailed), stored.UpstreamStatus)
+}
+
 func TestResolveSeedanceVideoTaskAccountUsesPendingWhenStickyWriteFails(t *testing.T) {
 	cache := &seedanceVideoCache{}
 	svc := &OpenAIGatewayService{cache: cache, seedanceVideoTaskRepo: &seedanceVideoTaskMemoryRepo{}}
@@ -648,14 +951,197 @@ func TestSeedanceVideoRecoveryReleasesFailedTaskHold(t *testing.T) {
 	claimed, err := gateway.ClaimSeedanceVideoBilling(context.Background(), "task-failed", 7, 8)
 	require.NoError(t, err)
 	require.True(t, claimed)
+	claimedPending, err := gateway.LoadSeedanceVideoPendingBilling(context.Background(), "task-failed", 7, 8)
+	require.NoError(t, err)
 	recovery := NewSeedanceVideoRecoveryService(
 		gateway, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{*account}}, nil, nil,
 	)
 
-	require.NoError(t, recovery.processTask(context.Background(), stored))
+	require.NoError(t, recovery.processTask(context.Background(), claimedPending))
 	require.Len(t, billing.releases, 1)
 	require.Equal(t, "seedance:hold-failed", billing.releases[0].BatchID)
 	require.Equal(t, SeedanceVideoSettlementReleased, taskRepo.tasks[stored.StateID].SettlementStatus)
+}
+
+func TestSeedanceVideoRecoveryPreservesCanceledTaskStatus(t *testing.T) {
+	taskRepo := &seedanceVideoTaskMemoryRepo{}
+	billing := &seedanceVideoBillingRepo{}
+	account := seedanceVideoTestAccount()
+	upstream := &seedanceVideoUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"task-canceled","status":"cancelled"}`)),
+	}}}
+	gateway := &OpenAIGatewayService{
+		seedanceVideoTaskRepo: taskRepo, usageBillingRepo: billing,
+		httpUpstream: upstream, cfg: &config.Config{},
+	}
+	accountRepo := schedulerTestOpenAIAccountRepo{accounts: []Account{*account}}
+	stored := storeSeedanceTestPending(t, gateway, "task-canceled", 7, 8, SeedanceVideoPendingBilling{
+		AccountID: account.ID, Model: "Seedance-2.0", Resolution: "720p", DurationSeconds: 10,
+		HoldID: "seedance:hold-canceled", HoldAmount: 1,
+	})
+	claimed, err := gateway.ClaimSeedanceVideoBilling(context.Background(), "task-canceled", 7, 8)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimedPending, err := gateway.LoadSeedanceVideoPendingBilling(context.Background(), "task-canceled", 7, 8)
+	require.NoError(t, err)
+	recovery := NewSeedanceVideoRecoveryService(gateway, nil, accountRepo, nil, nil)
+
+	require.NoError(t, recovery.processTask(context.Background(), claimedPending))
+	released := taskRepo.tasks[stored.StateID]
+	require.Equal(t, SeedanceVideoSettlementReleased, released.SettlementStatus)
+	require.Equal(t, SeedanceVideoResponseStatusCanceled, released.UpstreamStatus)
+}
+
+func TestSeedanceVideoRecoveryReleaseIntentPreventsRepeatSettlement(t *testing.T) {
+	baseRepo := &seedanceVideoTaskMemoryRepo{}
+	taskRepo := &seedanceVideoReleaseFailOnceRepo{
+		seedanceVideoTaskMemoryRepo: baseRepo,
+		failRelease:                 true,
+	}
+	billing := &seedanceVideoBillingRepo{}
+	upstream := &seedanceVideoUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"task-release-intent","status":"completed","duration":10}`)),
+	}}}
+	gateway := &OpenAIGatewayService{
+		seedanceVideoTaskRepo: taskRepo,
+		usageBillingRepo:      billing,
+		httpUpstream:          upstream,
+		cfg:                   &config.Config{},
+	}
+	stored := storeSeedanceTestPending(t, gateway, "task-release-intent", 7, 8, SeedanceVideoPendingBilling{
+		AccountID: 20, Model: "Seedance-2.0", Resolution: "720p",
+		DurationSeconds: 10, IsSubscriptionBilling: true, UpstreamStatus: SeedanceVideoResponseStatusFailed,
+	})
+	claimed, err := gateway.ClaimSeedanceVideoBilling(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimedPending, err := gateway.LoadSeedanceVideoPendingBilling(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	recovery := NewSeedanceVideoRecoveryService(gateway, nil, nil, nil, nil)
+
+	err = recovery.processTask(context.Background(), claimedPending)
+	require.ErrorContains(t, err, "simulated terminal release write failure")
+	require.Equal(t, SeedanceVideoSettlementProcessing, baseRepo.tasks[stored.StateID].SettlementStatus)
+	require.Equal(t, SeedanceVideoResponseStatusFailed, baseRepo.tasks[stored.StateID].UpstreamStatus)
+	require.Empty(t, billing.commands)
+	require.Empty(t, upstream.requests)
+
+	require.NoError(t, recovery.processTask(context.Background(), claimedPending))
+	require.Equal(t, SeedanceVideoSettlementReleased, baseRepo.tasks[stored.StateID].SettlementStatus)
+	require.Empty(t, billing.commands)
+	require.Empty(t, upstream.requests)
+}
+
+func TestSeedanceVideoRecoveryRetriesDurableCancellationIntent(t *testing.T) {
+	taskRepo := &seedanceVideoTaskMemoryRepo{}
+	billing := &seedanceVideoBillingRepo{}
+	account := seedanceVideoTestAccount()
+	account.Credentials["video_provider"] = string(videoprovider.ProviderFFLinkV1)
+	account.Credentials["base_url"] = "https://api.fflink.top/v1"
+	upstream := &seedanceVideoUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"job_id":"task-cancel-intent","status":"success"}`)),
+	}}}
+	gateway := &OpenAIGatewayService{
+		seedanceVideoTaskRepo: taskRepo, usageBillingRepo: billing,
+		httpUpstream: upstream, cfg: &config.Config{},
+	}
+	stored := storeSeedanceTestPending(t, gateway, "task-cancel-intent", 7, 8, SeedanceVideoPendingBilling{
+		AccountID: account.ID, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: "Seedance-2.0",
+		Resolution: "720p", DurationSeconds: 10, HoldID: "seedance:hold-cancel-intent", HoldAmount: 1,
+		UpstreamStatus: "running",
+	})
+	claimed, err := gateway.ClaimSeedanceVideoCancellation(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimedPending, err := gateway.LoadSeedanceVideoPendingBilling(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	recovery := NewSeedanceVideoRecoveryService(
+		gateway, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{*account}}, nil, nil,
+	)
+
+	require.NoError(t, recovery.processTask(context.Background(), claimedPending))
+	released := taskRepo.tasks[stored.StateID]
+	require.Equal(t, SeedanceVideoSettlementReleased, released.SettlementStatus)
+	require.Equal(t, SeedanceVideoResponseStatusCanceled, released.UpstreamStatus)
+	require.Len(t, billing.releases, 1)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, http.MethodDelete, upstream.requests[0].Method)
+}
+
+func TestSeedanceVideoRecoveryClearsUnsupportedCancellationIntent(t *testing.T) {
+	taskRepo := &seedanceVideoTaskMemoryRepo{}
+	account := seedanceVideoTestAccount()
+	gateway := &OpenAIGatewayService{
+		seedanceVideoTaskRepo: taskRepo,
+		httpUpstream:          &seedanceVideoUpstream{},
+		cfg:                   &config.Config{},
+	}
+	stored := storeSeedanceTestPending(t, gateway, "task-cancel-unsupported", 7, 8, SeedanceVideoPendingBilling{
+		AccountID: account.ID, ProviderID: string(videoprovider.ProviderBBLabuV1), Model: "Seedance-2.0",
+		Resolution: "720p", DurationSeconds: 10, HoldID: "seedance:hold-cancel-unsupported", HoldAmount: 1,
+		UpstreamStatus: SeedanceVideoResponseStatusInProgress,
+	})
+	claimed, err := gateway.ClaimSeedanceVideoCancellation(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimedPending, err := gateway.LoadSeedanceVideoPendingBilling(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	recovery := NewSeedanceVideoRecoveryService(
+		gateway, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{*account}}, nil, nil,
+	)
+
+	require.NoError(t, recovery.processTask(context.Background(), claimedPending))
+	rescheduled := taskRepo.tasks[stored.StateID]
+	require.Equal(t, SeedanceVideoSettlementPending, rescheduled.SettlementStatus)
+	require.Equal(t, SeedanceVideoResponseStatusInProgress, rescheduled.UpstreamStatus)
+	require.Nil(t, rescheduled.LeaseUntil)
+}
+
+func TestSeedanceVideoRecoveryResumesStatusPollingAfterCancellationError(t *testing.T) {
+	taskRepo := &seedanceVideoTaskMemoryRepo{}
+	billing := &seedanceVideoBillingRepo{}
+	account := seedanceVideoTestAccount()
+	account.Credentials["video_provider"] = string(videoprovider.ProviderFFLinkV1)
+	account.Credentials["base_url"] = "https://api.fflink.top/v1"
+	upstream := &seedanceVideoUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":"job not found"}`)),
+	}}}
+	gateway := &OpenAIGatewayService{
+		seedanceVideoTaskRepo: taskRepo,
+		usageBillingRepo:      billing,
+		httpUpstream:          upstream,
+		cfg:                   &config.Config{},
+	}
+	stored := storeSeedanceTestPending(t, gateway, "task-cancel-error", 7, 8, SeedanceVideoPendingBilling{
+		AccountID: account.ID, ProviderID: string(videoprovider.ProviderFFLinkV1), Model: "Seedance-2.0",
+		Resolution: "720p", DurationSeconds: 10, HoldID: "seedance:hold-cancel-error", HoldAmount: 1,
+		UpstreamStatus: SeedanceVideoResponseStatusInProgress,
+	})
+	claimed, err := gateway.ClaimSeedanceVideoCancellation(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimedPending, err := gateway.LoadSeedanceVideoPendingBilling(context.Background(), stored.TaskID, stored.UserID, stored.APIKeyID)
+	require.NoError(t, err)
+	recovery := NewSeedanceVideoRecoveryService(
+		gateway, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{*account}}, nil, nil,
+	)
+
+	require.NoError(t, recovery.processTask(context.Background(), claimedPending))
+	rescheduled := taskRepo.tasks[stored.StateID]
+	require.Equal(t, SeedanceVideoSettlementPending, rescheduled.SettlementStatus)
+	require.Equal(t, SeedanceVideoResponseStatusInProgress, rescheduled.UpstreamStatus)
+	require.Nil(t, rescheduled.LeaseUntil)
+	require.Empty(t, billing.releases)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, http.MethodDelete, upstream.requests[0].Method)
 }
 
 func TestSeedanceVideoRecoverySettlesCompletedTaskOnceWithFrozenPricing(t *testing.T) {
