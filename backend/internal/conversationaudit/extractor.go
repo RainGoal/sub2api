@@ -49,16 +49,6 @@ func ExtractRequest(protocol string, body []byte, maxBytes int) (ExtractResult, 
 			payload.Messages = append(payload.Messages, messageFromValue("system", instructions)...)
 		}
 		payload.Messages = append(payload.Messages, responseInputMessages(container["input"])...)
-		payload.Messages = append(payload.Messages, responseInputMessages(root["item"])...)
-		eventType := strings.ToLower(stringValue(root["type"]))
-		switch {
-		case strings.Contains(eventType, "input_audio_transcription"):
-			payload.Messages = append(payload.Messages, messageFromValue("user", root["transcript"])...)
-		case eventType == "input_audio_buffer.append":
-			payload.Messages = append(payload.Messages, Message{Role: "user", Content: []ContentItem{{
-				Type: "media_omitted", MediaType: "audio", EncodedBytes: encodedMediaBytes(root),
-			}}})
-		}
 	case "gemini":
 		if system, ok := root["systemInstruction"]; ok {
 			payload.Messages = append(payload.Messages, geminiMessage("system", system)...)
@@ -70,9 +60,6 @@ func ExtractRequest(protocol string, body []byte, maxBytes int) (ExtractResult, 
 		payload.Messages = append(payload.Messages, geminiContents(root["content"])...)
 	case "embeddings":
 		payload.Messages = append(payload.Messages, messageFromValue("user", root["input"])...)
-	case "openai_images":
-		payload.Messages = append(payload.Messages, extractReadableOptions(root)...)
-		payload.Messages = append(payload.Messages, batchImagePromptMessages(root)...)
 	default:
 		payload.Messages = append(payload.Messages, extractReadableOptions(root)...)
 		if len(payload.Messages) == 0 {
@@ -96,7 +83,7 @@ func normalizeProtocol(protocol string) string {
 		return "anthropic_messages"
 	case "openai_responses", "responses":
 		return "openai_responses"
-	case "responses_websocket", "grok_realtime", "openai_live":
+	case "responses_websocket":
 		return "responses_websocket"
 	case "gemini", "gemini_generate_content":
 		return "gemini"
@@ -308,32 +295,6 @@ func extractReadableOptions(root map[string]any) []Message {
 	return []Message{{Role: "user", Content: content}}
 }
 
-func batchImagePromptMessages(root map[string]any) []Message {
-	request, ok := root["request"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	items, ok := request["items"].([]any)
-	if !ok {
-		return nil
-	}
-	result := make([]Message, 0, len(items))
-	for _, item := range items {
-		object, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		content := contentItems(object["prompt"])
-		if references, ok := object["reference_images"].([]any); ok && len(references) > 0 {
-			content = append(content, ContentItem{Type: "media_omitted", MediaType: "image"})
-		}
-		if len(content) > 0 {
-			result = append(result, Message{Role: "user", Content: content})
-		}
-	}
-	return result
-}
-
 func normalizeRole(role string) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "system", "developer", "user", "assistant", "tool":
@@ -390,7 +351,7 @@ func hasMediaValue(value map[string]any) bool {
 }
 
 func encodedMediaBytes(value map[string]any) int64 {
-	for _, key := range []string{"data", "image", "audio", "video", "url", "delta"} {
+	for _, key := range []string{"data", "image", "audio", "video", "url"} {
 		if candidate, ok := value[key]; ok {
 			return encodedValueBytes(candidate)
 		}

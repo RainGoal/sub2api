@@ -34,18 +34,6 @@ func TestExtractRequestProtocolShapes(t *testing.T) {
 	}
 }
 
-func TestExtractRequestBatchImagesPreservesPromptsAndOmitsReferences(t *testing.T) {
-	body := `{"request":{"items":[{"prompt":"first prompt"},{"prompt":"second prompt","reference_images":[{"data":"QUJDRA=="}]}]}}`
-	result, err := ExtractRequest("openai_images", []byte(body), 1<<20)
-
-	require.NoError(t, err)
-	require.Len(t, result.Payload.Messages, 2)
-	require.Equal(t, "first prompt", result.Payload.Messages[0].Content[0].Text)
-	require.Equal(t, "second prompt", result.Payload.Messages[1].Content[0].Text)
-	require.Equal(t, "media_omitted", result.Payload.Messages[1].Content[1].Type)
-	require.NotContains(t, string(mustJSON(t, result.Payload)), "QUJDRA")
-}
-
 func TestExtractRequestPreservesToolsAndOmitsMedia(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,QUJDRA=="}}]},{"role":"assistant","tool_calls":[{"function":{"name":"search","arguments":"{\"q\":\"term\"}"}}]}]}`
 	result, err := ExtractRequest("openai_chat_completions", []byte(body), 1<<20)
@@ -80,16 +68,4 @@ func TestExtractRequestNonJSONSTTIsMetadataOnly(t *testing.T) {
 	require.Equal(t, "non_json_media_omitted", result.Reason)
 	require.Equal(t, "media_omitted", result.Payload.Messages[0].Content[0].Type)
 	require.NotContains(t, string(mustJSON(t, result)), "binary-media-canary")
-}
-
-func TestExtractRequestNormalizesRealtimeTextAndOmitsAudio(t *testing.T) {
-	textResult, err := ExtractRequest("grok_realtime", []byte(`{"type":"conversation.item.create","item":{"type":"message","role":"user","content":[{"type":"input_text","text":"realtime prompt"}]}}`), 1<<20)
-	require.NoError(t, err)
-	require.Contains(t, string(mustJSON(t, textResult.Payload)), "realtime prompt")
-
-	audioResult, err := ExtractRequest("openai_live", []byte(`{"type":"input_audio_buffer.append","audio":"QUJDRA=="}`), 1<<20)
-	require.NoError(t, err)
-	require.Equal(t, "media_omitted", audioResult.Payload.Messages[0].Content[0].Type)
-	require.EqualValues(t, 4, audioResult.Payload.Messages[0].Content[0].EncodedBytes)
-	require.NotContains(t, string(mustJSON(t, audioResult.Payload)), "QUJDRA")
 }

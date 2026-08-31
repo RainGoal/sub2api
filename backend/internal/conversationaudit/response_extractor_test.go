@@ -81,32 +81,6 @@ func TestExtractResponseSegmentsHandlesWebSocketJSONEvents(t *testing.T) {
 	require.Contains(t, canonicalText(result.Payload), "websocket answer")
 }
 
-func TestExtractResponseSegmentsNormalizesRealtimeTranscriptsAndAudio(t *testing.T) {
-	result, err := ExtractResponseSegments("grok_realtime", [][]byte{
-		[]byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"user speech"}`),
-		[]byte(`{"type":"response.audio.delta","delta":"QUJDRA=="}`),
-		[]byte(`{"type":"response.audio_transcript.delta","delta":"assistant speech"}`),
-		[]byte(`{"type":"response.done","response":{"status":"completed"}}`),
-	}, 1<<20)
-	require.NoError(t, err)
-	require.Len(t, result.Payload.Messages, 2)
-	require.Equal(t, "user", result.Payload.Messages[0].Role)
-	require.Contains(t, canonicalText(result.Payload), "user speech")
-	require.Contains(t, canonicalText(result.Payload), "assistant speech")
-	encoded := string(mustJSON(t, result.Payload))
-	require.Contains(t, encoded, "media_omitted")
-	require.NotContains(t, encoded, "QUJDRA")
-}
-
-func TestExtractResponseSegmentsUsesRealtimeDoneTranscriptWithoutDelta(t *testing.T) {
-	result, err := ExtractResponseSegments("openai_live", [][]byte{
-		[]byte(`{"type":"response.output_audio_transcript.done","transcript":"done-only transcript"}`),
-		[]byte(`{"type":"response.done","response":{"status":"completed"}}`),
-	}, 1<<20)
-	require.NoError(t, err)
-	require.Contains(t, canonicalText(result.Payload), "done-only transcript")
-}
-
 func TestExtractResponseOmitsVectorsAndBase64Media(t *testing.T) {
 	result, err := ExtractResponse("embeddings", []byte(`{"data":[{"embedding":[0.1,0.2]},{"b64_json":"aGVsbG8="},{"url":"https://example.test/image.png"}]}`), 1<<20)
 	require.NoError(t, err)

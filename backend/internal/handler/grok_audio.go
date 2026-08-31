@@ -129,19 +129,8 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	audit := middleware2.NewRealtimeConversationAudit(
-		c, "grok_realtime", model, service.ExtractClientSessionID(c),
-		selection.Account.ID, selection.Account.Name,
-	)
-	var auditHooks *service.RealtimeRelayHooks
-	if audit != nil {
-		auditHooks = &service.RealtimeRelayHooks{
-			AfterUpstreamWrite: audit.ObserveClientEvent,
-			AfterClientWrite:   audit.ObserveServerEvent,
-		}
-	}
 	started := time.Now()
-	audioObserved, proxyErr := h.gatewayService.ProxyGrokRealtimeConn(c.Request.Context(), c, conn, upstream, auditHooks)
+	audioObserved, proxyErr := h.gatewayService.ProxyGrokRealtimeConn(c.Request.Context(), c, conn, upstream)
 	elapsed := time.Since(started)
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))
@@ -205,11 +194,12 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	// TTS bodies use {"input":"..."} (and variants). Normalize to chat messages so
-	// both conversation audit and content moderation see the spoken text. STT keeps
-	// only media omission metadata when the request is multipart/binary.
-	auditBody := body
 	if endpoint == "tts" {
+		subject, _ := middleware2.GetAuthSubjectFromContext(c)
+		reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
+		// TTS bodies use {"input":"..."} (and variants). Normalize to chat messages so
+		// content moderation extractors see the spoken text.
+		auditBody := body
 		if input := extractGrokTTSInputText(body); input != "" {
 			if b, err := json.Marshal(map[string]any{
 				"messages": []map[string]any{{"role": "user", "content": input}},
@@ -217,11 +207,6 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 				auditBody = b
 			}
 		}
-	}
-	middleware2.CaptureConversationAuditRequest(c, "openai_audio", "grok-4.5", auditBody)
-	if endpoint == "tts" {
-		subject, _ := middleware2.GetAuthSubjectFromContext(c)
-		reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
 		if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIChat, "grok-4.5", auditBody); decision != nil && !decision.AllowNextStage {
 			h.openAISecurityAuditError(c, decision)
 			return

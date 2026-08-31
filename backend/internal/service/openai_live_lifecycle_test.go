@@ -378,12 +378,6 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 		openaiWSPassthroughDialer: dialer,
 		liveAttestationCipher:     attestationCipher,
 	}
-	auditedUpstream := make(chan []byte, 1)
-	auditedClient := make(chan []byte, 1)
-	hooks := &RealtimeRelayHooks{
-		AfterUpstreamWrite: func(payload []byte) { auditedUpstream <- append([]byte(nil), payload...) },
-		AfterClientWrite:   func(payload []byte) { auditedClient <- append([]byte(nil), payload...) },
-	}
 	proxyResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		downstream, err := coderws.Accept(writer, request, nil)
@@ -392,7 +386,7 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 			return
 		}
 		defer func() { _ = downstream.CloseNow() }()
-		proxyResult <- service.ProxyLiveSideband(request.Context(), record, downstream, hooks)
+		proxyResult <- service.ProxyLiveSideband(request.Context(), record, downstream)
 	}))
 	defer server.Close()
 
@@ -410,7 +404,6 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	clientText := <-upstream.writes
 	require.Equal(t, coderws.MessageText, clientText.messageType)
 	require.JSONEq(t, `{"type":"client.text"}`, string(clientText.payload))
-	require.JSONEq(t, `{"type":"client.text"}`, string(<-auditedUpstream))
 
 	require.NoError(t, client.Write(ctx, coderws.MessageBinary, []byte{1, 2, 3}))
 	clientBinary := <-upstream.writes
@@ -422,7 +415,6 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, coderws.MessageText, messageType)
 	require.JSONEq(t, `{"type":"server.text"}`, string(payload))
-	require.JSONEq(t, `{"type":"server.text"}`, string(<-auditedClient))
 
 	upstream.reads <- liveTestFrame{messageType: coderws.MessageBinary, payload: []byte{4, 5, 6}}
 	messageType, payload, err = client.Read(ctx)

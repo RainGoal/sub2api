@@ -99,11 +99,9 @@ func extractWebSocketResponse(protocol string, segments [][]byte, payload *Canon
 }
 
 type responseStreamAccumulator struct {
-	text              strings.Builder
-	items             []ContentItem
-	userItems         []ContentItem
-	sawTextDelta      bool
-	audioEncodedBytes int64
+	text         strings.Builder
+	items        []ContentItem
+	sawTextDelta bool
 }
 
 func (a *responseStreamAccumulator) add(protocol string, root map[string]any, payload *CanonicalConversation) {
@@ -115,23 +113,10 @@ func (a *responseStreamAccumulator) add(protocol string, root map[string]any, pa
 		return
 	}
 	switch eventType {
-	case "response.output_text.delta", "response.refusal.delta", "response.text.delta",
-		"response.audio_transcript.delta", "response.output_audio_transcript.delta":
+	case "response.output_text.delta", "response.refusal.delta":
 		if delta := stringValue(root["delta"]); delta != "" {
 			_, _ = a.text.WriteString(delta)
 			a.sawTextDelta = true
-		}
-	case "response.output_text.done", "response.text.done", "response.audio_transcript.done",
-		"response.output_audio_transcript.done":
-		if !a.sawTextDelta {
-			if text := stringValue(firstNonNil(root["text"], root["transcript"])); text != "" {
-				_, _ = a.text.WriteString(text)
-			}
-		}
-	case "conversation.item.input_audio_transcription.completed", "conversation.item.input_audio_transcription.done",
-		"input_audio_transcription.completed", "input_audio_transcription.done":
-		if transcript := stringValue(firstNonNil(root["transcript"], root["text"])); transcript != "" {
-			a.userItems = append(a.userItems, ContentItem{Type: "text", Text: transcript})
 		}
 	case "content_block_delta":
 		if delta, ok := root["delta"].(map[string]any); ok {
@@ -159,25 +144,13 @@ func (a *responseStreamAccumulator) add(protocol string, root map[string]any, pa
 			}
 		}
 	default:
-		if strings.Contains(eventType, "audio") && !strings.Contains(eventType, "transcript") {
-			a.audioEncodedBytes += encodedMediaBytes(root)
-		} else {
-			appendChatOrGeminiDelta(root, &a.text, &a.items)
-		}
+		appendChatOrGeminiDelta(root, &a.text, &a.items)
 	}
 }
 
 func (a *responseStreamAccumulator) finish(payload *CanonicalConversation) {
-	if len(a.userItems) > 0 {
-		payload.Messages = append(payload.Messages, Message{Role: "user", Content: a.userItems})
-	}
 	if a.text.Len() > 0 {
 		a.items = append([]ContentItem{{Type: "text", Text: a.text.String()}}, a.items...)
-	}
-	if a.audioEncodedBytes > 0 {
-		a.items = append(a.items, ContentItem{
-			Type: "media_omitted", MediaType: "audio", EncodedBytes: a.audioEncodedBytes,
-		})
 	}
 	if len(a.items) > 0 {
 		payload.Messages = append(payload.Messages, Message{Role: "assistant", Content: a.items})

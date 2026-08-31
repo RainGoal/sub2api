@@ -234,17 +234,7 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 		return
 	}
 	defer func() { _ = downstream.CloseNow() }()
-	audit := middleware2.NewRealtimeConversationAudit(
-		c, "openai_live", record.Model, record.CallID, record.AccountID, "",
-	)
-	var auditHooks *service.RealtimeRelayHooks
-	if audit != nil {
-		auditHooks = &service.RealtimeRelayHooks{
-			AfterUpstreamWrite: audit.ObserveClientEvent,
-			AfterClientWrite:   audit.ObserveServerEvent,
-		}
-	}
-	if err := h.gatewayService.ProxyLiveSideband(c.Request.Context(), record, downstream, auditHooks); err != nil {
+	if err := h.gatewayService.ProxyLiveSideband(c.Request.Context(), record, downstream); err != nil {
 		_ = downstream.Close(coderws.StatusInternalError, "live sideband closed")
 		return
 	}

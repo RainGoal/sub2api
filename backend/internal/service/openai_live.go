@@ -493,7 +493,6 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 	ctx context.Context,
 	record *LiveCallRecord,
 	downstream *coderws.Conn,
-	hooks *RealtimeRelayHooks,
 ) error {
 	if record == nil || downstream == nil {
 		return ErrLiveCallNotFound
@@ -536,9 +535,6 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 				errCh <- writeErr
 				return
 			}
-			if messageType == coderws.MessageText && hooks != nil && hooks.AfterUpstreamWrite != nil {
-				runRealtimeRelayHook(hooks.AfterUpstreamWrite, payload)
-			}
 		}
 	}()
 	go func() {
@@ -553,9 +549,6 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 				return
 			}
 			if messageType == coderws.MessageText {
-				if hooks != nil && hooks.AfterClientWrite != nil {
-					runRealtimeRelayHook(hooks.AfterClientWrite, payload)
-				}
 				eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 				if eventType == "session.closed" || eventType == "session.ended" {
 					errCh <- ErrLiveCallNotFound
