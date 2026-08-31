@@ -12,7 +12,6 @@ func TestNoopRecorderIsNilSafeAndAllocationFree(t *testing.T) {
 	allocs := testing.AllocsPerRun(1000, func() {
 		session := recorder.Begin(context.Background(), BeginInput{})
 		session.Annotate(MetadataPatch{})
-		session.SetRequestBody("", nil)
 		session.SetRequest(CanonicalConversation{})
 		session.Observe(ResponseEvent{})
 		session.Finish(FinishResult{})

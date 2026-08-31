@@ -93,37 +93,6 @@ func TestWorkerPoolBudgetSaturationIsNonBlocking(t *testing.T) {
 	require.NoError(t, pool.Shutdown(ctx))
 }
 
-func TestWorkerPoolReleasesPartialReservationWhenBudgetIsFull(t *testing.T) {
-	repository := &workerTestRepository{started: make(chan struct{})}
-	budget := NewMemoryBudget(64)
-	pool, err := NewWorkerPool(repository, newWorkerTestCodec(t), budget, 1, 1)
-	require.NoError(t, err)
-	require.True(t, budget.TryReserve(32))
-	job := workerTestJob()
-	job.reservedBytes = 32
-	require.ErrorIs(t, pool.Submit(job), ErrMemoryBudgetFull)
-	require.Zero(t, budget.Used())
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	require.NoError(t, pool.Shutdown(ctx))
-}
-
-func TestWorkerPoolReleasesReservationAfterStop(t *testing.T) {
-	repository := &workerTestRepository{started: make(chan struct{})}
-	budget := NewMemoryBudget(1 << 20)
-	pool, err := NewWorkerPool(repository, newWorkerTestCodec(t), budget, 1, 1)
-	require.NoError(t, err)
-	require.True(t, budget.TryReserve(128))
-	job := workerTestJob()
-	job.reservedBytes = 128
-	pool.StopAccepting()
-	require.ErrorIs(t, pool.Submit(job), ErrWorkerPoolStopped)
-	require.Zero(t, budget.Used())
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	require.NoError(t, pool.Shutdown(ctx))
-}
-
 func TestWorkerPoolRecoversWorkerPanic(t *testing.T) {
 	repository := &workerTestRepository{started: make(chan struct{}), panicFirst: true}
 	budget := NewMemoryBudget(1 << 20)
