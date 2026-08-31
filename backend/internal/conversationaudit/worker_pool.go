@@ -94,12 +94,6 @@ func (p *WorkerPool) Submit(job *WriteJob) error {
 	required := int64(0)
 	if job.Canonical != nil {
 		required = int64(job.CanonicalStats.StoredBytes)
-	} else if job.RawPayload != nil {
-		required = int64(len(job.RawPayload))
-	} else if job.RawSegments != nil {
-		for _, segment := range job.RawSegments {
-			required += int64(cap(segment))
-		}
 	}
 	if reserved < required {
 		if !p.budget.TryReserve(required - reserved) {
@@ -112,7 +106,7 @@ func (p *WorkerPool) Submit(job *WriteJob) error {
 	}
 	job.reservedBytes = reserved
 	channel := p.queue
-	if job.Canonical == nil && job.RawPayload == nil && job.RawSegments == nil {
+	if job.Canonical == nil {
 		channel = p.metadata
 	}
 	select {
@@ -214,39 +208,6 @@ func (p *WorkerPool) processSafely(ctx context.Context, job *WriteJob) {
 	if !job.Deadline.After(now) {
 		p.metrics.Expired.Add(1)
 		return
-	}
-	if job.Canonical == nil && (job.RawPayload != nil || job.RawSegments != nil) {
-		var result ExtractResult
-		var err error
-		if job.RawSegments != nil {
-			result, err = ExtractResponseSegments(job.Protocol, job.RawSegments, job.MaxBytes)
-		} else {
-			result, err = ExtractResponse(job.Protocol, job.RawPayload, job.MaxBytes)
-		}
-		if err != nil {
-			job.Record.CaptureStatus = CaptureDegraded
-			job.Record.DegradedReason = result.Reason
-			if job.Record.DegradedReason == "" {
-				job.Record.DegradedReason = "response_extract_failed"
-			}
-		} else {
-			if job.RawTruncated {
-				result.Payload.Truncated = true
-				result.Payload, result.Stats, err = LimitCanonical(result.Payload, PayloadSideResponse, job.MaxBytes)
-			}
-			if err != nil {
-				job.Record.CaptureStatus = CaptureDegraded
-				job.Record.DegradedReason = "response_limit_failed"
-			} else {
-				job.Canonical, job.CanonicalStats = &result.Payload, result.Stats
-				if result.Payload.Error != nil && job.Record.ErrorCode == "" {
-					job.Record.ErrorCode = result.Payload.Error.Code
-				}
-				if (job.RawTruncated || result.Stats.Truncated) && job.Record.CaptureStatus != CaptureDegraded {
-					job.Record.CaptureStatus = CaptureTruncated
-				}
-			}
-		}
 	}
 	if job.Canonical != nil {
 		encoded, err := p.codec.Encode(RecordIdentity{AuditID: job.Record.AuditID, CreatedAt: job.Record.CreatedAt}, job.Side, *job.Canonical)

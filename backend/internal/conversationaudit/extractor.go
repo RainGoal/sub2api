@@ -236,8 +236,8 @@ func contentItems(value any) []ContentItem {
 	case map[string]any:
 		typeName := strings.ToLower(stringValue(typed["type"]))
 		switch typeName {
-		case "text", "input_text", "output_text", "refusal":
-			if text := stringValue(firstNonNil(typed["text"], typed["refusal"])); text != "" {
+		case "text", "input_text", "output_text":
+			if text := stringValue(typed["text"]); text != "" {
 				return []ContentItem{{Type: "text", Text: text}}
 			}
 		case "tool_use", "tool_call", "function_call":

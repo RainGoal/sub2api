@@ -61,11 +61,6 @@ type WriteJob struct {
 	Side           PayloadSide
 	Canonical      *CanonicalConversation
 	CanonicalStats CanonicalStats
-	RawPayload     []byte
-	RawSegments    [][]byte
-	Protocol       string
-	MaxBytes       int
-	RawTruncated   bool
 	Deadline       time.Time
 	reservedBytes  int64
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/conversationaudit"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -20,14 +19,7 @@ const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
 func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
-	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg, nil))
-}
-
-// ProvideAPIKeyAuthMiddleware is the production provider. Keeping the public
-// constructor above audit-free preserves isolated middleware tests and makes
-// the optional hook straightforward to remove.
-func ProvideAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, recorder *conversationaudit.CaptureService) APIKeyAuthMiddleware {
-	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg, recorder))
+	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
 }
 
 // apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）
@@ -39,7 +31,7 @@ func ProvideAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscript
 // /v1/usage、/v1/sub2api/billing 端点与异步生图/Seedance 视频任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
 // 异步生图/Seedance 视频查询允许已耗尽额度的 Key 拉取自身任务结果，视频还可取消未完成任务。
-func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config, recorder conversationaudit.Recorder) gin.HandlerFunc {
+func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
 		if rejectInvalidAuthAbuse(c, apiKeyService) {
@@ -125,9 +117,6 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// apiKey 已加载（含 User/Group）。即便后续因分组停用/Key 停用/用户停用/
 		// IP 限制等早退中断，也让 Ops 错误日志能回退取到 user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
-		if finishAudit := beginConversationAudit(c, recorder, apiKey); finishAudit != nil {
-			defer finishAudit()
-		}
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
