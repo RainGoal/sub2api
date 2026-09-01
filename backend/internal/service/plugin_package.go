@@ -137,6 +137,9 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	if err := i.extractArchive(ctx, &archive.Reader, manifest, extractPath); err != nil {
 		return nil, err
 	}
+	// Windows does not allow renaming an open archive file. Extraction is
+	// complete at this point, so release the reader before moving the artifact.
+	_ = archive.Close()
 	if err := os.Rename(extractPath, installPath); err != nil {
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}
