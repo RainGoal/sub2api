@@ -39,7 +39,7 @@ func TestHandleCCBufferedFromAnthropic_ToolArgumentsAreValidJSON(t *testing.T) {
 		``,
 	}, "\n")))}
 
-	_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
+	_, err := (&GatewayService{}).handleCCBufferedFromAnthropic(resp, c, nil, "gpt-5", "claude-sonnet-4.5", nil, time.Now())
 	require.NoError(t, err)
 
 	var body struct {

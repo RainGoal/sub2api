@@ -125,7 +125,7 @@ func TestHandleResponsesBufferedStreamingResponse_ToolArgumentsAreValidJSON(t *t
 	c, _ := gin.CreateTestContext(rec)
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(toolAnthropicSSEStream()))}
 
-	_, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "claude-fable-5", "claude-fable-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+	_, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, nil, "claude-fable-5", "claude-fable-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 
 	var body struct {
