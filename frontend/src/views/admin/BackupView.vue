@@ -54,7 +54,7 @@
         </div>
       </div>
 
-      <!-- Async image object storage -->
+      <!-- Image results and video reference storage -->
       <div class="card p-6">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -69,6 +69,25 @@
             <input v-model="imageStorageForm.enabled" type="checkbox" />
             <span>{{ t('admin.backup.imageStorage.enabled') }}</span>
           </label>
+        </div>
+
+        <div class="mb-4">
+          <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input v-model="imageStorageForm.video_upload_enabled" type="checkbox" />
+            <span>{{ t('admin.backup.imageStorage.videoUploadEnabled') }}</span>
+          </label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.videoUploadHint') }}</p>
+          <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <label for="video-upload-max-per-minute" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.videoUploadMaxPerMinute') }}</label>
+              <input id="video-upload-max-per-minute" v-model.number="imageStorageForm.video_upload_max_per_minute" type="number" min="1" max="10000" step="1" class="input w-full" aria-describedby="video-upload-limits-hint" />
+            </div>
+            <div>
+              <label for="video-upload-daily-limit-mib" class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.videoUploadDailyLimitMiB') }}</label>
+              <input id="video-upload-daily-limit-mib" v-model.number="imageStorageForm.video_upload_daily_limit_mib" type="number" min="1" max="1048576" step="1" class="input w-full" aria-describedby="video-upload-limits-hint" />
+            </div>
+          </div>
+          <p id="video-upload-limits-hint" class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.imageStorage.videoUploadLimitsHint') }}</p>
         </div>
 
         <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -447,6 +466,9 @@ const testingS3 = ref(false)
 // to reuse the credentials configured above and only differ by prefix.
 const imageStorageForm = ref<ImageStorageConfig>({
   enabled: false,
+  video_upload_enabled: false,
+  video_upload_max_per_minute: 20,
+  video_upload_daily_limit_mib: 1024,
   reuse_backup_s3: true,
   bucket: '',
   prefix: 'images/',
@@ -638,6 +660,9 @@ async function loadImageStorageConfig() {
     const { config, secret_configured } = await adminAPI.backup.getImageStorageConfig()
     imageStorageForm.value = {
       ...config,
+      video_upload_enabled: config.video_upload_enabled ?? false,
+      video_upload_max_per_minute: config.video_upload_max_per_minute ?? 20,
+      video_upload_daily_limit_mib: config.video_upload_daily_limit_mib ?? 1024,
       prefix: config.prefix || 'images/',
       region: config.region || 'auto',
       secret_access_key: '',
@@ -648,10 +673,26 @@ async function loadImageStorageConfig() {
   }
 }
 
+function validateVideoUploadLimits(config: ImageStorageConfig): boolean {
+  const perMinute = config.video_upload_max_per_minute
+  if (typeof perMinute !== 'number' || !Number.isInteger(perMinute) || perMinute < 1 || perMinute > 10000) {
+    appStore.showError(t('admin.backup.imageStorage.videoUploadMaxPerMinuteInvalid'))
+    return false
+  }
+  const dailyMiB = config.video_upload_daily_limit_mib
+  if (typeof dailyMiB !== 'number' || !Number.isInteger(dailyMiB) || dailyMiB < 1 || dailyMiB > 1048576) {
+    appStore.showError(t('admin.backup.imageStorage.videoUploadDailyLimitMiBInvalid'))
+    return false
+  }
+  return true
+}
+
 async function saveImageStorageConfig() {
+  const config = { ...imageStorageForm.value }
+  if (!validateVideoUploadLimits(config)) return
   savingImageStorage.value = true
   try {
-    await backupStepUp.run(() => adminAPI.backup.updateImageStorageConfig(imageStorageForm.value))
+    await backupStepUp.run(() => adminAPI.backup.updateImageStorageConfig(config))
     appStore.showSuccess(t('admin.backup.imageStorage.saved'))
     await loadImageStorageConfig()
   } catch (error) {
@@ -666,9 +707,11 @@ async function saveImageStorageConfig() {
 }
 
 async function testImageStorage() {
+  const config = { ...imageStorageForm.value }
+  if (!validateVideoUploadLimits(config)) return
   testingImageStorage.value = true
   try {
-    const result = await adminAPI.backup.testImageStorageConnection(imageStorageForm.value)
+    const result = await adminAPI.backup.testImageStorageConnection(config)
     if (result.ok) {
       appStore.showSuccess(result.message || t('admin.backup.s3.testSuccess'))
     } else {

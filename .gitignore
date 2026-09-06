@@ -140,6 +140,7 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/SEEDANCE_VIDEO_API.md
+!docs/VIDEO_REFERENCE_UPLOADS.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/legal/
 !docs/legal/*.md

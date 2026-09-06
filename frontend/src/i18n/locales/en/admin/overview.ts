@@ -103,9 +103,16 @@ export default {
         saved: 'S3 configuration saved'
       },
       imageStorage: {
-        title: 'Async image object storage',
+        title: 'Image and video reference storage',
         description: 'Enables the asynchronous image endpoints and offloads generated images to object storage, keeping only short links in Redis. Shares the S3 client with backups and takes effect on save — no restart needed.',
         enabled: 'Enable async image tasks',
+        videoUploadEnabled: 'Enable video reference uploads',
+        videoUploadMaxPerMinute: 'Uploads per user per minute',
+        videoUploadDailyLimitMiB: 'Daily upload capacity per user (MiB)',
+        videoUploadLimitsHint: 'Both limits must be positive integers; unlimited is not supported. Saved limits apply to new upload requests without clearing usage. Daily capacity counts upload attempts and resets at 00:00 UTC (08:00 Beijing time).',
+        videoUploadMaxPerMinuteInvalid: 'Uploads per minute must be an integer from 1 to 10000.',
+        videoUploadDailyLimitMiBInvalid: 'Daily upload capacity must be an integer from 1 to 1048576 MiB (up to 1 TiB).',
+        videoUploadHint: 'Independent of async image tasks; reuses the storage credentials below. Images and audio: 20 MiB each; videos: 50 MiB. Inputs use video-inputs/ and signed links valid for 24–168 hours. Configure a lifecycle of at least 8 days for this prefix and keep the bucket private.',
         reuseBackupS3: 'Reuse the backup S3 configuration above (different bucket/prefix only)',
         bucket: 'Bucket',
         bucketInherited: 'Leave empty to use the backup bucket',
@@ -113,7 +120,7 @@ export default {
         publicBaseUrl: 'Public base URL',
         publicBaseUrlPlaceholder: 'Leave empty to return presigned links',
         presignExpiryHours: 'Presigned link TTL (hours)',
-        saved: 'Async image object storage saved'
+        saved: 'Image and video reference storage saved'
       },
       schedule: {
         title: 'Scheduled Backup',

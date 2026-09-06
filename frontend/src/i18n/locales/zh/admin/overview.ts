@@ -103,9 +103,16 @@ export default {
         saved: 'S3 配置已保存'
       },
       imageStorage: {
-        title: '异步生图对象存储',
+        title: '图片与视频素材存储',
         description: '开启后，异步生图接口可用，生成结果转存到对象存储，只把短链接写入 Redis。与备份共用同一套 S3 客户端，保存后立即生效，无需重启。',
         enabled: '启用异步生图',
+        videoUploadEnabled: '启用视频素材上传',
+        videoUploadMaxPerMinute: '每用户每分钟上传次数',
+        videoUploadDailyLimitMiB: '每用户每日上传容量（MiB）',
+        videoUploadLimitsHint: '两项均须为正整数，不支持不限额。保存后对新上传请求生效，不清空已用量。每日容量按上传尝试累计，于每日 UTC 00:00（北京时间 08:00）重置。',
+        videoUploadMaxPerMinuteInvalid: '每分钟上传次数须为 1–10000 的整数。',
+        videoUploadDailyLimitMiBInvalid: '每日上传容量须为 1–1048576 的整数 MiB（最大 1 TiB）。',
+        videoUploadHint: '独立于异步生图开关，复用下方存储凭证。图片和音频每个限 20 MiB，视频限 50 MiB；素材保存至 video-inputs/，使用 24–168 小时的签名链接。请为该前缀配置至少 8 天的生命周期，并保持存储桶私有。',
         reuseBackupS3: '复用上方备份的 S3 配置（只用不同的存储桶/前缀）',
         bucket: '存储桶',
         bucketInherited: '留空则沿用备份存储桶',
@@ -113,7 +120,7 @@ export default {
         publicBaseUrl: '公开访问域名',
         publicBaseUrlPlaceholder: '留空则返回预签名临时链接',
         presignExpiryHours: '预签名链接有效期（小时）',
-        saved: '异步生图对象存储配置已保存'
+        saved: '图片与视频素材存储配置已保存'
       },
       schedule: {
         title: '定时备份',

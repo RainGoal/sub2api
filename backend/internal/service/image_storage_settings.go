@@ -9,11 +9,19 @@ import (
 	"sync"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	apperrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
 )
 
 const settingKeyImageStorageConfig = "image_storage_config"
+
+const (
+	DefaultVideoUploadMaxPerMinute        = 20
+	DefaultVideoUploadDailyLimitMiB int64 = 1024
+	maxVideoUploadPerMinute               = 10_000
+	maxVideoUploadDailyLimitMiB     int64 = 1 << 20
+)
 
 // ErrImageStorageIncomplete 表示开关已打开但凭证不全，无法启用异步生图。
 var ErrImageStorageIncomplete = errors.New("image storage is enabled but bucket/access_key_id/secret_access_key are incomplete")
@@ -27,8 +35,11 @@ type ImageStorageFactory func(ctx context.Context, cfg *config.ImageStorageConfi
 // ReuseBackupS3 为真时不保存自己的凭证，直接借用数据库备份已配置的 S3 端点与密钥，
 // 只用自己的 Bucket/Prefix 区分对象；这样"数据走 backups/、图片走 images/"无需重复配置。
 type ImageStorageSettings struct {
-	Enabled       bool `json:"enabled"`
-	ReuseBackupS3 bool `json:"reuse_backup_s3"`
+	Enabled                  bool  `json:"enabled"`
+	ReuseBackupS3            bool  `json:"reuse_backup_s3"`
+	VideoUploadEnabled       bool  `json:"video_upload_enabled"`
+	VideoUploadMaxPerMinute  int   `json:"video_upload_max_per_minute"`
+	VideoUploadDailyLimitMiB int64 `json:"video_upload_daily_limit_mib"`
 
 	Bucket           string `json:"bucket"` // 留空且复用备份时，沿用备份桶
 	Prefix           string `json:"prefix"`
@@ -166,6 +177,12 @@ func (s *ImageStorageSettingService) SecretConfigured(ctx context.Context) bool 
 // Update 保存设置并立即生效。SecretAccessKey 留空表示沿用已保存的值。
 func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorageSettings) (*ImageStorageSettings, error) {
 	normalizeImageStorageSettings(&in)
+	if in.VideoUploadMaxPerMinute < 1 || in.VideoUploadMaxPerMinute > maxVideoUploadPerMinute {
+		return nil, apperrors.New(400, "INVALID_VIDEO_UPLOAD_LIMIT", "Video uploads per minute must be between 1 and 10000")
+	}
+	if in.VideoUploadDailyLimitMiB < 1 || in.VideoUploadDailyLimitMiB > maxVideoUploadDailyLimitMiB {
+		return nil, apperrors.New(400, "INVALID_VIDEO_UPLOAD_LIMIT", "Daily video upload capacity must be a whole number of MiB between 1 and 1048576")
+	}
 
 	if in.ReuseBackupS3 {
 		// 复用备份凭证时不落自己的密钥，避免同一份密钥在库里存两份。
@@ -301,26 +318,30 @@ func (s *ImageStorageSettingService) load(ctx context.Context) (*ImageStorageSet
 	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
 		return nil, fmt.Errorf("parse image storage settings: %w", err)
 	}
+	defaultVideoUploadLimits(&settings)
 	return &settings, nil
 }
 
 func settingsFromConfig(cfg config.ImageStorageConfig) *ImageStorageSettings {
 	return &ImageStorageSettings{
-		Enabled:          cfg.Enabled,
-		Bucket:           cfg.Bucket,
-		Prefix:           cfg.Prefix,
-		PublicBaseURL:    cfg.PublicBaseURL,
-		PresignExpiry:    cfg.PresignExpiry,
-		MaxDownloadBytes: cfg.MaxDownloadByte,
-		Endpoint:         cfg.Endpoint,
-		Region:           cfg.Region,
-		AccessKeyID:      cfg.AccessKeyID,
-		SecretAccessKey:  cfg.SecretAccessKey,
-		ForcePathStyle:   cfg.ForcePathStyle,
+		VideoUploadMaxPerMinute:  DefaultVideoUploadMaxPerMinute,
+		VideoUploadDailyLimitMiB: DefaultVideoUploadDailyLimitMiB,
+		Enabled:                  cfg.Enabled,
+		Bucket:                   cfg.Bucket,
+		Prefix:                   cfg.Prefix,
+		PublicBaseURL:            cfg.PublicBaseURL,
+		PresignExpiry:            cfg.PresignExpiry,
+		MaxDownloadBytes:         cfg.MaxDownloadByte,
+		Endpoint:                 cfg.Endpoint,
+		Region:                   cfg.Region,
+		AccessKeyID:              cfg.AccessKeyID,
+		SecretAccessKey:          cfg.SecretAccessKey,
+		ForcePathStyle:           cfg.ForcePathStyle,
 	}
 }
 
 func normalizeImageStorageSettings(in *ImageStorageSettings) {
+	defaultVideoUploadLimits(in)
 	in.Bucket = strings.TrimSpace(in.Bucket)
 	in.Endpoint = strings.TrimSpace(in.Endpoint)
 	in.Region = strings.TrimSpace(in.Region)
@@ -343,5 +364,16 @@ func normalizeImageStorageSettings(in *ImageStorageSettings) {
 	}
 	if in.MaxDownloadBytes <= 0 {
 		in.MaxDownloadBytes = defaultImageMaxDownloadBytes
+	}
+}
+
+// Zero values from older clients or stored settings retain the original limits.
+// Zero is not an unlimited quota.
+func defaultVideoUploadLimits(in *ImageStorageSettings) {
+	if in.VideoUploadMaxPerMinute == 0 {
+		in.VideoUploadMaxPerMinute = DefaultVideoUploadMaxPerMinute
+	}
+	if in.VideoUploadDailyLimitMiB == 0 {
+		in.VideoUploadDailyLimitMiB = DefaultVideoUploadDailyLimitMiB
 	}
 }

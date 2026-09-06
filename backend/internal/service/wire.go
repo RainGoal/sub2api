@@ -844,6 +844,7 @@ var ProviderSet = wire.NewSet(
 	ProvideSeedanceVideoRecoveryService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
+	NewVideoAssetService,
 	ProvideBatchImageModelPricingResolver,
 	NewBatchImagePublicService,
 	NewBatchImageDownloadService,

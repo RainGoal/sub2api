@@ -1,17 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 import BackupView from '../BackupView.vue'
 
 const {
   getS3Config,
   getImageStorageConfig,
+  updateImageStorageConfig,
+  testImageStorageConnection,
+  showError,
   getSchedule,
   listBackups,
   getDownloadURL,
 } = vi.hoisted(() => ({
   getS3Config: vi.fn(),
   getImageStorageConfig: vi.fn(),
+  updateImageStorageConfig: vi.fn(),
+  testImageStorageConnection: vi.fn(),
+  showError: vi.fn(),
   getSchedule: vi.fn(),
   listBackups: vi.fn(),
   getDownloadURL: vi.fn(),
@@ -24,8 +30,8 @@ vi.mock('@/api', () => ({
       updateS3Config: vi.fn(),
       testS3Connection: vi.fn(),
       getImageStorageConfig,
-      updateImageStorageConfig: vi.fn(),
-      testImageStorageConnection: vi.fn(),
+      updateImageStorageConfig,
+      testImageStorageConnection,
       getSchedule,
       updateSchedule: vi.fn(),
       createBackup: vi.fn(),
@@ -40,7 +46,7 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/stores', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError,
     showSuccess: vi.fn(),
     showWarning: vi.fn(),
   }),
@@ -81,6 +87,78 @@ function mountBackupView() {
     },
   })
 }
+
+describe('admin BackupView 视频素材上传限额', () => {
+  let wrapper: VueWrapper
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getS3Config.mockResolvedValue({})
+    getImageStorageConfig.mockResolvedValue({ config: {}, secret_configured: false })
+    getSchedule.mockResolvedValue({ enabled: false, cron_expr: '', retain_days: 14, retain_count: 10 })
+    listBackups.mockResolvedValue({ items: [] })
+    updateImageStorageConfig.mockResolvedValue({})
+    testImageStorageConnection.mockResolvedValue({ ok: true })
+  })
+
+  afterEach(() => { wrapper?.unmount() })
+
+  async function clickImageStorageAction(key: string) {
+    const card = wrapper.findAll('.card').find((item) => item.text().includes('admin.backup.imageStorage.title'))!
+    await card.findAll('button').find((button) => button.text() === key)!.trigger('click')
+    await flushPromises()
+  }
+
+  it('兼容旧响应，显示并发送默认限额', async () => {
+    wrapper = mountBackupView()
+    await flushPromises()
+    expect((wrapper.get('#video-upload-max-per-minute').element as HTMLInputElement).value).toBe('20')
+    expect((wrapper.get('#video-upload-daily-limit-mib').element as HTMLInputElement).value).toBe('1024')
+    await clickImageStorageAction('admin.backup.s3.testConnection')
+    await clickImageStorageAction('common.save')
+    const defaults = { video_upload_max_per_minute: 20, video_upload_daily_limit_mib: 1024 }
+    expect(testImageStorageConnection).toHaveBeenCalledWith(expect.objectContaining(defaults))
+    expect(updateImageStorageConfig).toHaveBeenCalledWith(expect.objectContaining(defaults))
+  })
+
+  it.each([
+    [1, 1],
+    [10000, 1048576],
+    [75, 2048],
+  ])('支持保存和测试合法限额 %i 次/分钟、%i MiB/日', async (perMinute, dailyMiB) => {
+    wrapper = mountBackupView()
+    await flushPromises()
+    await wrapper.get('#video-upload-max-per-minute').setValue(String(perMinute))
+    await wrapper.get('#video-upload-daily-limit-mib').setValue(String(dailyMiB))
+    await clickImageStorageAction('admin.backup.s3.testConnection')
+    await clickImageStorageAction('common.save')
+    const limits = { video_upload_max_per_minute: perMinute, video_upload_daily_limit_mib: dailyMiB }
+    expect(testImageStorageConnection).toHaveBeenCalledWith(expect.objectContaining(limits))
+    expect(updateImageStorageConfig).toHaveBeenCalledWith(expect.objectContaining(limits))
+  })
+
+  it.each([
+    ['video-upload-max-per-minute', '', 'videoUploadMaxPerMinuteInvalid'],
+    ['video-upload-max-per-minute', '0', 'videoUploadMaxPerMinuteInvalid'],
+    ['video-upload-max-per-minute', '-1', 'videoUploadMaxPerMinuteInvalid'],
+    ['video-upload-max-per-minute', '1.5', 'videoUploadMaxPerMinuteInvalid'],
+    ['video-upload-max-per-minute', '10001', 'videoUploadMaxPerMinuteInvalid'],
+    ['video-upload-daily-limit-mib', '', 'videoUploadDailyLimitMiBInvalid'],
+    ['video-upload-daily-limit-mib', '0', 'videoUploadDailyLimitMiBInvalid'],
+    ['video-upload-daily-limit-mib', '-1', 'videoUploadDailyLimitMiBInvalid'],
+    ['video-upload-daily-limit-mib', '1.5', 'videoUploadDailyLimitMiBInvalid'],
+    ['video-upload-daily-limit-mib', '1048577', 'videoUploadDailyLimitMiBInvalid'],
+  ])('阻止非法字段 %s=%s 发往保存或连接测试接口', async (field, value, errorKey) => {
+    wrapper = mountBackupView()
+    await flushPromises()
+    await wrapper.get(`#${field}`).setValue(value)
+    await clickImageStorageAction('common.save')
+    await clickImageStorageAction('admin.backup.s3.testConnection')
+    expect(updateImageStorageConfig).not.toHaveBeenCalled()
+    expect(testImageStorageConnection).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(`admin.backup.imageStorage.${errorKey}`)
+  })
+})
 
 describe('admin BackupView 分卷备份', () => {
   beforeEach(() => {
