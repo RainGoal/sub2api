@@ -25,7 +25,8 @@ func TestVideoAssetStorageStreamsAndSignsReadURL(t *testing.T) {
 		var err error
 		received, err = io.ReadAll(r.Body)
 		require.NoError(t, err)
-		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(nil)
+		require.NoError(t, err)
 	}))
 	defer server.Close()
 	store, err := ProvideVideoAssetStorageFactory()(context.Background(), &config.ImageStorageConfig{
@@ -50,5 +51,7 @@ func TestVideoAssetStorageCapsSignatureLifetime(t *testing.T) {
 		AccessKeyID: "test-id", SecretAccessKey: "test-secret", PresignExpiry: 9999,
 	})
 	require.NoError(t, err)
-	require.Equal(t, 7*24*time.Hour, store.(*S3VideoAssetStorage).storage.presignExpiry)
+	videoStore, ok := store.(*S3VideoAssetStorage)
+	require.True(t, ok)
+	require.Equal(t, 7*24*time.Hour, videoStore.storage.presignExpiry)
 }

@@ -40,6 +40,11 @@ type VideoAsset struct {
 	URLExpiresAt *time.Time `json:"url_expires_at"`
 }
 
+type VideoAssetUploadLimiter interface {
+	Allow(context.Context, int64, int) (allowed bool, retryAfter time.Duration, err error)
+	ReserveBytes(context.Context, int64, int64, int64) (bool, error)
+}
+
 // VideoAssetStorage keeps input uploads independent of image result rewriting.
 type VideoAssetStorage interface {
 	Save(context.Context, string, string, io.ReadSeeker, int64) (string, *time.Time, error)

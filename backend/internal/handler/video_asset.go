@@ -9,12 +9,10 @@ import (
 	"sync"
 	"time"
 
-	limitmiddleware "github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
 
 type videoAssetService interface {
@@ -24,16 +22,15 @@ type videoAssetService interface {
 
 type VideoAssetHandler struct {
 	service videoAssetService
-	redis   *redis.Client
-	limiter *limitmiddleware.RateLimiter
+	limiter service.VideoAssetUploadLimiter
 	slots   chan struct{}
 	mu      sync.Mutex
 	active  map[int64]int
 }
 
-func NewVideoAssetHandler(assets *service.VideoAssetService, redisClient *redis.Client) *VideoAssetHandler {
+func NewVideoAssetHandler(assets *service.VideoAssetService, limiter service.VideoAssetUploadLimiter) *VideoAssetHandler {
 	return &VideoAssetHandler{
-		service: assets, redis: redisClient, limiter: limitmiddleware.NewRateLimiter(redisClient),
+		service: assets, limiter: limiter,
 		slots: make(chan struct{}, 8), active: make(map[int64]int),
 	}
 }
@@ -152,40 +149,30 @@ func (h *VideoAssetHandler) release(userID int64) {
 }
 
 func (h *VideoAssetHandler) allowUpload(c *gin.Context, userID int64, maxPerMinute int) bool {
-	if h.redis == nil {
+	if h.limiter == nil {
 		response.ErrorWithDetails(c, 503, "Upload limits are temporarily unavailable", "UPLOAD_LIMIT_UNAVAILABLE", nil)
 		return false
 	}
-	result, err := h.limiter.Allow(c.Request.Context(), "video-assets:user:"+strconv.FormatInt(userID, 10), maxPerMinute, time.Minute)
+	allowed, retryAfter, err := h.limiter.Allow(c.Request.Context(), userID, maxPerMinute)
 	if err != nil {
 		response.ErrorWithDetails(c, 503, "Upload limits are temporarily unavailable", "UPLOAD_LIMIT_UNAVAILABLE", nil)
 		return false
 	}
-	if !result.Allowed {
-		c.Header("Retry-After", strconv.Itoa(max(1, int(result.RetryAfter.Seconds()))))
+	if !allowed {
+		c.Header("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 		response.ErrorWithDetails(c, 429, "Too many uploads; please retry later", "UPLOAD_RATE_LIMITED", nil)
 		return false
 	}
 	return true
 }
 
-var videoAssetByteBudget = redis.NewScript(`
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-local size = tonumber(ARGV[1])
-if current + size > tonumber(ARGV[2]) then return 0 end
-redis.call('INCRBY', KEYS[1], size)
-redis.call('EXPIRE', KEYS[1], 172800)
-return 1
-`)
-
 func (h *VideoAssetHandler) reserveBytes(c *gin.Context, userID, size, dailyLimit int64) bool {
-	key := "video-assets:bytes:" + time.Now().UTC().Format("2006-01-02") + ":" + strconv.FormatInt(userID, 10)
-	allowed, err := videoAssetByteBudget.Run(c.Request.Context(), h.redis, []string{key}, size, dailyLimit).Int()
+	allowed, err := h.limiter.ReserveBytes(c.Request.Context(), userID, size, dailyLimit)
 	if err != nil {
 		response.ErrorWithDetails(c, 503, "Upload limits are temporarily unavailable", "UPLOAD_LIMIT_UNAVAILABLE", nil)
 		return false
 	}
-	if allowed == 0 {
+	if !allowed {
 		response.ErrorWithDetails(c, 429, "Daily upload capacity reached; please try tomorrow", "UPLOAD_QUOTA_EXCEEDED", nil)
 		return false
 	}
