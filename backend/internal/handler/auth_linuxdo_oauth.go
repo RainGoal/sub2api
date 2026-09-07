@@ -114,6 +114,7 @@ func (h *AuthHandler) LinuxDoOAuthStart(c *gin.Context) {
 	intent := normalizeOAuthIntent(c.Query("intent"))
 	setCookie(c, linuxDoOAuthIntentCookieName, encodeCookieValue(intent), linuxDoOAuthCookieMaxAgeSec, secureCookie)
 	captureOAuthPromoCode(c, secureCookie)
+	h.captureSalesOAuthReferral(c, "linuxdo", state)
 	setOAuthPendingBrowserCookie(c, browserSessionKey, secureCookie)
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	if intent == oauthIntentBindCurrentUser {
@@ -195,6 +196,7 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 		return
 	}
 
+	h.restoreSalesOAuthReferral(c, "linuxdo", state)
 	redirectTo, _ := readCookieDecoded(c, linuxDoOAuthRedirectCookie)
 	redirectTo = sanitizeFrontendRedirectPath(redirectTo)
 	if redirectTo == "" {
@@ -545,6 +547,7 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	restorePendingSalesReferral(c, session.LocalFlowState)
 	if err := ensurePendingOAuthCompleteRegistrationSession(session); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -608,12 +611,7 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
 
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
-	})
+	writeOAuthTokenPairResponse(c, tokenPair)
 }
 
 func (h *AuthHandler) getLinuxDoOAuthConfig(ctx context.Context) (config.LinuxDoConnectConfig, error) {
@@ -849,6 +847,9 @@ func redirectOAuthTokenPair(c *gin.Context, frontendCallback string, tokenPair *
 }
 
 func redirectWithFragment(c *gin.Context, frontendCallback string, fragment url.Values) {
+	if fragment.Get("access_token") != "" {
+		clearSalesReferralCookie(c)
+	}
 	u, err := url.Parse(frontendCallback)
 	if err != nil {
 		// 兜底：尽力跳转到默认页面，避免卡死在回调页。

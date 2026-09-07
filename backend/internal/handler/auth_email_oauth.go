@@ -82,6 +82,7 @@ func (h *AuthHandler) emailOAuthStart(c *gin.Context, provider string) {
 	emailOAuthSetCookie(c, emailOAuthRedirectCookie, encodeCookieValue(redirectTo), secureCookie)
 	emailOAuthSetCookie(c, emailOAuthProviderCookie, encodeCookieValue(provider), secureCookie)
 	captureOAuthPromoCode(c, secureCookie)
+	h.captureSalesOAuthReferral(c, provider, state)
 	if affCode := strings.TrimSpace(firstNonEmpty(c.Query("aff_code"), c.Query("aff"))); affCode != "" {
 		emailOAuthSetCookie(c, emailOAuthAffiliateCookie, encodeCookieValue(affCode), secureCookie)
 	} else {
@@ -131,6 +132,7 @@ func (h *AuthHandler) emailOAuthCallback(c *gin.Context, provider string) {
 		return
 	}
 	expectedProvider, _ := readCookieDecoded(c, emailOAuthProviderCookie)
+	h.restoreSalesOAuthReferral(c, provider, state)
 	if !strings.EqualFold(strings.TrimSpace(expectedProvider), provider) {
 		redirectOAuthError(c, frontendCallback, "invalid_state", "invalid oauth provider", "")
 		return

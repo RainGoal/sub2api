@@ -308,13 +308,37 @@ func (s *AuthService) RollbackOAuthEmailAccountCreation(ctx context.Context, use
 	if s == nil || s.userRepo == nil || userID <= 0 {
 		return ErrServiceUnavailable
 	}
-	if err := s.restoreOAuthRegistrationInvitation(ctx, invitationCode, userID); err != nil {
+	rollback := func(txCtx context.Context) error {
+		if err := s.restoreOAuthRegistrationInvitation(txCtx, invitationCode, userID); err != nil {
+			return err
+		}
+		if sales, ok := s.salesService.(interface {
+			RollbackRegistration(context.Context, int64) error
+		}); ok {
+			if err := sales.RollbackRegistration(txCtx, userID); err != nil {
+				return fmt.Errorf("rollback sales registration: %w", err)
+			}
+		}
+		if err := s.userRepo.Delete(txCtx, userID); err != nil {
+			return fmt.Errorf("delete created oauth user: %w", err)
+		}
+		return nil
+	}
+	if s.salesService == nil || dbent.TxFromContext(ctx) != nil {
+		return rollback(ctx)
+	}
+	if s.entClient == nil {
+		return ErrServiceUnavailable
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
 		return err
 	}
-	if err := s.userRepo.Delete(ctx, userID); err != nil {
-		return fmt.Errorf("delete created oauth user: %w", err)
+	defer func() { _ = tx.Rollback() }()
+	if err = rollback(dbent.NewTxContext(ctx, tx)); err != nil {
+		return err
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *AuthService) restoreOAuthRegistrationInvitation(ctx context.Context, invitationCode string, userID int64) error {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -44,6 +45,12 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+
+	// SalesCost is the agreed account-statistics cost captured before billing.
+	// It does not participate in the existing billing fingerprint: changing a
+	// sales policy must never invalidate a retry of an already billed request.
+	SalesCost       *float64
+	SalesConsumedAt time.Time
 }
 
 func (c *UsageBillingCommand) Normalize() {
@@ -186,6 +193,9 @@ type BatchImageBalanceHoldCommand struct {
 	BatchID            string
 	HoldAmount         float64
 	ActualAmount       float64
+	SalesCost          *float64
+	SalesConsumedAt    time.Time
+	SalesModel         string
 }
 
 func (c *BatchImageBalanceHoldCommand) Normalize() {

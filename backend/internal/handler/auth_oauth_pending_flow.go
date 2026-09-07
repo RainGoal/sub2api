@@ -239,6 +239,7 @@ func (h *AuthHandler) createOAuthPendingSession(c *gin.Context, payload oauthPen
 
 	localFlowState := map[string]any{
 		oauthCompletionResponseKey: payload.CompletionResponse,
+		oauthSalesReferralStateKey: service.SalesReferralFromContext(c.Request.Context()),
 	}
 	if promoCode := readOAuthPromoCode(c); promoCode != "" {
 		localFlowState[oauthPromoCodeStateKey] = promoCode
@@ -1474,6 +1475,9 @@ func readPendingOAuthBrowserSession(c *gin.Context, h *AuthHandler) (*service.Au
 		return nil, nil, clearCookies, err
 	}
 
+	// Restore the first source captured by this server-owned flow. An empty
+	// captured source also overrides a later cookie from another browser tab.
+	restorePendingSalesReferral(c, session.LocalFlowState)
 	return svc, session, clearCookies, nil
 }
 
@@ -1500,6 +1504,7 @@ func (h *AuthHandler) consumePendingOAuthSessionOnLogout(c *gin.Context) {
 
 func clearOAuthLogoutCookies(c *gin.Context) {
 	secureCookie := isRequestHTTPS(c)
+	clearSalesReferralCookie(c)
 
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
@@ -1612,6 +1617,7 @@ func (h *AuthHandler) transitionPendingOAuthAccountToChoiceState(
 }
 
 func writeOAuthTokenPairResponse(c *gin.Context, tokenPair *service.TokenPair) {
+	clearSalesReferralCookie(c)
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  tokenPair.AccessToken,
 		"refresh_token": tokenPair.RefreshToken,
@@ -2059,6 +2065,7 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		payload["refresh_token"] = tokenPair.RefreshToken
 		payload["expires_in"] = tokenPair.ExpiresIn
 		payload["token_type"] = "Bearer"
+		clearSalesReferralCookie(c)
 	}
 
 	clearCookies()

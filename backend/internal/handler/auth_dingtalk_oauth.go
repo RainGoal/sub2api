@@ -147,6 +147,7 @@ func (h *AuthHandler) DingTalkOAuthStart(c *gin.Context) {
 	intent := normalizeOAuthIntent(c.Query("intent"))
 	setDingTalkCookie(c, dingTalkOAuthIntentCookieName, encodeCookieValue(intent), dingTalkOAuthCookieMaxAgeSec, secureCookie)
 	captureOAuthPromoCode(c, secureCookie)
+	h.captureSalesOAuthReferral(c, "dingtalk", state)
 
 	setOAuthPendingBrowserCookie(c, browserSessionKey, secureCookie)
 	clearOAuthPendingSessionCookie(c, secureCookie)
@@ -329,6 +330,7 @@ func (h *AuthHandler) DingTalkOAuthCallback(c *gin.Context) {
 		redirectOAuthError(c, frontendCallback, "csrf", "state mismatch", "")
 		return
 	}
+	h.restoreSalesOAuthReferral(c, "dingtalk", state)
 	redirectTo, _ := readCookieDecoded(c, dingTalkOAuthRedirectCookie)
 	intent, _ := readCookieDecoded(c, dingTalkOAuthIntentCookieName)
 	intent = normalizeOAuthIntent(intent)
@@ -734,6 +736,7 @@ func (h *AuthHandler) CompleteDingTalkOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	restorePendingSalesReferral(c, session.LocalFlowState)
 	if err := ensurePendingOAuthCompleteRegistrationSession(session); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -814,12 +817,7 @@ func (h *AuthHandler) CompleteDingTalkOAuthRegistration(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
 
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
-	})
+	writeOAuthTokenPairResponse(c, tokenPair)
 }
 
 // CreateDingTalkOAuthAccount creates a new user account from a pending DingTalk OAuth session.

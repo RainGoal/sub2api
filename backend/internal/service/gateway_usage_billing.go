@@ -333,6 +333,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
 	}
 
+	captureSalesBillingCost(cmd, usageLog, p)
 	cmd.Normalize()
 	return cmd
 }

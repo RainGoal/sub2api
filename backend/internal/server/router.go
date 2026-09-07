@@ -124,6 +124,10 @@ func registerRoutes(
 	panelRateLimiter := middleware2.NewPanelRateLimiter(redisClient, settingService)
 	activeConnectionService := service.NewActiveConnectionService()
 
+	if h.Sales != nil {
+		v1.GET("/sales/referral", panelRateLimiter.PublicIP(), h.Sales.Referral)
+	}
+
 	// 注册各模块路由
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService, panelRateLimiter)
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService, panelRateLimiter, activeConnectionService)

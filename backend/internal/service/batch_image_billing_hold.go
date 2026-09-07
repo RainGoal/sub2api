@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"go.uber.org/zap"
@@ -82,6 +83,16 @@ func captureBatchImageBalanceHold(ctx context.Context, repo UsageBillingReposito
 	cmd, err := buildBatchImageHoldCommand(job, BatchImageCaptureRequestID(job.BatchID), actualAmount, payloadHash)
 	if err != nil {
 		return err
+	}
+	cmd.SalesConsumedAt = time.Now().UTC()
+	cmd.SalesModel = job.Model
+	// Match recordUsageLog's agreed account-statistics basis for batch images.
+	if validSalesCost(actualAmount) && validSalesCost(job.AccountRateMultiplier) {
+		cost := actualAmount * job.AccountRateMultiplier
+		if validSalesCost(cost) {
+			cost = QuantizeUsageBillingAmount(cost)
+			cmd.SalesCost = &cost
+		}
 	}
 	if _, err := repo.CaptureBatchImageBalance(ctx, cmd); err != nil {
 		return ErrBatchImageSettlementBillingFailed.WithCause(err)

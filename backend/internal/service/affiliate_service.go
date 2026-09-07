@@ -281,6 +281,9 @@ func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, 
 	if !isValidAffiliateCodeFormat(code) {
 		return ErrAffiliateCodeInvalid
 	}
+	if salesCustomer, err := s.isSalesCustomer(ctx, userID); err != nil || salesCustomer {
+		return err
+	}
 
 	selfSummary, err := s.repo.EnsureUserAffiliate(ctx, userID)
 	if err != nil {
@@ -325,6 +328,9 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 	// 总开关关闭时，新充值不再产生返利
 	if !s.IsEnabled(ctx) {
 		return 0, nil
+	}
+	if salesCustomer, err := s.isSalesCustomer(ctx, inviteeUserID); err != nil || salesCustomer {
+		return 0, err
 	}
 
 	inviteeSummary, err := s.repo.EnsureUserAffiliate(ctx, inviteeUserID)

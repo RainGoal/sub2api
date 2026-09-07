@@ -70,6 +70,7 @@ func ProvideAuthService(
 	defaultSubAssigner DefaultSubscriptionAssigner,
 	affiliateService *AffiliateService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	salesService *SalesService,
 ) *AuthService {
 	svc := NewAuthService(
 		entClient,
@@ -88,6 +89,13 @@ func ProvideAuthService(
 	)
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
+	svc.SetSalesService(salesService)
+	return svc
+}
+
+func ProvideSalesService(repo SalesRepository, cfg *config.Config) *SalesService {
+	svc := NewSalesService(repo, cfg)
+	svc.Start()
 	return svc
 }
 
@@ -937,6 +945,7 @@ var ProviderSet = wire.NewSet(
 	NewModelPlazaService,
 	NewContentModerationService,
 	NewAffiliateService,
+	ProvideSalesService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,

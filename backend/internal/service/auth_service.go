@@ -84,6 +84,7 @@ type AuthService struct {
 	emailQueueService     *EmailQueueService
 	promoService          *PromoService
 	affiliateService      *AffiliateService
+	salesService          SalesRegistrationService
 	defaultSubAssigner    DefaultSubscriptionAssigner
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 }
@@ -620,7 +621,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 				SignupSource: signupSource,
 			}
 
-			if err := s.userRepo.Create(ctx, newUser); err != nil {
+			if err := s.createUserWithSales(ctx, newUser, s.userRepo.Create); err != nil {
 				if errors.Is(err, ErrEmailExists) {
 					// 并发场景：GetByEmail 与 Create 之间用户被创建。
 					user, err = s.userRepo.GetByEmail(ctx, email)
@@ -778,7 +779,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				defer func() { _ = tx.Rollback() }()
 				txCtx := dbent.NewTxContext(ctx, tx)
 
-				if err := s.userRepo.Create(txCtx, newUser); err != nil {
+				if err := s.createUserWithSales(txCtx, newUser, s.userRepo.Create); err != nil {
 					if errors.Is(err, ErrEmailExists) {
 						user, err = s.userRepo.GetByEmail(ctx, email)
 						if err != nil {
@@ -806,7 +807,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 				}
 			} else {
-				if err := s.userRepo.Create(ctx, newUser); err != nil {
+				if err := s.createUserWithSales(ctx, newUser, s.userRepo.Create); err != nil {
 					if errors.Is(err, ErrEmailExists) {
 						user, err = s.userRepo.GetByEmail(ctx, email)
 						if err != nil {
@@ -1246,6 +1247,10 @@ func (s *AuthService) createUserWithRegistrationEmailGuard(ctx context.Context, 
 	if s == nil || s.userRepo == nil {
 		return ErrServiceUnavailable
 	}
+	return s.createUserWithSales(ctx, user, s.createUserWithRegistrationEmailGuardOnly)
+}
+
+func (s *AuthService) createUserWithRegistrationEmailGuardOnly(ctx context.Context, user *User) error {
 	whitelist := []string{}
 	if s.settingService != nil {
 		whitelist = s.settingService.GetRegistrationEmailSuffixWhitelist(ctx)

@@ -55,6 +55,12 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, err
 	}
 
+	if !cmd.SalesConsumedAt.IsZero() {
+		if err := appendSalesBillingEvent(ctx, tx, cmd); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -163,6 +169,16 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 		result = &service.BatchImageBalanceHoldResult{}
 	}
 	result.Applied = true
+
+	if !cmd.SalesConsumedAt.IsZero() {
+		if err := appendSalesBillingEvent(ctx, tx, &service.UsageBillingCommand{
+			RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID, UserID: cmd.UserID,
+			BillingType: service.BillingTypeBalance, BalanceCost: cmd.ActualAmount,
+			Model: cmd.SalesModel, SalesCost: cmd.SalesCost, SalesConsumedAt: cmd.SalesConsumedAt,
+		}); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
