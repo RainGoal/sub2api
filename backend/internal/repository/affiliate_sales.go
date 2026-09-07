@@ -10,7 +10,7 @@ func (r *affiliateRepository) IsSalesCustomer(ctx context.Context, userID int64)
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		return false, rows.Err()
 	}

@@ -15,7 +15,7 @@ func (r *salesRepository) RollbackRegistration(ctx context.Context, userID int64
 		if err != nil {
 			return err
 		}
-		rows.Close()
+		_ = rows.Close()
 		_, err = client.ExecContext(ctx, `DELETE FROM sales_customers c WHERE c.user_id=$1
 AND NOT EXISTS (SELECT 1 FROM sales_commission_events e WHERE e.customer_user_id=c.user_id)
 AND NOT EXISTS (SELECT 1 FROM sales_commission_ledger l WHERE l.customer_user_id=c.user_id)`, userID)

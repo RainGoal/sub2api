@@ -17,7 +17,7 @@ func TestSalesBillingEventSharesDebitTransaction(t *testing.T) {
 		t.Run(map[bool]string{false: "commit", true: "rollback_on_event_failure"}[failEvent], func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			at, cost := time.Now().UTC(), 1.0
 			cmd := &service.UsageBillingCommand{RequestID: "sales-request", APIKeyID: 2, UserID: 3,
 				BalanceCost: 2, SalesCost: &cost, SalesConsumedAt: at, Model: "model"}

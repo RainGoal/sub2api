@@ -48,7 +48,7 @@ func (r *salesRepository) GetSettings(ctx context.Context) (*service.SalesSettin
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	cfg := &service.SalesSettings{}
 	if !rows.Next() {
 		return cfg, rows.Err()
@@ -93,7 +93,7 @@ func salesGetPartner(ctx context.Context, client *dbent.Client, condition string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err = rows.Err(); err != nil {
 			return nil, err
@@ -124,7 +124,7 @@ func (r *salesRepository) ListPartners(ctx context.Context, f service.SalesFilte
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.SalesPartner, 0)
 	for rows.Next() {
 		p, err := scanSalesPartner(rows)
@@ -166,11 +166,11 @@ func (r *salesRepository) SavePartner(ctx context.Context, id int64, in service.
 			return e
 		}
 		if !rows.Next() {
-			rows.Close()
+			_ = rows.Close()
 			return service.ErrSalesNotFound
 		}
 		out, e = scanSalesPartner(rows)
-		rows.Close()
+		_ = rows.Close()
 		if e != nil {
 			return e
 		}
@@ -198,7 +198,7 @@ func (r *salesRepository) BindCustomer(ctx context.Context, userID int64, a *ser
 			return err
 		}
 		inserted := rows.Next()
-		rows.Close()
+		_ = rows.Close()
 		if !inserted {
 			count, err := salesCount(ctx, client, `SELECT COUNT(*) FROM sales_customers WHERE user_id=$1 AND partner_id=$2`, userID, p.ID)
 			if err != nil {
@@ -217,7 +217,7 @@ func salesCount(ctx context.Context, client *dbent.Client, query string, args ..
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var count int64
 	if rows.Next() {
 		err = rows.Scan(&count)
@@ -266,7 +266,7 @@ LEFT JOIN LATERAL (SELECT SUM(revenue) revenue,SUM(profit) profit,SUM(commission
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.SalesCustomer, 0)
 	for rows.Next() {
 		var v service.SalesCustomer
@@ -298,7 +298,7 @@ func (r *salesRepository) ListLedger(ctx context.Context, f service.SalesFilter)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.SalesLedgerEntry, 0)
 	for rows.Next() {
 		v, e := scanSalesLedger(rows)
@@ -326,7 +326,7 @@ func (r *salesRepository) Overview(ctx context.Context, id int64, f service.Sale
 	if rows.Next() {
 		err = rows.Scan(&out.Revenue, &out.Cost, &out.Profit, &out.Commission)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (r *salesRepository) Overview(ctx context.Context, id int64, f service.Sale
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if rows.Next() {
 		err = rows.Scan(&out.CustomerCount, &out.UnsettledCommission, &out.PendingPayout, &out.PaidCommission, &out.PendingEvents)
 	}
@@ -359,11 +359,11 @@ func (r *salesRepository) ProcessEvents(ctx context.Context, limit int) (process
 		}
 		var id int64
 		if !rows.Next() {
-			rows.Close()
+			_ = rows.Close()
 			return nil
 		}
 		e = rows.Scan(&id)
-		rows.Close()
+		_ = rows.Close()
 		if e != nil {
 			return e
 		}
@@ -379,7 +379,7 @@ func (r *salesRepository) ProcessEvents(ctx context.Context, limit int) (process
 		if e != nil {
 			return e
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		if rows.Next() {
 			e = rows.Scan(&processed)
 		}
@@ -401,7 +401,7 @@ func salesGetSettlement(ctx context.Context, client *dbent.Client, id int64) (*s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		return nil, service.ErrSalesNotFound
 	}
@@ -420,7 +420,7 @@ func (r *salesRepository) ListSettlements(ctx context.Context, f service.SalesFi
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]service.SalesSettlement, 0)
 	for rows.Next() {
 		v, e := scanSalesSettlement(rows)
@@ -445,7 +445,7 @@ func (r *salesRepository) CreateSettlement(ctx context.Context, in service.Sales
 			var id, pid int64
 			var month string
 			e = rows.Scan(&id, &pid, &month)
-			rows.Close()
+			_ = rows.Close()
 			if e != nil {
 				return e
 			}
@@ -455,7 +455,7 @@ func (r *salesRepository) CreateSettlement(ctx context.Context, in service.Sales
 			out, e = salesGetSettlement(ctx, client, id)
 			return e
 		}
-		rows.Close()
+		_ = rows.Close()
 		count, e := salesCount(ctx, client, `SELECT COUNT(*) FROM sales_settlements WHERE partner_id=$1 AND cutoff >= $2`, in.PartnerID, cutoff)
 		if e != nil {
 			return e
@@ -481,11 +481,11 @@ func (r *salesRepository) CreateSettlement(ctx context.Context, in service.Sales
 			return e
 		}
 		if !rows.Next() {
-			rows.Close()
+			_ = rows.Close()
 			return service.ErrSalesConflict
 		}
 		out, e = scanSalesSettlement(rows)
-		rows.Close()
+		_ = rows.Close()
 		if e != nil {
 			return e
 		}
@@ -519,7 +519,7 @@ func (r *salesRepository) ConfirmSettlement(ctx context.Context, id int64, key s
 		if rows.Next() {
 			e = rows.Scan(&status, &existing)
 		}
-		rows.Close()
+		_ = rows.Close()
 		if e != nil {
 			return e
 		}
@@ -563,7 +563,7 @@ func (r *salesRepository) PaySettlement(ctx context.Context, id int64, in servic
 		if rows.Next() {
 			e = rows.Scan(&status, &key, &ref)
 		}
-		rows.Close()
+		_ = rows.Close()
 		if e != nil {
 			return e
 		}
@@ -608,7 +608,7 @@ func (r *salesRepository) Adjust(ctx context.Context, in service.SalesAdjustment
 			var note string
 			var source *int64
 			e = rows.Scan(&id, &pid, &amount, &note, &source)
-			rows.Close()
+			_ = rows.Close()
 			if e != nil {
 				return e
 			}
@@ -617,7 +617,7 @@ func (r *salesRepository) Adjust(ctx context.Context, in service.SalesAdjustment
 				return service.ErrSalesConflict
 			}
 		} else {
-			rows.Close()
+			_ = rows.Close()
 			if in.SourceLedgerID != nil {
 				count, e := salesCount(ctx, client, `SELECT COUNT(*) FROM sales_commission_ledger WHERE id=$1 AND partner_id=$2 AND kind<>'carry'`, *in.SourceLedgerID, in.PartnerID)
 				if e != nil {
@@ -634,7 +634,7 @@ func (r *salesRepository) Adjust(ctx context.Context, in service.SalesAdjustment
 			if rows.Next() {
 				e = rows.Scan(&id)
 			}
-			rows.Close()
+			_ = rows.Close()
 			if e != nil {
 				return e
 			}
@@ -646,7 +646,7 @@ func (r *salesRepository) Adjust(ctx context.Context, in service.SalesAdjustment
 		if e != nil {
 			return e
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		if !rows.Next() {
 			return service.ErrSalesNotFound
 		}
