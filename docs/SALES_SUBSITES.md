@@ -175,7 +175,7 @@ Remove-Item Env:SUB2API_SALES_QA_DATABASE_URL
 可在有 Docker 的环境执行 `go test -tags integration ./internal/repository -run '^TestSales' -count=1 -v` 验证项目完整迁移与容器环境。
 后端及管理端随个人版本 `v0.1.29` 发布，销售工作台在独立 `wsapi-front` 仓库提交。
 `v0.1.30` 补齐销售仓储与测试中的资源关闭返回值处理，沿用现有仓储的清理方式。
-修复后 `golangci-lint 2.13.0 run --timeout=30m --max-issues-per-linter=0 --max-same-issues=0 ./...` 报告 `0 issues`，`go test -p 2 ./...` 通过。
+修复后使用 golangci-lint 2.13.0 执行 `golangci-lint run --timeout=30m --max-issues-per-linter=0 --max-same-issues=0 ./...`，报告 `0 issues`；`go test -p 2 ./...` 通过。
 首发版本的 GitHub CI 单元测试、集成测试、前端及部署脚本检查均通过；本次修复针对失败的 `errcheck` 静态检查，并将完整 lint 加入发布前验证要求。
 本地验证没有执行线上部署；用户端仓库原有的其他修改不包含在本次销售功能提交中。
 
