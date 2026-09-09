@@ -318,6 +318,11 @@ export default {
         providerHint: '协议决定接口路径、请求字段和任务状态解析；自定义中转地址不会影响协议选择。',
         baseUrlHint: '{provider} 默认地址为 {url}。只填写到 /v1，视频路径由 Sub2API 自动拼接。',
         apiKeyHint: '填写所选视频上游的 API Key。该凭证仅用于视频任务。',
+        models: '可用 Seedance 型号',
+        allModels: '全部内置型号（不限制）',
+        selectedModelsOnly: '仅所选型号',
+        modelsHint: '型号随上游协议变化。切换协议时仅保留仍受支持的已选型号；分辨率价格在分组中配置。',
+        modelsRequired: '请至少选择一个型号，或明确选择“全部内置型号（不限制）”。',
       },
       cnProviders: {
         accountMode: {

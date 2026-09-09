@@ -507,6 +507,50 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     })
   })
 
+  it('saves selected fflink Seedance models as a same-ID whitelist', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    expect(wrapper.find('[data-testid="seedance-model-seedance-2.0-fast"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('fflink_v1')
+    await wrapper.get('[data-testid="seedance-model-mode"]').setValue('selected')
+    await wrapper.get('[data-testid="seedance-model-seedance-2.0"]').setValue(false)
+    await wrapper.get('[data-testid="seedance-model-seedance-2.5"]').setValue(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Seedance fast and mini')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials.model_mapping).toEqual({
+      'seedance-2.0-fast': 'seedance-2.0-fast',
+      'seedance-2.0-mini': 'seedance-2.0-mini'
+    })
+    expect(syncUpstreamModelsMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an emptied Seedance selection after changing protocol until explicitly unrestricted', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('fflink_v1')
+    await wrapper.get('[data-testid="seedance-model-mode"]').setValue('selected')
+    for (const id of ['seedance-2.0', 'seedance-2.0-mini', 'seedance-2.5']) {
+      await wrapper.get(`[data-testid="seedance-model-${id}"]`).setValue(false)
+    }
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('bblabu_v1')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Seedance restricted')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="seedance-model-selector"] [role="alert"]').text())
+      .toBe('admin.accounts.seedance.modelsRequired')
+
+    await wrapper.get('[data-testid="seedance-model-mode"]').setValue('all')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledOnce()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('model_mapping')
+  })
+
   it('exposes Agent Identity in the OpenAI authorization methods', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

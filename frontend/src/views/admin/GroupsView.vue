@@ -1109,10 +1109,10 @@
             data-testid="create-grok-video-model-prices"
           >
             <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t("admin.groups.videoPricing.modelOverridesTitle") }}
+              {{ t(videoPricingI18nKey("modelOverridesTitle", createForm.platform)) }}
             </p>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
+              {{ t(videoPricingI18nKey("modelOverridesDescription", createForm.platform)) }}
             </p>
             <div class="mt-3 space-y-3">
               <div
@@ -2910,10 +2910,10 @@
             data-testid="edit-grok-video-model-prices"
           >
             <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t("admin.groups.videoPricing.modelOverridesTitle") }}
+              {{ t(videoPricingI18nKey("modelOverridesTitle", editForm.platform)) }}
             </p>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t("admin.groups.videoPricing.modelOverridesDescription") }}
+              {{ t(videoPricingI18nKey("modelOverridesDescription", editForm.platform)) }}
             </p>
             <div class="mt-3 space-y-3">
               <div

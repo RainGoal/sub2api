@@ -36,6 +36,12 @@
             </option>
           </select>
           <p class="input-hint">{{ t('admin.accounts.seedance.providerHint') }}</p>
+          <SeedanceModelSelector
+            id="edit-seedance"
+            v-model="seedanceModelSelection"
+            :provider="editVideoProvider"
+            class="mt-4"
+          />
         </div>
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
@@ -2945,6 +2951,13 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
+import {
+  buildSeedanceModelMapping,
+  filterSeedanceModelSelection,
+  readSeedanceModelSelection,
+  type SeedanceModelSelection
+} from '@/components/account/seedanceModelRestriction'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
@@ -3038,6 +3051,7 @@ const handleOllamaCloudUsageUpdated = (state: OllamaCloudUsageState) => {
 
 const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const editVideoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
+const seedanceModelSelection = ref<SeedanceModelSelection>(null)
 
 // Platform-specific hint for Base URL
 const baseUrlHint = computed(() => {
@@ -3077,6 +3091,7 @@ const editApiKey = ref('')
 
 watch(editVideoProvider, (provider, previousProvider) => {
   if (props.account?.platform !== 'seedance') return
+  seedanceModelSelection.value = filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = editBaseUrl.value.trim()
   if (!currentBaseUrl || currentBaseUrl === videoProviderDefaultBaseUrl(previousProvider)) {
     editBaseUrl.value = videoProviderDefaultBaseUrl(provider)
@@ -3797,6 +3812,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load intercept warmup requests setting (applies to all account types)
   const credentials = newAccount.credentials as Record<string, unknown> | undefined
   editVideoProvider.value = normalizeVideoProviderID(credentials?.video_provider)
+  seedanceModelSelection.value = readSeedanceModelSelection(credentials?.model_mapping, editVideoProvider.value)
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
   autoPauseOnExpired.value = newAccount.auto_pause_on_expired === true
   editVertexProjectId.value = ''
@@ -4735,6 +4751,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 
 const handleSubmit = async () => {
   if (!props.account) return
+  if (props.account.platform === 'seedance' && seedanceModelSelection.value?.length === 0) {
+    appStore.showError(t('admin.accounts.seedance.modelsRequired'))
+    return
+  }
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
@@ -4835,7 +4855,9 @@ const handleSubmit = async () => {
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (props.account.platform === 'seedance') {
-        delete newCredentials.model_mapping
+        const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value)
+        if (modelMapping) newCredentials.model_mapping = modelMapping
+        else delete newCredentials.model_mapping
         delete newCredentials.compact_model_mapping
         delete newCredentials.pool_mode
         delete newCredentials.pool_mode_retry_count

@@ -53,6 +53,16 @@ func CanonicalGrokImagineVideoPriceFamily(model string) string {
 	}
 }
 
+func canonicalVideoPriceFamily(model string) string {
+	if canonical, ok := videoprovider.CanonicalModel(model); ok {
+		return canonical
+	}
+	if family := CanonicalGrokImagineVideoPriceFamily(model); family != "" {
+		return family
+	}
+	return strings.ToLower(strings.TrimSpace(model))
+}
+
 // NormalizeVideoModelPrices cleans and canonicalizes a per-model resolution map.
 // Keys become price families; tiers are restricted to each provider model's
 // documented resolution catalog. Negative prices are dropped.
@@ -77,18 +87,9 @@ func NormalizeVideoModelPrices(in map[string]map[string]float64) map[string]map[
 		if len(tierPrices) == 0 {
 			continue
 		}
-		family := CanonicalGrokImagineVideoPriceFamily(modelKey)
+		family := canonicalVideoPriceFamily(modelKey)
 		if family == "" {
-			key := strings.ToLower(strings.TrimSpace(modelKey))
-			switch key {
-			case VideoPriceFamilyGrokImagineVideo, VideoPriceFamilyGrokImagineVideo15:
-				family = key
-			default:
-				if key == "" {
-					continue
-				}
-				family = key
-			}
+			continue
 		}
 		normalizedTiers := out[family]
 		if normalizedTiers == nil {
@@ -161,21 +162,27 @@ func LookupVideoModelPrice(prices map[string]map[string]float64, model, resoluti
 	if len(prices) == 0 {
 		return nil
 	}
-	family := CanonicalGrokImagineVideoPriceFamily(model)
+	family := canonicalVideoPriceFamily(model)
 	if family == "" {
-		family = strings.ToLower(strings.TrimSpace(model))
-	}
-	if family == "" {
-		return nil
-	}
-	tierPrices, ok := prices[family]
-	if !ok || len(tierPrices) == 0 {
 		return nil
 	}
 	tier := NormalizeVideoBillingResolutionOrDefault(resolution)
-	if price, ok := tierPrices[tier]; ok {
+	if _, seedance := videoprovider.CanonicalModel(family); seedance {
+		var known bool
+		tier, known = LookupVideoBillingResolution(resolution)
+		if !known || !isVideoPriceResolutionSupported(family, tier) {
+			return nil
+		}
+	}
+	if price, ok := prices[family][tier]; ok {
 		p := price
 		return &p
+	}
+	// Older group rows may still store the provider alias until their next save.
+	if family == videoprovider.ModelSeedance25 {
+		if price, ok := prices["bytedance/seedance-2.5"][tier]; ok {
+			return &price
+		}
 	}
 	return nil
 }

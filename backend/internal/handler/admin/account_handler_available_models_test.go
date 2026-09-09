@@ -136,6 +136,36 @@ func TestAccountHandlerGetAvailableModels_SeedanceUsesFixedCatalog(t *testing.T)
 	require.Equal(t, "Seedance-2.5", resp.Data[1].ID)
 }
 
+func TestAccountHandlerGetAvailableModels_SeedanceRespectsSelectedModels(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID: 250, Platform: service.PlatformSeedance, Type: service.AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"video_provider": "fflink_v1",
+				"model_mapping": map[string]any{
+					"seedance-2.0-fast": "seedance-2.0-fast",
+					"seedance-2.5":      "seedance-2.5",
+				},
+			},
+		},
+	}
+	rec := httptest.NewRecorder()
+	setupAvailableModelsRouter(svc).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/250/models", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	var ids []string
+	for _, model := range resp.Data {
+		ids = append(ids, model.ID)
+	}
+	require.Equal(t, []string{"seedance-2.0-fast", "seedance-2.5"}, ids)
+}
+
 func TestAccountHandlerGetAvailableModels_GrokDefaultsToXAIModelsWithoutMapping(t *testing.T) {
 	svc := &availableModelsAdminService{
 		stubAdminService: newStubAdminService(),

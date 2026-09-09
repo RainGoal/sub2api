@@ -387,6 +387,55 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('rehydrates and preserves a Seedance whitelist including the legacy 2.5 alias', async () => {
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: {
+        api_key: 'sk-video', video_provider: 'fflink_v1',
+        model_mapping: {
+          'seedance-2.0-fast': 'seedance-2.0-fast',
+          'bytedance/seedance-2.5': 'bytedance/seedance-2.5'
+        }
+      }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    expect((wrapper.get('[data-testid="seedance-model-mode"]').element as HTMLSelectElement).value).toBe('selected')
+    expect((wrapper.get('[data-testid="seedance-model-seedance-2.5"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="seedance-model-seedance-2.0-mini"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual({
+      'seedance-2.0-fast': 'seedance-2.0-fast', 'seedance-2.5': 'seedance-2.5'
+    })
+  })
+
+  it('retains a Seedance restriction when switching to a protocol without the selected model', async () => {
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: {
+        api_key: 'sk-video', video_provider: 'fflink_v1',
+        model_mapping: { 'seedance-2.0-fast': 'seedance-2.0-fast' }
+      }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('bblabu_v1')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="seedance-model-selector"] [role="alert"]').text())
+      .toBe('admin.accounts.seedance.modelsRequired')
+    await wrapper.get('[data-testid="seedance-model-mode"]').setValue('all')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledOnce()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('model_mapping')
+  })
+
   it('preserves adaptive Kimi Responses endpoint on submit', async () => {
     const account = buildAccount()
     account.platform = 'kimi'

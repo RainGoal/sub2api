@@ -115,6 +115,11 @@ export default {
         providerHint: 'The protocol controls endpoint paths, request fields, and task status parsing; custom relay URLs do not change it.',
         baseUrlHint: '{provider} defaults to {url}. Enter the URL through /v1 only; Sub2API appends video paths.',
         apiKeyHint: 'Enter the API key for the selected video upstream. This credential is used only for video tasks.',
+        models: 'Available Seedance models',
+        allModels: 'All built-in models (unrestricted)',
+        selectedModelsOnly: 'Selected models only',
+        modelsHint: 'Models depend on the upstream protocol. Switching protocols retains only selected models still supported; configure resolution prices in the group.',
+        modelsRequired: 'Select at least one model, or explicitly choose “All built-in models (unrestricted)”.',
       },
       cnProviders: {
         accountMode: {

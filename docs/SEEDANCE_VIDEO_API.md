@@ -24,6 +24,42 @@ adapter; callers should treat it as opaque and use it only with the gateway's
 status, content, and cancellation endpoints. A gateway-owned opaque ID can be
 introduced later without changing the response fields.
 
+## Account Models and Group Prices
+
+Create and edit account forms offer an explicit choice between all built-in
+models supported by the selected protocol and an allowlist of selected models.
+Existing accounts without `credentials.model_mapping` remain unrestricted
+within their protocol's built-in catalog. A selection is stored as same-model
+entries in `model_mapping`; arbitrary model rewrites and wildcards are not
+supported for video accounts. An empty restricted selection cannot be saved.
+Changing protocols retains only compatible selections and requires choosing
+again if none remain.
+
+| Model | Protocols | Configurable resolutions |
+| --- | --- | --- |
+| `seedance-2.0` | bblabu V1, fflink V1 | 480p, 720p, 1080p, 4k |
+| `seedance-2.0-fast` | fflink V1 | 480p, 720p |
+| `seedance-2.0-mini` | fflink V1 | 480p, 720p, 1080p |
+| `seedance-2.5` | bblabu V1, fflink V1 | 480p, 720p |
+
+This is Sub2API's built-in compatibility catalog, not a guarantee that an
+upstream API key has access to every listed model. Select the models available
+to the actual upstream key. Mini retains its existing adapter support.
+
+Configure per-second prices in the group's video price table. Each model has
+independent prices and only its supported resolution tiers are displayed.
+Unpriced tiers cannot create tasks. Unknown or unsupported Seedance resolutions
+never borrow the 480p price. `bytedance/seedance-2.5` and `Seedance-2.5` are aliases
+of `seedance-2.5` for model selection and pricing. When alias and canonical prices
+coexist, their tiers merge and the lowercase canonical model key wins conflicts.
+Running tasks retain their frozen price snapshot.
+
+Deployment needs the backend and rebuilt admin frontend, with no database
+migration. Verify account selection persists after reopening, `/v1/models`
+reflects account selections, and a configured model/resolution completes the
+existing create/status/content flow. Check missing prices are rejected and
+completed tasks are billed once. The public video routes remain unchanged.
+
 ## Create Request
 
 ```json

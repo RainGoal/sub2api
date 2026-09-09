@@ -53,9 +53,12 @@ describe('Seedance video model pricing form', () => {
     const form = createVideoModelPricesForm(undefined, 'seedance')
     const rows = videoModelPriceFamilyRows(form, 'seedance')
 
-    expect(rows.map(({ key }) => key)).toEqual(['seedance-2.0', 'seedance-2.5'])
-    expect(rows[0].resolutions.map(({ key }) => key)).toEqual(['480p', '720p', '1080p', '4k'])
-    expect(rows[1].resolutions.map(({ key }) => key)).toEqual(['480p', '720p'])
+    expect(rows.map(({ key, resolutions }) => [key, resolutions.map(({ key }) => key)])).toEqual([
+      ['seedance-2.0', ['480p', '720p', '1080p', '4k']],
+      ['seedance-2.0-fast', ['480p', '720p']],
+      ['seedance-2.0-mini', ['480p', '720p', '1080p']],
+      ['seedance-2.5', ['480p', '720p']]
+    ])
     expect(form['seedance-2.0']['4k']).toBeNull()
     expect(form['seedance-2.5']['1080p']).toBeUndefined()
   })
@@ -68,6 +71,27 @@ describe('Seedance video model pricing form', () => {
     expect(serializeVideoModelPrices(form)).toMatchObject({
       'seedance-2.5': { '720p': 0.3 }
     })
+  })
+
+  it('merges the 2.5 alias without mixing prices between model variants', () => {
+    const prices = {
+      'seedance-2.5': { '720p': 0.3 },
+      'bytedance/seedance-2.5': { '480p': 0.2, '720p': 0.9 },
+      'seedance-2.0': { '720p': 0.1, '4k': 0.4 },
+      'seedance-2.0-fast': { '720p': 0.05 },
+      'seedance-2.0-mini': { '1080p': 0.08 }
+    }
+    const form = createVideoModelPricesForm(prices, 'seedance')
+    const expected = {
+      'seedance-2.5': { '480p': 0.2, '720p': 0.3 },
+      'seedance-2.0': { '720p': 0.1, '4k': 0.4 },
+      'seedance-2.0-fast': { '720p': 0.05 },
+      'seedance-2.0-mini': { '1080p': 0.08 }
+    }
+
+    expect(serializeVideoModelPrices(form)).toEqual(expected)
+    expect(serializeVideoModelPrices(prices)).toEqual(expected)
+    expect(videoModelPriceFamilyRows(form, 'seedance')).toHaveLength(4)
   })
 
   it('renders each fallback resolution once for future Seedance models', () => {

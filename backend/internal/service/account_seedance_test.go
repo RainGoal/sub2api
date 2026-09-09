@@ -45,6 +45,55 @@ func TestSeedanceSchedulerSelectsSeedanceAccount(t *testing.T) {
 	require.Equal(t, account.ID, selection.Account.ID)
 }
 
+func TestSeedanceModelSelectionValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider string
+		mapping  any
+		valid    bool
+	}{
+		{"legacy unrestricted", "bblabu_v1", nil, true},
+		{"empty unrestricted", "fflink_v1", map[string]any{}, true},
+		{"fflink fast", "fflink_v1", map[string]any{"seedance-2.0-fast": "seedance-2.0-fast"}, true},
+		{"bblabu alias", "bblabu_v1", map[string]any{"bytedance/seedance-2.5": "Seedance-2.5"}, true},
+		{"wrong provider", "bblabu_v1", map[string]any{"seedance-2.0-fast": "seedance-2.0-fast"}, false},
+		{"unknown model", "fflink_v1", map[string]any{"kling-3.0": "kling-3.0"}, false},
+		{"model rewrite", "fflink_v1", map[string]any{"seedance-2.0": "seedance-2.5"}, false},
+		{"wildcard", "fflink_v1", map[string]any{"seedance-*": "seedance-*"}, false},
+		{"non string target", "fflink_v1", map[string]any{"seedance-2.0": true}, false},
+		{"non object", "fflink_v1", []string{"seedance-2.0"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateSeedanceAccountCredentials(PlatformSeedance, AccountTypeAPIKey, map[string]any{
+				"api_key": "test-key", "video_provider": tc.provider, "model_mapping": tc.mapping,
+			})
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestSeedanceModelSelectionMatchesCanonicalAliases(t *testing.T) {
+	for _, selected := range []string{"seedance-2.5", "Seedance-2.5", "bytedance/seedance-2.5"} {
+		account := &Account{Platform: PlatformSeedance, Credentials: map[string]any{
+			"video_provider": "fflink_v1", "model_mapping": map[string]any{selected: selected},
+		}}
+		for _, request := range []string{"seedance-2.5", "Seedance-2.5", "bytedance/seedance-2.5"} {
+			require.True(t, account.IsModelSupported(request), "selected=%s requested=%s", selected, request)
+		}
+		require.False(t, account.IsModelSupported("seedance-2.0"))
+		require.False(t, account.IsModelSupported("seedance-2.0-fast"))
+		require.False(t, account.IsModelSupported("kling-3.0"))
+	}
+	account := &Account{Platform: PlatformSeedance, Credentials: map[string]any{
+		"video_provider": "bblabu_v1", "model_mapping": map[string]any{"seedance-2.0-fast": "seedance-2.0-fast"},
+	}}
+	require.False(t, account.IsModelSupported("seedance-2.0-fast"))
+}
+
 func TestAccountSeedanceAccessors(t *testing.T) {
 	account := &Account{Platform: PlatformSeedance, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": " key "}}
 	require.True(t, account.IsSeedance())

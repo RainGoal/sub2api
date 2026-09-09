@@ -892,10 +892,7 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		return true
 	}
 	if a.IsSeedance() {
-		driver, err := videoprovider.Resolve(string(a.GetVideoProviderID()))
-		if err != nil || !driver.SupportsModel(requestedModel) {
-			return false
-		}
+		return a.isSeedanceModelSupported(requestedModel)
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {

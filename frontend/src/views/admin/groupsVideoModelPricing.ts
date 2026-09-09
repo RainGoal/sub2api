@@ -1,17 +1,10 @@
+import { SEEDANCE_MODEL_OPTIONS } from '@/constants/videoProviders'
+
 export const grokVideoPriceResolutions = [
   { key: '480p', label: '480p' },
   { key: '720p', label: '720p' },
   { key: '1080p', label: '1080p' }
 ] as const
-
-const seedance20Resolutions = [
-  { key: '480p', label: '480p' },
-  { key: '720p', label: '720p' },
-  { key: '1080p', label: '1080p' },
-  { key: '4k', label: '4K' }
-] as const
-
-const seedance25Resolutions = seedance20Resolutions.slice(0, 2)
 
 type VideoPricingPlatform = 'grok' | 'seedance'
 type ResolutionOption = { key: string; label: string }
@@ -22,10 +15,11 @@ const platformFamilies: Record<VideoPricingPlatform, readonly FamilyOption[]> = 
     { key: 'grok-imagine-video', label: 'grok-imagine-video', resolutions: grokVideoPriceResolutions },
     { key: 'grok-imagine-video-1.5', label: 'grok-imagine-video-1.5', resolutions: grokVideoPriceResolutions }
   ],
-  seedance: [
-    { key: 'seedance-2.0', label: 'Seedance-2.0', resolutions: seedance20Resolutions },
-    { key: 'seedance-2.5', label: 'Seedance-2.5', resolutions: seedance25Resolutions }
-  ]
+  seedance: SEEDANCE_MODEL_OPTIONS.map(({ id, label, resolutions }) => ({
+    key: id,
+    label,
+    resolutions: resolutions.map((key) => ({ key, label: key === '4k' ? '4K' : key }))
+  }))
 }
 
 export type VideoModelPrices = Record<string, Record<string, number>>
@@ -36,7 +30,8 @@ function pricingPlatform(platform: string): VideoPricingPlatform {
 }
 
 function normalizeFamily(value: string): string {
-  return value.trim().toLowerCase()
+  const family = value.trim().toLowerCase()
+  return family === 'bytedance/seedance-2.5' ? 'seedance-2.5' : family
 }
 
 function normalizePrice(value: unknown): number | null {
@@ -65,11 +60,12 @@ export function createVideoModelPricesForm(
   const catalog = platformFamilies[pricingPlatform(platform)]
   const fallbackResolutions = combinedResolutions(catalog)
 
-  for (const [rawFamily, rawTiers] of Object.entries(prices ?? {})) {
+  for (const rawFamily of Object.keys(prices ?? {}).sort()) {
+    const rawTiers = prices?.[rawFamily]
     const family = normalizeFamily(rawFamily)
     if (!family || !rawTiers || typeof rawTiers !== 'object') continue
     const known = catalog.find(({ key }) => key === family)
-    form[family] = emptyTiers(known?.resolutions ?? fallbackResolutions)
+    form[family] ??= emptyTiers(known?.resolutions ?? fallbackResolutions)
     for (const [rawResolution, rawPrice] of Object.entries(rawTiers)) {
       const price = normalizePrice(rawPrice)
       if (price !== null) form[family][rawResolution.trim().toLowerCase()] = price
@@ -84,11 +80,12 @@ export function createVideoModelPricesForm(
 
 export function serializeVideoModelPrices(form: VideoModelPricesForm): VideoModelPrices {
   const result: VideoModelPrices = {}
-  for (const [rawFamily, tiers] of Object.entries(form)) {
+  for (const rawFamily of Object.keys(form).sort()) {
+    const tiers = form[rawFamily]
     const family = normalizeFamily(rawFamily)
     if (!family || !tiers || typeof tiers !== 'object') continue
 
-    const normalizedTiers: Record<string, number> = {}
+    const normalizedTiers: Record<string, number> = result[family] ?? {}
     for (const [rawResolution, rawPrice] of Object.entries(tiers)) {
       const resolution = rawResolution.trim().toLowerCase()
       const price = normalizePrice(rawPrice)

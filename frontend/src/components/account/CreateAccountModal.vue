@@ -1310,6 +1310,12 @@
             </option>
           </select>
           <p class="input-hint">{{ t('admin.accounts.seedance.providerHint') }}</p>
+          <SeedanceModelSelector
+            id="create-seedance"
+            v-model="seedanceModelSelection"
+            :provider="videoProvider"
+            class="mt-4"
+          />
         </div>
         <div v-if="!isCNPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
@@ -3875,6 +3881,12 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
+import {
+  buildSeedanceModelMapping,
+  filterSeedanceModelSelection,
+  type SeedanceModelSelection
+} from '@/components/account/seedanceModelRestriction'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
@@ -3950,6 +3962,7 @@ const oauthStepTitle = computed(() => {
 
 const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const videoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
+const seedanceModelSelection = ref<SeedanceModelSelection>(null)
 
 // Platform-specific hints for API Key type
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
@@ -4229,6 +4242,7 @@ watch(apiProtocol, (protocol) => {
 })
 watch(videoProvider, (provider, previousProvider) => {
   if (form.platform !== 'seedance') return
+  seedanceModelSelection.value = filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = apiKeyBaseUrl.value.trim()
   if (!currentBaseUrl || currentBaseUrl === videoProviderDefaultBaseUrl(previousProvider)) {
     apiKeyBaseUrl.value = videoProviderDefaultBaseUrl(provider)
@@ -4767,6 +4781,7 @@ watch(
               : 'https://api.anthropic.com'
     }
     // Clear model-related settings
+    seedanceModelSelection.value = null
     allowedModels.value = []
     upstreamModelsPreviewed.value = false
     modelMappings.value = []
@@ -5176,7 +5191,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       Object.values(modelMapping).some((target) =>
         typeof target === 'string' && target.trim() !== '' && !target.includes('*')
       )
-    if (upstreamModelsPreviewed.value || hasConcreteMappedTarget) {
+    if (payload.platform !== 'seedance' && (upstreamModelsPreviewed.value || hasConcreteMappedTarget)) {
       try {
         const result = await adminAPI.accounts.syncUpstreamModels(account.id)
         const warnings = result.warnings ?? []
@@ -5242,6 +5257,7 @@ const resetForm = () => {
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
   videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
+  seedanceModelSelection.value = null
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
@@ -5546,6 +5562,10 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (form.platform === 'seedance' && seedanceModelSelection.value?.length === 0) {
+    appStore.showError(t('admin.accounts.seedance.modelsRequired'))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -5710,6 +5730,8 @@ const handleSubmit = async () => {
   }
   if (form.platform === 'seedance') {
     credentials.video_provider = videoProvider.value
+    const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value)
+    if (modelMapping) credentials.model_mapping = modelMapping
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
