@@ -107,7 +107,14 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	if err != nil {
 		return nil, fmt.Errorf("插件包不是有效的 ZIP: %w", err)
 	}
-	defer func() { _ = archive.Close() }()
+	archiveClosed := false
+	closeArchive := func() {
+		if !archiveClosed {
+			archiveClosed = true
+			_ = archive.Close()
+		}
+	}
+	defer closeArchive()
 	manifest, _, signatureStatus, err := i.inspectArchive(&archive.Reader)
 	if err != nil {
 		return nil, err
@@ -137,9 +144,8 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	if err := i.extractArchive(ctx, &archive.Reader, manifest, extractPath); err != nil {
 		return nil, err
 	}
-	// Windows does not allow renaming an open archive file. Extraction is
-	// complete at this point, so release the reader before moving the artifact.
-	_ = archive.Close()
+	// Windows 不允许重命名仍被打开的文件，提交前先释放 ZIP 读取器。
+	closeArchive()
 	if err := os.Rename(extractPath, installPath); err != nil {
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}
