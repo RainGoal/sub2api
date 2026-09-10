@@ -146,7 +146,7 @@ func (r *salesRepository) SavePartner(ctx context.Context, id int64, in service.
 				return e
 			}
 			if old.UserID != in.UserID {
-				return service.ErrSalesInvalid
+				return service.ErrSalesInvalid.WithMetadata(map[string]string{"field": "user_id"})
 			}
 		}
 		active, e := salesCount(ctx, client, `SELECT COUNT(*) FROM users WHERE id=$1 AND deleted_at IS NULL AND role='user'`, in.UserID)
@@ -154,7 +154,7 @@ func (r *salesRepository) SavePartner(ctx context.Context, id int64, in service.
 			return e
 		}
 		if active != 1 {
-			return service.ErrSalesInvalid
+			return service.ErrSalesInvalid.WithMetadata(map[string]string{"field": "user_id"})
 		}
 		var rows *sql.Rows
 		if id == 0 {

@@ -8,12 +8,12 @@ import Pagination from '@/components/common/Pagination.vue'
 import type { Column } from '@/components/common/types'
 import { salesAPI, type SalesPartner, type SalesPartnerInput, type SalesOverview, type SalesCustomer, type SalesLedger, type SalesSettlement } from '@/api/admin/sales'
 import { useAppStore } from '@/stores/app'
-import { extractI18nErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMetadata, extractI18nErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 
 type Tab = 'partners' | 'customers' | 'ledger' | 'settlements'
 type Action = 'createSettlement' | 'confirm' | 'pay' | 'adjust'
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const app = useAppStore()
 const tab = ref<Tab>('partners')
 const selected = ref<SalesPartner | null>(null)
@@ -52,7 +52,14 @@ const columns = computed<Column[]>(() => {
 })
 function money(value: number) { return new Intl.NumberFormat(locale.value, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 8 }).format(value) }
 function newPartner(): SalesPartnerInput { return { user_id: 0, name: '', code: '', hostname: '', commission_rate: 0, promotion_enabled: true, accrual_enabled: true, payout_frozen: false } }
-function message(cause: unknown) { return extractI18nErrorMessage(cause, t, 'sales.errors', t('sales.loadError')) }
+function message(cause: unknown) {
+  if (extractApiErrorCode(cause) === 'SALES_INVALID') {
+    const field = extractApiErrorMetadata(cause)?.field
+    const key = typeof field === 'string' ? `sales.validation.${field}` : ''
+    if (key && te(key)) return t(key)
+  }
+  return extractI18nErrorMessage(cause, t, 'sales.errors', t('sales.loadError'))
+}
 function params() { return { page: page.value, page_size: pageSize.value, partner_id: selected.value?.id, search: filters.search || undefined, start_date: filters.start_date || undefined, end_date: filters.end_date || undefined } }
 async function load() {
   if (filters.start_date && filters.end_date && filters.start_date > filters.end_date) { error.value = t('sales.invalidDates'); return }
@@ -86,6 +93,10 @@ function openAction(value: Action, item?: SalesSettlement) {
 }
 async function save(kind: 'settings' | 'partner' | 'finance') {
   if (saving.value) return
+  if (kind === 'partner' && !/^[a-z0-9][a-z0-9-]{2,47}$/i.test(partnerForm.code.trim())) {
+    dialogError.value = t('sales.validation.code')
+    return
+  }
   saving.value = true; dialogError.value = ''
   try {
     if (kind === 'settings') { Object.assign(settings, await salesAPI.saveSettings({ ...settingsForm })); settingsLoaded.value = true; settingsOpen.value = false }
@@ -178,7 +189,8 @@ onMounted(() => { void load(); void salesAPI.settings().then(value => { Object.a
         <label class="block text-sm">{{ t('sales.name') }}<input v-model.trim="partnerForm.name" class="input mt-1" required maxlength="100" :disabled="saving" /></label>
         <label class="block text-sm">{{ t('sales.userId') }}<input v-model.number="partnerForm.user_id" class="input mt-1" type="number" min="1" step="1" required :disabled="!!editingID || saving" /></label>
         <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('sales.userIdHint') }}</p>
-        <label class="block text-sm">{{ t('sales.code') }}<input v-model.trim="partnerForm.code" class="input mt-1 font-mono" required maxlength="64" :disabled="saving" /></label>
+        <label class="block text-sm">{{ t('sales.code') }}<input v-model.trim="partnerForm.code" class="input mt-1 font-mono" required maxlength="48" aria-describedby="sales-code-hint" :disabled="saving" /></label>
+        <p id="sales-code-hint" class="text-xs text-gray-500 dark:text-dark-400">{{ t('sales.codeHint') }}</p>
         <label class="block text-sm">{{ t('sales.hostname') }}<input v-model.trim="partnerForm.hostname" class="input mt-1 font-mono" required maxlength="253" :disabled="saving" /></label>
         <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('sales.hostnameHint') }}</p>
         <label class="block text-sm">{{ t('sales.commission_rate') }} (%)<input v-model.number="partnerForm.commission_rate" class="input mt-1" type="number" min="0" max="100" step="0.0001" required :disabled="saving" /></label>

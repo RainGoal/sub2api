@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,10 +59,12 @@ func TestSalesReferralSignatureAndPromotionStatus(t *testing.T) {
 }
 
 func TestSalesSettingsRejectRedirectInjection(t *testing.T) {
-	for _, raw := range []string{"https://user:pass@main.example.com", "https://main.example.com/other", "https://main.example.com?next=bad", "https://main.example.com#bad", "//main.example.com", "http://main.example.com"} {
+	for _, raw := range []string{"", "https://user:pass@main.example.com", "https://main.example.com/other", "https://main.example.com?next=bad", "https://main.example.com#bad", "//main.example.com", "http://main.example.com"} {
 		repo := &salesServiceRepoStub{}
 		s := NewSalesService(repo, nil)
-		require.ErrorIs(t, s.SaveSettings(context.Background(), &SalesSettings{Enabled: true, MainFrontendURL: raw}, 1), ErrSalesInvalid, raw)
+		err := s.SaveSettings(context.Background(), &SalesSettings{Enabled: true, MainFrontendURL: raw}, 1)
+		require.ErrorIs(t, err, ErrSalesInvalid, raw)
+		require.Equal(t, "main_frontend_url", infraerrors.FromError(err).Metadata["field"], raw)
 		require.False(t, repo.saved)
 	}
 	repo := &salesServiceRepoStub{}
@@ -76,12 +79,16 @@ func TestSalesPartnerAndSettlementValidation(t *testing.T) {
 	for _, rate := range []float64{-1, 101, math.NaN(), math.Inf(1)} {
 		v := valid
 		v.CommissionRate = rate
-		require.ErrorIs(t, validateSalesPartner(&v), ErrSalesInvalid)
+		err := validateSalesPartner(&v)
+		require.ErrorIs(t, err, ErrSalesInvalid)
+		require.Equal(t, "commission_rate", infraerrors.FromError(err).Metadata["field"])
 	}
 	for _, host := range []string{"sales.example.com/path", "*.example.com", "a..example.com", "-a.example.com", "example.com", "sales.example.com:443"} {
 		v := valid
 		v.Hostname = host
-		require.ErrorIs(t, validateSalesPartner(&v), ErrSalesInvalid, host)
+		err := validateSalesPartner(&v)
+		require.ErrorIs(t, err, ErrSalesInvalid, host)
+		require.Equal(t, "hostname", infraerrors.FromError(err).Metadata["field"], host)
 	}
 	now := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
 	cutoff, err := SalesSettlementCutoff("2026-08", now)
@@ -91,6 +98,34 @@ func TestSalesPartnerAndSettlementValidation(t *testing.T) {
 	require.ErrorIs(t, err, ErrSalesInvalid)
 	_, err = SalesSettlementCutoff("2026-13", now)
 	require.ErrorIs(t, err, ErrSalesInvalid)
+}
+
+func TestSalesPartnerValidationIdentifiesInvalidField(t *testing.T) {
+	valid := SalesPartnerInput{UserID: 1, Name: "Partner", Code: "sales-qq", Hostname: "qq.yusflow.com", CommissionRate: 50}
+	for _, tc := range []struct {
+		name, field string
+		change      func(*SalesPartnerInput)
+	}{
+		{"missing_user", "user_id", func(in *SalesPartnerInput) { in.UserID = 0 }},
+		{"missing_name", "name", func(in *SalesPartnerInput) { in.Name = " " }},
+		{"long_name", "name", func(in *SalesPartnerInput) { in.Name = strings.Repeat("x", 101) }},
+		{"two_character_code", "code", func(in *SalesPartnerInput) { in.Code = "qq" }},
+		{"long_hostname", "hostname", func(in *SalesPartnerInput) { in.Hostname = strings.Repeat("a.", 127) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := valid
+			tc.change(&in)
+			err := validateSalesPartner(&in)
+			require.ErrorIs(t, err, ErrSalesInvalid)
+			require.Equal(t, tc.field, infraerrors.FromError(err).Metadata["field"])
+		})
+	}
+	for _, code := range []string{"qqq", "sales-qq"} {
+		in := valid
+		in.Code = code
+		require.NoError(t, validateSalesPartner(&in))
+	}
+	require.Nil(t, ErrSalesInvalid.Metadata, "field details must not mutate the shared error")
 }
 
 type salesWorkerRepoStub struct {

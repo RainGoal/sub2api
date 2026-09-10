@@ -251,17 +251,17 @@ func (s *SalesService) RollbackRegistration(ctx context.Context, userID int64) e
 
 func (s *SalesService) SaveSettings(ctx context.Context, cfg *SalesSettings, actorID int64) error {
 	if cfg == nil {
-		return ErrSalesInvalid
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "main_frontend_url"})
 	}
 	cfg.MainFrontendURL = strings.TrimRight(strings.TrimSpace(cfg.MainFrontendURL), "/")
 	if cfg.MainFrontendURL != "" {
 		u, err := url.Parse(cfg.MainFrontendURL)
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-			return ErrSalesInvalid
+			return ErrSalesInvalid.WithMetadata(map[string]string{"field": "main_frontend_url"})
 		}
 	}
 	if cfg.Enabled && cfg.MainFrontendURL == "" {
-		return ErrSalesInvalid
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "main_frontend_url"})
 	}
 	return s.repo.SaveSettings(ctx, cfg, actorID)
 }
@@ -362,16 +362,28 @@ var salesHostLabelRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?
 
 func validateSalesPartner(in *SalesPartnerInput) error {
 	in.Name, in.Code, in.Hostname = strings.TrimSpace(in.Name), strings.ToLower(strings.TrimSpace(in.Code)), strings.ToLower(strings.TrimSpace(in.Hostname))
-	if in.UserID <= 0 || in.Name == "" || len(in.Name) > 100 || !salesCodeRE.MatchString(in.Code) || math.IsNaN(in.CommissionRate) || math.IsInf(in.CommissionRate, 0) || in.CommissionRate < 0 || in.CommissionRate > 100 || len(in.Hostname) > 253 {
-		return ErrSalesInvalid
+	if in.UserID <= 0 {
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "user_id"})
+	}
+	if in.Name == "" || len(in.Name) > 100 {
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "name"})
+	}
+	if !salesCodeRE.MatchString(in.Code) {
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "code"})
+	}
+	if math.IsNaN(in.CommissionRate) || math.IsInf(in.CommissionRate, 0) || in.CommissionRate < 0 || in.CommissionRate > 100 {
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "commission_rate"})
+	}
+	if len(in.Hostname) > 253 {
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "hostname"})
 	}
 	labels := strings.Split(in.Hostname, ".")
 	if len(labels) < 3 {
-		return ErrSalesInvalid
+		return ErrSalesInvalid.WithMetadata(map[string]string{"field": "hostname"})
 	}
 	for _, label := range labels {
 		if !salesHostLabelRE.MatchString(label) {
-			return ErrSalesInvalid
+			return ErrSalesInvalid.WithMetadata(map[string]string{"field": "hostname"})
 		}
 	}
 	in.CommissionRate = QuantizeUsageBillingAmount(in.CommissionRate)
