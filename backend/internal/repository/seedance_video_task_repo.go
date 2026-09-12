@@ -133,14 +133,20 @@ WHERE state_id = $1 AND settlement_status = 'pending' AND provider_task_id IS NU
 	return seedanceVideoTaskMutationResult(result, err)
 }
 
-func marshalSeedanceAccountCost(snapshot *service.SeedanceAccountCostSnapshot) ([]byte, error) {
+func marshalSeedanceAccountCost(snapshot *service.SeedanceAccountCostSnapshot) (any, error) {
 	if snapshot == nil {
+		// Return an untyped nil for SQL NULL. lib/pq sends a typed nil []byte
+		// as an empty value, which PostgreSQL rejects for a JSONB column.
 		return nil, nil
 	}
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(snapshot)
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return string(encoded), nil
 }
 
 func (r *seedanceVideoTaskRepository) BindProviderTask(ctx context.Context, stateID, taskID, upstreamStatus string, dueAt time.Time) error {

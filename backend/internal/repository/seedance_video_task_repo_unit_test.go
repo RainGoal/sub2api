@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"testing"
 	"time"
@@ -21,6 +22,11 @@ var seedanceVideoTaskTestColumns = []string{
 	"is_subscription_billing", "subscription_id", "upstream_status", "settlement_status",
 	"retry_count", "next_poll_at", "lease_until", "last_error_message", "created_at", "account_cost_snapshot",
 }
+
+// A typed nil []byte is not SQL NULL in lib/pq: it is sent as zero-length JSON.
+type seedanceSQLNullArgument struct{}
+
+func (seedanceSQLNullArgument) Match(value driver.Value) bool { return value == nil }
 
 func seedanceVideoTaskTestRow(now time.Time, settlement string, lease any) *sqlmock.Rows {
 	return sqlmock.NewRows(seedanceVideoTaskTestColumns).AddRow(
@@ -50,10 +56,16 @@ func TestSeedanceVideoTaskRepositoryCreateBindAndOwnerLookup(t *testing.T) {
 		NextPollAt: now.Add(time.Minute),
 	}
 
-	mock.ExpectExec(`(?s)INSERT INTO custom_seedance_video_tasks`).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`(?s)INSERT INTO custom_seedance_video_tasks`).
+		WithArgs(pending.StateID, pending.UserID, pending.APIKeyID, groupID, pending.AccountID,
+			pending.ProviderID, pending.Model, pending.Resolution, pending.DurationSeconds, pending.ReferenceVideoCount,
+			pending.OriginalModel, pending.RequestPayloadHash, pending.HoldID, pending.HoldAmount,
+			pending.TotalCostPerSecond, pending.ActualCostPerSecond, pending.RateMultiplier,
+			pending.IsSubscriptionBilling, nil, pending.NextPollAt, now, seedanceSQLNullArgument{}).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	require.NoError(t, repo.Create(ctx, pending))
 	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks\s+SET account_id = \$2`).
-		WithArgs("state-1", int64(20), "bblabu_v1", []byte(nil)).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("state-1", int64(20), "bblabu_v1", seedanceSQLNullArgument{}).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.AssignAccount(ctx, "state-1", 20, "bblabu_v1", nil))
 	dueAt := now.Add(4 * time.Second)
 	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks\s+SET provider_task_id = \$2`).
@@ -79,7 +91,7 @@ func TestSeedanceVideoTaskRepositoryAssignsCostAtomicallyAndReadsSnapshot(t *tes
 	snapshot := &service.SeedanceAccountCostSnapshot{BillingMode: service.BillingModeVideo, UnitPrice: 0.03, RateMultiplier: 0.5}
 	encoded := []byte(`{"billing_mode":"video","unit_price":0.03,"rate_multiplier":0.5}`)
 	mock.ExpectExec(`(?s)SET account_id = \$2, provider_protocol = \$3, account_cost_snapshot = \$4.*provider_task_id IS NULL`).
-		WithArgs("state-cost", int64(20), "fflink_v1", encoded).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("state-cost", int64(20), "fflink_v1", string(encoded)).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.AssignAccount(context.Background(), "state-cost", 20, "fflink_v1", snapshot))
 	now := time.Now().UTC()
 	rows := sqlmock.NewRows(seedanceVideoTaskTestColumns).AddRow(
