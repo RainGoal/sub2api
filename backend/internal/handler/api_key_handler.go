@@ -4,6 +4,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -20,13 +21,15 @@ import (
 
 // APIKeyHandler handles API key-related requests
 type APIKeyHandler struct {
-	apiKeyService *service.APIKeyService
+	apiKeyService  *service.APIKeyService
+	channelService *service.ChannelService
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler
-func NewAPIKeyHandler(apiKeyService *service.APIKeyService) *APIKeyHandler {
+func NewAPIKeyHandler(apiKeyService *service.APIKeyService, channelService *service.ChannelService) *APIKeyHandler {
 	return &APIKeyHandler{
-		apiKeyService: apiKeyService,
+		apiKeyService:  apiKeyService,
+		channelService: channelService,
 	}
 }
 
@@ -334,7 +337,18 @@ func (h *APIKeyHandler) GetAvailableGroups(c *gin.Context) {
 
 	out := make([]dto.Group, 0, len(groups))
 	for i := range groups {
-		out = append(out, *dto.GroupFromService(&groups[i]))
+		projected, err := service.ProjectSeedanceSalesPrices(c.Request.Context(), h.channelService, &groups[i])
+		if err != nil {
+			// Price display failure must not hide the user's other groups. Omit
+			// unavailable prices; task creation still validates the actual price.
+			slog.Warn("seedance sales price display unavailable", "group_id", groups[i].ID, "error", err)
+			unpriced := groups[i]
+			unpriced.VideoModelPrices = nil
+			unpriced.VideoPrice480P, unpriced.VideoPrice720P, unpriced.VideoPrice1080P = nil, nil, nil
+			unpriced.ModelPricing = nil
+			projected = &unpriced
+		}
+		out = append(out, *dto.GroupFromService(projected))
 	}
 	response.Success(c, out)
 }

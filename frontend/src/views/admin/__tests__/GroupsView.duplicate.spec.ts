@@ -303,6 +303,48 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
+  it('keeps Seedance legacy prices read-only and omits all sale prices when saving the group', async () => {
+    const group = { ...sourceGroup, platform: 'seedance', video_model_prices: { 'seedance-2.0': { '720p': 0.08 } } }
+    listGroups.mockResolvedValue({ items: [group], total: 1 })
+    updateGroup.mockResolvedValue(group)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="edit-grok-video-model-prices"]').exists()).toBe(false)
+    expect(wrapper.get('#edit-group-form').text()).not.toContain('admin.groups.modelPricing.title')
+    expect(wrapper.get('#edit-group-form details').text()).toContain('seedance-2.0')
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    const payload = updateGroup.mock.calls[0]?.[1]
+    expect(payload).toBeDefined()
+    for (const key of ['video_model_prices', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'model_pricing']) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    expect(group.video_model_prices).toEqual({ 'seedance-2.0': { '720p': 0.08 } })
+    wrapper.unmount()
+  })
+
+  it('creates Seedance groups without a model sale-price editor or submitted prices', async () => {
+    vi.mocked(adminAPI.groups.create).mockReset().mockResolvedValue(sourceGroup)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'admin.groups.createGroup')!.trigger('click')
+    wrapper.findComponent('[data-tour="group-form-platform"]').vm.$emit('update:modelValue', 'seedance')
+    await flushPromises()
+    expect(wrapper.get('#create-group-form').text()).not.toContain('admin.groups.modelPricing.title')
+    expect(wrapper.find('[data-testid="create-grok-video-model-prices"]').exists()).toBe(false)
+    await wrapper.get('[data-tour="group-form-name"]').setValue('Video group')
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    const payload = vi.mocked(adminAPI.groups.create).mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('seedance')
+    for (const key of ['video_model_prices', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'model_pricing']) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
+  })
+
   it('shows the standardized API message when updating a group fails', async () => {
     updateGroup.mockRejectedValueOnce({
       status: 409,

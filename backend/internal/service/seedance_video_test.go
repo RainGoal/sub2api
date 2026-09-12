@@ -314,13 +314,14 @@ func (r *seedanceVideoTaskMemoryRepo) Create(_ context.Context, pending *Seedanc
 	return nil
 }
 
-func (r *seedanceVideoTaskMemoryRepo) AssignAccount(_ context.Context, stateID string, accountID int64, providerID string) error {
+func (r *seedanceVideoTaskMemoryRepo) AssignAccount(_ context.Context, stateID string, accountID int64, providerID string, accountCost *SeedanceAccountCostSnapshot) error {
 	pending := r.tasks[stateID]
 	if pending == nil {
 		return ErrSeedanceVideoTaskNotFound
 	}
 	pending.AccountID = accountID
 	pending.ProviderID = providerID
+	pending.AccountCost = accountCost
 	return nil
 }
 
@@ -617,7 +618,7 @@ func storeSeedanceTestPending(t *testing.T, svc *OpenAIGatewayService, taskID st
 		pending.ProviderID = string(videoprovider.ProviderBBLabuV1)
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.seedanceVideoTaskRepo.AssignAccount(context.Background(), pending.StateID, pending.AccountID, pending.ProviderID, pending.AccountCost))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), taskID, userID, apiKeyID, pending))
 	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), taskID, userID, apiKeyID)
 	require.NoError(t, err)
@@ -720,7 +721,7 @@ func TestStoreSeedanceVideoPendingBillingFailsClosedWhenDatabaseBindFails(t *tes
 		AccountID: 20, Model: "Seedance-2.0", Resolution: "720p", DurationSeconds: 10,
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
 	err := svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-fail", 7, 8, pending)
 	require.ErrorContains(t, err, "database unavailable")
 }
@@ -735,7 +736,7 @@ func TestStoreSeedanceVideoPendingBillingPreservesTerminalUpstreamStatus(t *test
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-terminal", pending.UserID, pending.APIKeyID, pending))
 
 	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-terminal", pending.UserID, pending.APIKeyID)
@@ -752,7 +753,7 @@ func TestReleaseSeedanceVideoTaskWithStatusPersistsCanceledState(t *testing.T) {
 		Resolution: "720p", DurationSeconds: 10,
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID, pending))
 	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID)
 	require.NoError(t, err)
@@ -774,7 +775,7 @@ func TestClaimSeedanceVideoCancellationSerializesWithCompletion(t *testing.T) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID, pending))
 
 	claimed, err := svc.ClaimSeedanceVideoCancellation(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID)
@@ -852,7 +853,7 @@ func TestClaimSeedanceVideoBillingPreservesObservedFailureStatus(t *testing.T) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, pending.AccountID, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID, pending))
 
 	claimed, err := svc.ClaimSeedanceVideoBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID)
@@ -1149,6 +1150,7 @@ func TestSeedanceVideoRecoverySettlesCompletedTaskOnceWithFrozenPricing(t *testi
 	taskRepo := &seedanceVideoTaskMemoryRepo{}
 	billing := &seedanceVideoBillingRepo{}
 	account := seedanceVideoTestAccount()
+	account.RateMultiplier = seedanceCostPrice(9)
 	account.Status = StatusActive
 	account.Schedulable = true
 	user := &User{ID: 7}
@@ -1175,6 +1177,7 @@ func TestSeedanceVideoRecoverySettlesCompletedTaskOnceWithFrozenPricing(t *testi
 		DurationSeconds: 30, ReferenceVideoCount: 1, HoldID: "seedance:hold-complete", HoldAmount: 6,
 		RequestPayloadHash: "payload-hash", TotalCostPerSecond: 0.1,
 		ActualCostPerSecond: 0.2, RateMultiplier: 2,
+		AccountCost: &SeedanceAccountCostSnapshot{BillingMode: BillingModeVideo, UnitPrice: 0.03, RateMultiplier: 0.5},
 	}
 	stored := storeSeedanceTestPending(t, gateway, "task-complete", user.ID, apiKey.ID, pending)
 	claimed, err := gateway.ClaimSeedanceVideoBilling(context.Background(), "task-complete", user.ID, apiKey.ID)
@@ -1190,6 +1193,8 @@ func TestSeedanceVideoRecoverySettlesCompletedTaskOnceWithFrozenPricing(t *testi
 	command := billing.commands[0]
 	require.Equal(t, "seedance-video:task-complete", command.RequestID)
 	require.InDelta(t, 8.4, command.BalanceCost, 1e-12)
+	require.NotNil(t, command.SalesCost)
+	require.InDelta(t, 0.63, *command.SalesCost, 1e-12)
 	require.Equal(t, "seedance:hold-complete", command.BalanceHoldID)
 	require.InDelta(t, 6.0, command.BalanceHoldAmount, 1e-12)
 	require.Equal(t, SeedanceVideoSettlementSettled, taskRepo.tasks[stored.StateID].SettlementStatus)

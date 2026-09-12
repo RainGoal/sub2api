@@ -1050,7 +1050,7 @@
             {{ t(videoPricingI18nKey("title", createForm.platform)) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t(videoPricingI18nKey("description", createForm.platform)) }}
+            {{ createForm.platform === 'seedance' ? t('admin.channels.form.seedanceGroupHint') : t(videoPricingI18nKey("description", createForm.platform)) }}
           </p>
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -1114,6 +1114,7 @@
             </div>
           </div>
           <div
+            v-if="createForm.platform !== 'seedance'"
             class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
             data-testid="create-grok-video-model-prices"
           >
@@ -1152,7 +1153,7 @@
               </div>
             </div>
           </div>
-          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          <p v-if="createForm.platform !== 'seedance'" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(videoPricingI18nKey("modeHint", createForm.platform)) }}
           </p>
           <div v-if="createForm.platform === 'grok'" class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
@@ -1474,7 +1475,7 @@
         </div>
 
 
-        <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
+        <div v-if="createForm.platform !== 'seedance'" class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
@@ -2690,7 +2691,7 @@
             {{ t(videoPricingI18nKey("title", editForm.platform)) }}
           </label>
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            {{ t(videoPricingI18nKey("description", editForm.platform)) }}
+            {{ editForm.platform === 'seedance' ? t('admin.channels.form.seedanceGroupHint') : t(videoPricingI18nKey("description", editForm.platform)) }}
           </p>
           <div class="mb-4">
             <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -2754,6 +2755,7 @@
             </div>
           </div>
           <div
+            v-if="editForm.platform !== 'seedance'"
             class="mt-4 border-t border-dashed border-gray-200 pt-4 dark:border-dark-700"
             data-testid="edit-grok-video-model-prices"
           >
@@ -2792,7 +2794,14 @@
               </div>
             </div>
           </div>
-          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          <details v-if="editForm.platform === 'seedance'" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            <summary class="cursor-pointer">{{ t('admin.channels.form.seedanceLegacySales') }}</summary>
+            <div v-for="(tiers, model) in serializeVideoModelPrices(editForm.video_model_prices)" :key="model" class="mt-2">
+              <span class="font-mono">{{ model }}</span>
+              <span v-for="(price, resolution) in tiers" :key="resolution" class="ml-3 inline-block">{{ resolution }}: ${{ price }}/s</span>
+            </div>
+          </details>
+          <p v-if="editForm.platform !== 'seedance'" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
             {{ t(videoPricingI18nKey("modeHint", editForm.platform)) }}
           </p>
           <div v-if="editForm.platform === 'grok'" class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
@@ -3124,7 +3133,7 @@
         />
 
 
-        <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
+        <div v-if="editForm.platform !== 'seedance'" class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4>
@@ -5999,6 +6008,11 @@ const handleCreateGroup = async () => {
           platform: createForm.platform,
         }
       : requestData;
+    if (createForm.platform === 'seedance') {
+      for (const key of ['video_model_prices', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'model_pricing']) {
+        delete (payload as Record<string, unknown>)[key];
+      }
+    }
     await adminAPI.groups.create(payload);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
@@ -6349,6 +6363,11 @@ const handleUpdateGroup = async () => {
           description: editForm.description,
         }
       : payload;
+    if (editForm.platform === 'seedance') {
+      for (const key of ['video_model_prices', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'model_pricing']) {
+        delete (requestData as Record<string, unknown>)[key];
+      }
+    }
     await adminAPI.groups.update(editingGroup.value.id, requestData);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();

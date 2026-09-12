@@ -98,9 +98,9 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			h.errorResponse(c, http.StatusUnprocessableEntity, "invalid_request_error", err.Error())
 			return
 		}
-		if apiKey.Group == nil || service.LookupVideoModelPrice(apiKey.Group.VideoModelPrices, requestInfo.Model, requestInfo.Resolution) == nil {
+		if _, pricingErr := h.gatewayService.GetSeedanceVideoSalesPrice(c.Request.Context(), apiKey, requestInfo); pricingErr != nil {
 			h.errorResponse(c, http.StatusServiceUnavailable, "video_pricing_not_configured",
-				"Seedance video pricing is not configured for this model and resolution")
+				"Seedance sales pricing is not configured for this model and resolution")
 			return
 		}
 		taskID = ""
@@ -294,6 +294,7 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 	switchCount := 0
 	routingStart := time.Now()
 	var lastFailoverErr *service.UpstreamFailoverError
+	accountCostMissing := false
 
 	for {
 		var selection *service.AccountSelectionResult
@@ -312,6 +313,9 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 		if selectErr != nil || selection == nil || selection.Account == nil {
 			if lastFailoverErr != nil {
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
+			} else if accountCostMissing {
+				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_account_cost_not_configured",
+					"Seedance account cost is not configured for this model and resolution")
 			} else {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, selectErr)
 				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_no_available_account", "No available Seedance accounts")
@@ -321,8 +325,26 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 		account := selection.Account
 		if endpoint == service.SeedanceVideoEndpointCreate {
 			taskProviderID = string(account.GetVideoProviderID())
-			if assignErr := h.gatewayService.AssignSeedanceVideoTaskAccount(requestCtx, &pendingTemplate, account.ID, taskProviderID); assignErr != nil {
+			if assignErr := h.gatewayService.AssignSeedanceVideoTaskAccount(requestCtx, &pendingTemplate, account, taskProviderID); assignErr != nil {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+					selection.ReleaseFunc = nil
+				}
 				reqLog.Error("seedance_video.assign_task_account_failed", zap.Error(assignErr), zap.Int64("account_id", account.ID))
+				if errors.Is(assignErr, service.ErrSeedanceAccountCostMissing) {
+					accountCostMissing = true
+					if switchCount < maxSwitches {
+						// A local price gap is not a provider failure. Exclude only
+						// this request's candidate and retain the existing retry bound.
+						failedAccountIDs[account.ID] = struct{}{}
+						switchCount++
+						h.gatewayService.RecordOpenAIAccountSwitch()
+						continue
+					}
+					h.errorResponse(c, http.StatusServiceUnavailable, "seedance_account_cost_not_configured",
+						"Seedance account cost is not configured for this model and resolution")
+					return
+				}
 				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_state_persistence_failed",
 					"Failed to persist Seedance account assignment")
 				return
@@ -827,7 +849,7 @@ func recordSeedanceVideoUsage(c *gin.Context, h *OpenAIGatewayHandler, reqLog *z
 	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 		subscriptionBilling := pending.IsSubscriptionBilling
 		rateMultiplier := pending.RateMultiplier
-		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+		if err := h.gatewayService.RecordSeedanceVideoUsage(ctx, pending, &service.OpenAIRecordUsageInput{
 			Result: result, APIKey: apiKey, User: apiKey.User, Account: account,
 			Subscription: subscription, InboundEndpoint: inboundEndpoint, UpstreamEndpoint: upstreamEndpoint,
 			UserAgent: c.GetHeader("User-Agent"), IPAddress: ip.GetClientIP(c),

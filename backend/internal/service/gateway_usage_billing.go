@@ -843,8 +843,41 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
 		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost)
 
-	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	// Account purchase prices follow the selected upstream account/model, including
+	// requests without a customer group. The quota multiplier below is unchanged.
+	accountCostInput := CostInput{
+		Model: result.UpstreamModel, RequestCount: 1, PricingAt: pricingAt,
+		Tokens: UsageTokens{
+			InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens,
+			CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
+			CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
+			CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+			CacheReadTokens:       result.Usage.CacheReadInputTokens,
+			ImageOutputTokens:     result.Usage.ImageOutputTokens,
+		},
+		SizeTier: NormalizeImageBillingTierOrDefault(result.ImageSize),
+	}
+	if accountCostInput.Model == "" {
+		accountCostInput.Model = result.Model
+	}
+	if usageLog.ServiceTier != nil {
+		accountCostInput.ServiceTier = *usageLog.ServiceTier
+	}
+	if usageLog.ReasoningEffort != nil {
+		accountCostInput.ReasoningEffort = *usageLog.ReasoningEffort
+	}
+	accountCost, err := resolveAccountModelCostWithImages(ctx, s.billingService, account,
+		accountCostInput, result.ImageCount, result.ImageSizeBreakdown)
+	if err != nil {
+		// The provider already succeeded. A statistics-only configuration error
+		// must not discard customer billing or the usage log.
+		slog.Warn("account purchase cost unavailable; using legacy estimate", "account_id", account.ID,
+			"model", accountCostInput.Model, "request_id", usageLog.RequestID, "error", err)
+	}
+	if accountCost != nil {
+		one := 1.0
+		usageLog.AccountStatsCost, usageLog.AccountRateMultiplier = accountCost, &one
+	} else if apiKey.GroupID != nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
 			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);

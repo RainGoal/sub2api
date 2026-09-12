@@ -24,7 +24,7 @@ adapter; callers should treat it as opaque and use it only with the gateway's
 status, content, and cancellation endpoints. A gateway-owned opaque ID can be
 introduced later without changing the response fields.
 
-## Account Models and Group Prices
+## Account Models and Sales Prices
 
 Create and edit account forms offer an explicit choice between all built-in
 models supported by the selected protocol and an allowlist of selected models.
@@ -46,19 +46,111 @@ This is Sub2API's built-in compatibility catalog, not a guarantee that an
 upstream API key has access to every listed model. Select the models available
 to the actual upstream key. Mini retains its existing adapter support.
 
-Configure per-second prices in the group's video price table. Each model has
-independent prices and only its supported resolution tiers are displayed.
+Configure sales prices under **Channels → edit/create channel → Seedance →
+Model Pricing** and associate the customer groups. Each model has independent
+USD/second prices and only its supported resolution tiers are displayed.
+Groups retain their access, account association, and video sales multiplier.
 Unpriced tiers cannot create tasks. Unknown or unsupported Seedance resolutions
 never borrow the 480p price. `bytedance/seedance-2.5` and `Seedance-2.5` are aliases
-of `seedance-2.5` for model selection and pricing. When alias and canonical prices
-coexist, their tiers merge and the lowercase canonical model key wins conflicts.
-Running tasks retain their frozen price snapshot.
+of `seedance-2.5` for model selection and pricing. Duplicate model aliases cannot
+be saved as conflicting channel entries. Running tasks retain their frozen price
+snapshot. `/api/v1/groups/available` keeps its existing `video_model_prices`
+response field and projects the effective channel sales prices into it.
+If that projection fails, only the affected group's prices are omitted; the
+group list remains available. Task creation still validates the actual price.
 
-Deployment needs the backend and rebuilt admin frontend, with no database
-migration. Verify account selection persists after reopening, `/v1/models`
+Legacy group prices remain effective until a channel takes ownership by saving
+Seedance video model pricing. Old channel Token/image/per-request rows do not
+take ownership and can be retained unchanged during ordinary channel edits.
+Editing Seedance prices requires the new USD/second video format; no old units
+are converted automatically. The group dialog shows old prices as read-only.
+Use **Import legacy group prices** in the channel dialog to preview existing
+prices, review the rows, then save normally. All selected Seedance groups must
+have identical legacy price maps, including which tiers are missing. Conflicts
+require separate channels or a manually reviewed common price. Removing prices
+or disabling a channel that has taken ownership does not revive legacy prices.
+Ownership follows the channel association: deleting the channel or detaching a
+group restores that group's legacy compatibility behavior. Keep the association
+and disable the channel when stopping sales without using legacy prices.
+
+The preview endpoint is `POST /api/v1/admin/channels/seedance-pricing/import-preview`
+with `{ "group_ids": [1, 2] }`. It uses the existing admin authentication and
+standard response envelope, returning `{ "model_pricing": [...] }`. It performs
+no writes. Invalid selections return HTTP 400; conflicting maps return HTTP 409
+with `SEEDANCE_LEGACY_PRICING_CONFLICT`. Channel saves remain on the existing
+admin channel create/update routes. Seedance sales pricing does not use time
+pricing.
+
+Deployment needs the backend and rebuilt admin frontend. Normal startup
+automatically applies the embedded `238_seedance_account_cost_snapshot.sql`
+migration for upstream cost snapshots. For online upgrades, wait for the tag's
+Release build, install it through the existing update flow, and restart as
+prompted; no manual SQL or immediate price reconfiguration is required. Verify
+account selection persists after reopening, `/v1/models`
 reflects account selections, and a configured model/resolution completes the
 existing create/status/content flow. Check missing prices are rejected and
 completed tasks are billed once. The public video routes remain unchanged.
+
+## Upstream Account Costs and Profit
+
+Open **Accounts → create/edit account → Model Purchase Cost**. Each supplier
+account stores its own model prices in `extra.model_cost_pricing`, using the
+existing `ChannelModelPricing[]` structure. Choose video billing and enter
+USD/second for each resolution, or per-request billing for a fixed USD/task
+cost. An explicit default video price covers tiers without their own price;
+`0` is a valid free price. Model matching uses the selected upstream account
+and canonical model, independently of the customer group or channel.
+
+Explicit purchase prices are final costs: the stored statistics multiplier is
+automatically `1`, regardless of the account quota multiplier. For example,
+a 10-second video sold at $0.10/second and purchased at $0.04/second, with sales
+multiplier 1, records $1 revenue, $0.40 cost, and $0.60 gross profit.
+Existing dashboard/account statistics and sales cost snapshots use the same
+stored cost fields. Customer billing and account quota accounting retain their
+existing formulas.
+
+New tasks freeze the selected account's cost mode, price, and statistics
+multiplier atomically with account assignment, before the upstream create
+request. A create retry with another account captures that account's price.
+Status-driven and background recovery settlement both use the frozen cost.
+Video costs follow the adapter's actual billable duration: fflink uses output
+seconds; bblabu 2.5 includes reference-video input seconds when applicable.
+Fixed per-request costs apply once to the completed task.
+
+When no account model price matches, the sales-base-price × account-multiplier
+estimate is frozen. A matching model without an applicable price rejects task
+submission to that account; the scheduler tries another account within the
+existing switch limit and releases skipped concurrency slots. If no suitable
+account remains, creation returns `seedance_account_cost_not_configured` and
+releases the unsubmitted task and balance hold. This local price gap does not
+count as a provider failure or silently use a different resolution or zero. Configure
+costs for all enabled model/resolution combinations before accepting traffic.
+Failed/canceled tasks keep the existing release behavior. Historical usage is
+not recalculated, and tasks created before the migration have a NULL snapshot
+and retain the previous settlement behavior.
+
+Account create/update/bulk/import validation shares the existing admin account
+routes. Omitting `extra.model_cost_pricing` preserves the latest stored prices;
+an explicit empty array clears them. Invalid data returns HTTP 400. Non-Seedance
+accounts support Token, per-request, image, and video costs in the ordinary
+gateway usage path. They require a base/default price to cover usage outside
+configured tiers. Token amounts use the existing per-token API units; the UI
+shows USD per million tokens. Unspecified token components are zero, and no
+official model price or sales discount is imported into the purchase price.
+The independent `/v1/images/batches` settlement path is not covered by this
+account configuration. Profit-based admission still uses its existing policy.
+If ordinary gateway purchase-cost calculation fails after a successful request,
+it logs a warning and retains the previous cost estimate, customer billing, and
+usage log. Correct the account configuration before treating that estimate as
+the actual purchase cost.
+
+The migration only adds a nullable JSONB column to the existing task table.
+No public video endpoint or switch changes. After deployment, reopen saved
+channel and account prices, verify USD/second values, and check successful tasks
+from two supplier accounts with different costs. Verify account cost, gross
+profit, and that repeated status/content polls do not charge twice. Rolling
+back the app can leave the added column in place; preserved legacy group prices
+are available to older code.
 
 ## Create Request
 

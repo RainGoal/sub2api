@@ -3010,6 +3010,11 @@
           <p class="input-hint">{{ t('admin.accounts.billingRateMultiplierHint') }}</p>
         </div>
       </div>
+      <AccountModelCostPricing
+        v-model="modelCostPricing"
+        :platform="form.platform"
+        :disabled="submitting"
+      />
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -3895,6 +3900,11 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import AccountModelCostPricing from '@/components/account/AccountModelCostPricing.vue'
+import {
+  ACCOUNT_MODEL_COST_KEY, accountModelCostPricingToAPI, validateAccountModelCostPricing,
+} from '@/components/account/accountModelCostPricing'
+import type { PricingFormEntry } from '@/components/admin/channel/types'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -3985,14 +3995,22 @@ const oauthStepTitle = computed(() => {
 const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const videoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
 const seedanceModelSelection = ref<SeedanceModelSelection>(null)
+const modelCostPricing = ref<PricingFormEntry[]>([])
 
 // Platform-specific hints for API Key type
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
 const upstreamRequestIdHeader = ref('')
-const withUpstreamRequestIdHeader = <T extends Record<string, unknown> | undefined>(extra: T): T | Record<string, unknown> => {
+const withAccountExtra = <T extends Record<string, unknown> | undefined>(extra: T): T | Record<string, unknown> => {
+  const costError = validateAccountModelCostPricing(modelCostPricing.value, form.platform, t)
+  if (costError) throw new Error(costError)
   const name = upstreamRequestIdHeader.value.trim()
-  if (!name) return extra
-  return { ...(extra || {}), upstream_request_id_header: name }
+  if (!name && modelCostPricing.value.length === 0) return extra
+  return {
+    ...(extra || {}),
+    ...(name ? { upstream_request_id_header: name } : {}),
+    ...(modelCostPricing.value.length > 0
+      ? { [ACCOUNT_MODEL_COST_KEY]: accountModelCostPricingToAPI(modelCostPricing.value, form.platform) } : {}),
+  }
 }
 
 const baseUrlHint = computed(() => {
@@ -4808,6 +4826,7 @@ watch(
     }
     // Clear model-related settings
     seedanceModelSelection.value = null
+    modelCostPricing.value = []
     allowedModels.value = []
     upstreamModelsPreviewed.value = false
     modelMappings.value = []
@@ -5285,6 +5304,7 @@ const resetForm = () => {
   videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
   seedanceModelSelection.value = null
   upstreamRequestIdHeader.value = ''
+  modelCostPricing.value = []
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -5588,6 +5608,12 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return
+  const costError = validateAccountModelCostPricing(modelCostPricing.value, form.platform, t)
+  if (costError) {
+    appStore.showError(costError)
+    return
+  }
   if (form.platform === 'seedance' && seedanceModelSelection.value?.length === 0) {
     appStore.showError(t('admin.accounts.seedance.modelsRequired'))
     return
@@ -5845,7 +5871,7 @@ const handleSubmit = async () => {
   await doCreateAccount({
     ...form,
     group_ids: form.group_ids,
-    extra: withUpstreamRequestIdHeader(extra),
+    extra: withAccountExtra(extra),
     upstream_billing_probe_enabled:
       form.platform === 'seedance' ? undefined : upstreamBillingAutoProbeEnabled.value,
     auto_pause_on_expired: autoPauseOnExpired.value
@@ -5909,7 +5935,7 @@ const createAccountAndFinish = async (
     return
   }
   // Inject quota limits for apikey/bedrock accounts
-  let finalExtra = withUpstreamRequestIdHeader(extra)
+  let finalExtra = withAccountExtra(extra)
   if (type === 'apikey' || type === 'bedrock') {
     const quotaExtra: Record<string, unknown> = { ...(finalExtra || {}) }
     if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
@@ -6036,7 +6062,7 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
           platform: 'grok',
           type: 'oauth',
           credentials,
-          extra: withUpstreamRequestIdHeader(extra),
+          extra: withAccountExtra(extra),
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
@@ -6213,7 +6239,7 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
           platform: 'grok',
           type: 'oauth',
           credentials,
-          extra: withUpstreamRequestIdHeader(extra),
+          extra: withAccountExtra(extra),
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
@@ -6312,7 +6338,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         platform: 'openai',
         type: 'oauth',
         credentials,
-        extra: withUpstreamRequestIdHeader(extra),
+        extra: withAccountExtra(extra),
         proxy_id: form.proxy_id,
         concurrency: form.concurrency,
         load_factor: form.load_factor ?? undefined,
@@ -6427,7 +6453,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
-      extra: withUpstreamRequestIdHeader(extra),
+      extra: withAccountExtra(extra),
       update_existing: true
     })
 
@@ -6505,7 +6531,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       expires_at: form.expires_at,
       auto_pause_on_expired: autoPauseOnExpired.value,
       credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
-      extra: withUpstreamRequestIdHeader(extra)
+      extra: withAccountExtra(extra)
     })
 
     appStore.showSuccess(t('admin.accounts.accountCreated'))
@@ -6593,7 +6619,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             platform: 'openai',
             type: 'oauth',
             credentials,
-            extra: withUpstreamRequestIdHeader(extra),
+            extra: withAccountExtra(extra),
             proxy_id: form.proxy_id,
             concurrency: form.concurrency,
             load_factor: form.load_factor ?? undefined,
@@ -6692,7 +6718,7 @@ const handleAntigravityValidateRT = async (refreshTokenInput: string) => {
           platform: 'antigravity',
           type: 'oauth',
           credentials,
-          extra: withUpstreamRequestIdHeader({}),
+          extra: withAccountExtra({}),
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,
@@ -7073,7 +7099,7 @@ const handleCookieAuth = async (sessionKey: string) => {
           platform: form.platform,
           type: addMethod.value, // Use addMethod as type: 'oauth' or 'setup-token'
           credentials,
-          extra: withUpstreamRequestIdHeader(extra),
+          extra: withAccountExtra(extra),
           proxy_id: form.proxy_id,
           concurrency: form.concurrency,
           load_factor: form.load_factor ?? undefined,

@@ -68,8 +68,8 @@
     >
       <div class="collapsible-inner">
         <!-- Header: Models + Billing Mode -->
-        <div class="mt-3 flex items-start gap-2">
-          <div class="flex-1">
+        <div class="mt-3 flex flex-wrap items-start gap-2">
+          <div class="min-w-0 flex-1">
             <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
               {{ t('admin.channels.form.models') }} <span class="text-red-500">*</span>
             </label>
@@ -206,7 +206,7 @@
           </div>
 
           <!-- Tiers -->
-          <div class="mt-3 flex items-center justify-between">
+          <div v-if="platform !== 'seedance'" class="mt-3 flex items-center justify-between">
             <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
               {{ t('admin.channels.form.requestTiers') }}
             </label>
@@ -214,7 +214,7 @@
               + {{ t('admin.channels.form.addTier') }}
             </button>
           </div>
-          <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
+          <div v-if="platform !== 'seedance' && entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
             <IntervalRow
               v-for="(iv, idx) in entry.intervals"
               :key="idx"
@@ -224,7 +224,7 @@
               @remove="removeInterval(idx)"
             />
           </div>
-          <div v-else class="mt-2 rounded border border-dashed border-gray-300 p-3 text-center text-xs text-gray-400 dark:border-dark-500">
+          <div v-else-if="platform !== 'seedance'" class="mt-2 rounded border border-dashed border-gray-300 p-3 text-center text-xs text-gray-400 dark:border-dark-500">
             {{ t('admin.channels.form.noTiersYet') }}
           </div>
         </div>
@@ -234,7 +234,7 @@
           <!-- Default image price (per-request, same as per_request mode) -->
           <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
             {{ entry.billing_mode === 'video' ? t('admin.channels.form.defaultVideoPrice') : t('admin.channels.form.defaultImagePrice') }}
-            <span class="ml-1 font-normal text-gray-400">$</span>
+            <span class="ml-1 font-normal text-gray-400">{{ entry.billing_mode === 'video' ? '$/s' : '$' }}</span>
           </label>
           <div class="mt-1 w-48">
             <input :value="entry.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
@@ -246,7 +246,7 @@
             <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
               {{ entry.billing_mode === 'video' ? t('admin.channels.form.videoTiers') : t('admin.channels.form.imageTiers') }}
             </label>
-            <button type="button" @click="addMediaTier" class="text-xs text-primary-600 hover:text-primary-700">
+            <button type="button" @click="addMediaTier" :disabled="platform === 'seedance' && availableSeedanceTiers.length === 0" class="text-xs text-primary-600 hover:text-primary-700 disabled:opacity-40">
               + {{ t('admin.channels.form.addTier') }}
             </button>
           </div>
@@ -278,6 +278,7 @@ import type { PricingFormEntry, IntervalFormEntry } from './types'
 import { perTokenToMTok, getPlatformTagClass } from './types'
 import type { BillingMode } from '@/api/admin/channels'
 import channelsAPI from '@/api/admin/channels'
+import { seedanceCostResolutions } from './seedanceCostPricing'
 
 const { t } = useI18n()
 
@@ -287,10 +288,13 @@ const props = withDefaults(defineProps<{
   hideTokenIntervals?: boolean
   enableTimePricing?: boolean
   enableTierMultipliers?: boolean
+  autoFillDefaultPricing?: boolean
+  allowedBillingModes?: BillingMode[]
 }>(), {
   hideTokenIntervals: false,
   enableTimePricing: false,
   enableTierMultipliers: false,
+  autoFillDefaultPricing: true,
 })
 
 const emit = defineEmits<{
@@ -306,7 +310,8 @@ const billingModeOptions = computed(() => [
   { value: 'per_request', label: t('admin.channels.billingMode.perRequest') },
   { value: 'image', label: t('admin.channels.billingMode.image') },
   { value: 'video', label: t('admin.channels.billingMode.video') }
-])
+].filter(option => (!props.allowedBillingModes || props.allowedBillingModes.includes(option.value as BillingMode)) &&
+  (props.platform !== 'seedance' || ['video', 'per_request'].includes(option.value))))
 
 const billingModeLabel = computed(() => {
   const opt = billingModeOptions.value.find(o => o.value === props.entry.billing_mode)
@@ -340,10 +345,11 @@ function addInterval() {
 function addMediaTier() {
   const intervals = [...(props.entry.intervals || [])]
   const labels = props.entry.billing_mode === 'video'
-    ? ['480p', '720p', '1080p']
+    ? props.platform === 'seedance' ? availableSeedanceTiers.value : ['480p', '720p', '1080p']
     : ['1K', '2K', '4K', 'HD']
+  if (props.platform === 'seedance' && labels.length === 0) return
   intervals.push({
-    min_tokens: 0, max_tokens: null, tier_label: labels[intervals.length] || '',
+    min_tokens: 0, max_tokens: null, tier_label: labels[props.platform === 'seedance' ? 0 : intervals.length] || '',
     input_price: null, output_price: null, cache_write_price: null,
     cache_write_1h_price: null,
     cache_read_price: null, per_request_price: null,
@@ -353,6 +359,9 @@ function addMediaTier() {
   })
   emit('update', { ...props.entry, intervals })
 }
+
+const availableSeedanceTiers = computed(() => seedanceCostResolutions(props.entry.models)
+  .filter(tier => !props.entry.intervals.some(interval => interval.tier_label.trim().toLowerCase() === tier)))
 
 function updateInterval(idx: number, updated: IntervalFormEntry) {
   const intervals = [...(props.entry.intervals || [])]
@@ -369,6 +378,8 @@ function removeInterval(idx: number) {
 async function onModelsUpdate(newModels: string[]) {
   const oldModels = props.entry.models
   emit('update', { ...props.entry, models: newModels })
+
+  if (!props.autoFillDefaultPricing || props.platform === 'seedance') return
 
   // 只在新增模型且当前无价格时自动填充
   const addedModels = newModels.filter(m => !oldModels.includes(m))

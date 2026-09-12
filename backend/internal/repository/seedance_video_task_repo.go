@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,7 +26,7 @@ COALESCE(account_id, 0), provider_protocol, model, resolution, duration_seconds,
 reference_video_count, original_model, request_payload_hash, hold_id,
 hold_amount, total_cost_per_second, actual_cost_per_second, rate_multiplier,
 is_subscription_billing, subscription_id, upstream_status, settlement_status,
-retry_count, next_poll_at, lease_until, last_error_message, created_at`
+retry_count, next_poll_at, lease_until, last_error_message, created_at, account_cost_snapshot`
 
 type seedanceVideoTaskScanner interface {
 	Scan(dest ...any) error
@@ -36,6 +37,7 @@ func scanSeedanceVideoTask(scanner seedanceVideoTaskScanner) (*service.SeedanceV
 	var groupID, subscriptionID sql.NullInt64
 	var leaseUntil sql.NullTime
 	var createdAt time.Time
+	var accountCostJSON []byte
 	err := scanner.Scan(
 		&pending.StateID, &pending.TaskID, &pending.UserID, &pending.APIKeyID, &groupID,
 		&pending.AccountID, &pending.ProviderID, &pending.Model, &pending.Resolution, &pending.DurationSeconds,
@@ -44,13 +46,21 @@ func scanSeedanceVideoTask(scanner seedanceVideoTaskScanner) (*service.SeedanceV
 		&pending.ActualCostPerSecond, &pending.RateMultiplier, &pending.IsSubscriptionBilling,
 		&subscriptionID, &pending.UpstreamStatus, &pending.SettlementStatus,
 		&pending.RetryCount, &pending.NextPollAt, &leaseUntil, &pending.LastError,
-		&createdAt,
+		&createdAt, &accountCostJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrSeedanceVideoTaskNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(accountCostJSON) > 0 {
+		if err := json.Unmarshal(accountCostJSON, &pending.AccountCost); err != nil {
+			return nil, fmt.Errorf("decode Seedance account cost snapshot: %w", err)
+		}
+		if err := pending.AccountCost.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	if groupID.Valid {
 		value := groupID.Int64
@@ -75,6 +85,10 @@ func (r *seedanceVideoTaskRepository) Create(ctx context.Context, pending *servi
 	if pending == nil || strings.TrimSpace(pending.StateID) == "" || strings.TrimSpace(pending.HoldID) == "" {
 		return errors.New("seedance video task state is invalid")
 	}
+	accountCostJSON, err := marshalSeedanceAccountCost(pending.AccountCost)
+	if err != nil {
+		return err
+	}
 	createdAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(pending.CreatedAt))
 	if err != nil {
 		createdAt = time.Now().UTC()
@@ -89,30 +103,44 @@ INSERT INTO custom_seedance_video_tasks (
     duration_seconds, reference_video_count, original_model, request_payload_hash,
     hold_id, hold_amount, total_cost_per_second, actual_cost_per_second,
     rate_multiplier, is_subscription_billing, subscription_id, upstream_status,
-    settlement_status, next_poll_at, created_at, updated_at
+    settlement_status, next_poll_at, created_at, updated_at, account_cost_snapshot
 ) VALUES (
     $1, $2, $3, $4, NULLIF($5, 0), $6, $7, $8, $9, $10, $11, $12,
-    $13, $14, $15, $16, $17, $18, $19, 'creating', 'pending', $20, $21, $21
+    $13, $14, $15, $16, $17, $18, $19, 'creating', 'pending', $20, $21, $21, $22
 )`, pending.StateID, pending.UserID, pending.APIKeyID, pending.GroupID, pending.AccountID,
 		pending.ProviderID, pending.Model, pending.Resolution, pending.DurationSeconds, pending.ReferenceVideoCount,
 		pending.OriginalModel, pending.RequestPayloadHash, pending.HoldID, pending.HoldAmount,
 		pending.TotalCostPerSecond, pending.ActualCostPerSecond, pending.RateMultiplier,
-		pending.IsSubscriptionBilling, pending.SubscriptionID, nextPollAt, createdAt)
+		pending.IsSubscriptionBilling, pending.SubscriptionID, nextPollAt, createdAt, accountCostJSON)
 	if err != nil {
 		return fmt.Errorf("create seedance video task: %w", err)
 	}
 	return nil
 }
 
-func (r *seedanceVideoTaskRepository) AssignAccount(ctx context.Context, stateID string, accountID int64, providerID string) error {
+func (r *seedanceVideoTaskRepository) AssignAccount(ctx context.Context, stateID string, accountID int64, providerID string, accountCost *service.SeedanceAccountCostSnapshot) error {
 	if r == nil || r.db == nil || strings.TrimSpace(stateID) == "" || accountID <= 0 || strings.TrimSpace(providerID) == "" {
 		return errors.New("seedance video task account assignment is invalid")
 	}
+	accountCostJSON, err := marshalSeedanceAccountCost(accountCost)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, `
 UPDATE custom_seedance_video_tasks
-SET account_id = $2, provider_protocol = $3, updated_at = NOW()
-WHERE state_id = $1 AND settlement_status = 'pending' AND provider_task_id IS NULL`, stateID, accountID, providerID)
+SET account_id = $2, provider_protocol = $3, account_cost_snapshot = $4, updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'pending' AND provider_task_id IS NULL`, stateID, accountID, providerID, accountCostJSON)
 	return seedanceVideoTaskMutationResult(result, err)
+}
+
+func marshalSeedanceAccountCost(snapshot *service.SeedanceAccountCostSnapshot) ([]byte, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	if err := snapshot.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(snapshot)
 }
 
 func (r *seedanceVideoTaskRepository) BindProviderTask(ctx context.Context, stateID, taskID, upstreamStatus string, dueAt time.Time) error {

@@ -408,6 +408,9 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := NormalizeAccountModelCostPricingExtra(input.Platform, accountExtra); err != nil {
+		return nil, err
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -569,6 +572,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := NormalizeAccountModelCostPricingExtra(account.Platform, input.Extra); err != nil {
 		return nil, err
 	}
 	var normalizedExtra map[string]any
@@ -834,6 +840,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	// Omission is distinct from an explicit empty array. Leave the key absent in
+	// the write payload so the repository can retain its latest value under lock.
+	accountForUpdate := account
+	if _, provided := input.Extra[AccountModelCostPricingExtraKey]; !provided {
+		copyForUpdate := *account
+		copyForUpdate.Extra = maps.Clone(account.Extra)
+		delete(copyForUpdate.Extra, AccountModelCostPricingExtraKey)
+		accountForUpdate = &copyForUpdate
+	}
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -845,7 +860,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if updater != nil {
 		if err := updater.UpdateWithAccountBillingSettings(
 			ctx,
-			account,
+			accountForUpdate,
 			requestedProbeEnabledUpdate,
 			requestedRateSyncEnabledUpdate,
 			input.RateMultiplier,
@@ -855,7 +870,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		billingSettingsAppliedAtomically = true
 	}
 	if !billingSettingsAppliedAtomically {
-		if err := s.accountRepo.Update(ctx, account); err != nil {
+		if err := s.accountRepo.Update(ctx, accountForUpdate); err != nil {
 			return nil, err
 		}
 		if (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil) &&
@@ -907,12 +922,17 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
-	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
+	_, hasLongContextBilling := updates[openAILongContextBillingEnabledKey]
+	_, hasModelCostPricing := updates[AccountModelCostPricingExtraKey]
+	if hasLongContextBilling || hasModelCostPricing {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
 			return err
 		}
 		if err := ValidateOpenAILongContextBillingExtra(account.Platform, updates); err != nil {
+			return err
+		}
+		if err := NormalizeAccountModelCostPricingExtra(account.Platform, updates); err != nil {
 			return err
 		}
 	}
@@ -969,7 +989,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	_, hasModelCostPricing := input.Extra[AccountModelCostPricingExtraKey]
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || hasModelCostPricing {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -980,6 +1001,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	if hasModelCostPricing {
+		for _, accountID := range input.AccountIDs {
+			account, ok := targetsByID[accountID]
+			if !ok {
+				return nil, ErrAccountNotFound
+			}
+			if err := NormalizeAccountModelCostPricingExtra(account.Platform, input.Extra); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if openAISettings.any() {

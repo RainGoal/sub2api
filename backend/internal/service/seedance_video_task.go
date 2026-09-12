@@ -27,7 +27,7 @@ var ErrSeedanceVideoLeaseMutationUnsupported = errors.New("seedance video lease-
 // recovery worker is safe when multiple Sub2API replicas are running.
 type SeedanceVideoTaskRepository interface {
 	Create(ctx context.Context, pending *SeedanceVideoPendingBilling) error
-	AssignAccount(ctx context.Context, stateID string, accountID int64, providerID string) error
+	AssignAccount(ctx context.Context, stateID string, accountID int64, providerID string, accountCost *SeedanceAccountCostSnapshot) error
 	BindProviderTask(ctx context.Context, stateID, taskID, upstreamStatus string, dueAt time.Time) error
 	GetByProviderTask(ctx context.Context, taskID string, userID, apiKeyID int64) (*SeedanceVideoPendingBilling, error)
 	ClaimDue(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]*SeedanceVideoPendingBilling, error)

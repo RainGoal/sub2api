@@ -1685,6 +1685,11 @@
           </div>
         </div>
       </div>
+      <AccountModelCostPricing
+        v-model="modelCostPricing"
+        :platform="account.platform"
+        :disabled="submitting"
+      />
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
@@ -3006,6 +3011,12 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import AccountModelCostPricing from '@/components/account/AccountModelCostPricing.vue'
+import {
+  ACCOUNT_MODEL_COST_KEY, accountModelCostPricingToAPI, readAccountModelCostPricing,
+  validateAccountModelCostPricing,
+} from '@/components/account/accountModelCostPricing'
+import type { PricingFormEntry } from '@/components/admin/channel/types'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -3126,6 +3137,8 @@ const handleOllamaCloudUsageUpdated = (state: OllamaCloudUsageState) => {
 const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const editVideoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
 const seedanceModelSelection = ref<SeedanceModelSelection>(null)
+const modelCostPricing = ref<PricingFormEntry[]>([])
+const initialModelCostPricing = ref('[]')
 
 // Platform-specific hint for Base URL
 const baseUrlHint = computed(() => {
@@ -3913,6 +3926,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
+  modelCostPricing.value = readAccountModelCostPricing(newAccount.extra)
+  initialModelCostPricing.value = JSON.stringify(modelCostPricing.value)
   form.status = (newAccount.status === 'active' || newAccount.status === 'inactive' || newAccount.status === 'error')
     ? newAccount.status
     : 'active'
@@ -4907,7 +4922,12 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
-  if (!props.account) return
+  if (!props.account || submitting.value) return
+  const costError = validateAccountModelCostPricing(modelCostPricing.value, props.account.platform, t)
+  if (costError) {
+    appStore.showError(costError)
+    return
+  }
   if (props.account.platform === 'seedance' && seedanceModelSelection.value?.length === 0) {
     appStore.showError(t('admin.accounts.seedance.modelsRequired'))
     return
@@ -5646,6 +5666,18 @@ const handleSubmit = async () => {
         newExtra.upstream_request_id_header = nextUpstreamRequestIdHeader
       } else {
         delete newExtra.upstream_request_id_header
+      }
+      updatePayload.extra = newExtra
+    }
+
+    // Unchanged purchase prices are omitted so ordinary edits cannot overwrite newer prices.
+    const modelCostChanged = JSON.stringify(modelCostPricing.value) !== initialModelCostPricing.value
+    if (updatePayload.extra || modelCostChanged) {
+      const newExtra = { ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>) }
+      if (modelCostChanged) {
+        newExtra[ACCOUNT_MODEL_COST_KEY] = accountModelCostPricingToAPI(modelCostPricing.value, props.account.platform)
+      } else {
+        delete newExtra[ACCOUNT_MODEL_COST_KEY]
       }
       updatePayload.extra = newExtra
     }

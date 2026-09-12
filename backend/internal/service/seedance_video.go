@@ -181,6 +181,8 @@ type SeedanceVideoPendingBilling struct {
 	NextPollAt            time.Time  `json:"next_poll_at,omitempty"`
 	LeaseUntil            *time.Time `json:"lease_until,omitempty"`
 	LastError             string     `json:"last_error,omitempty"`
+
+	AccountCost *SeedanceAccountCostSnapshot `json:"account_cost,omitempty"`
 }
 
 const (
@@ -233,19 +235,24 @@ func (s *OpenAIGatewayService) BeginSeedanceVideoTask(ctx context.Context, pendi
 	return s.seedanceVideoTaskRepo.Create(ctx, pending)
 }
 
-func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Context, pending *SeedanceVideoPendingBilling, accountID int64, providerID string) error {
-	if s == nil || s.seedanceVideoTaskRepo == nil || pending == nil {
+func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Context, pending *SeedanceVideoPendingBilling, account *Account, providerID string) error {
+	if s == nil || s.seedanceVideoTaskRepo == nil || pending == nil || account == nil {
 		return fmt.Errorf("seedance video task repository is unavailable")
 	}
 	normalizedProviderID, err := videoprovider.NormalizeID(providerID)
 	if err != nil {
 		return err
 	}
-	if err := s.seedanceVideoTaskRepo.AssignAccount(ctx, pending.StateID, accountID, string(normalizedProviderID)); err != nil {
+	accountCost, err := s.resolveSeedanceAccountCost(ctx, pending, account)
+	if err != nil {
 		return err
 	}
-	pending.AccountID = accountID
+	if err := s.seedanceVideoTaskRepo.AssignAccount(ctx, pending.StateID, account.ID, string(normalizedProviderID), accountCost); err != nil {
+		return err
+	}
+	pending.AccountID = account.ID
 	pending.ProviderID = string(normalizedProviderID)
+	pending.AccountCost = accountCost
 	return nil
 }
 
@@ -491,26 +498,42 @@ func (s *OpenAIGatewayService) ResolveSeedanceVideoPricingSnapshot(ctx context.C
 	}
 	rateMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 	billingSeconds := seedanceVideoPricingBillingSeconds(info)
-	result := &OpenAIForwardResult{
-		Model: info.Model, BillingModel: info.Model, VideoProvider: PlatformSeedance,
-		VideoCount: 1, VideoResolution: info.Resolution,
-		VideoDurationSeconds: info.DurationSeconds, VideoBillingDurationSeconds: billingSeconds,
+	unitPrice, err := s.GetSeedanceVideoSalesPrice(ctx, apiKey, info)
+	if err != nil {
+		return nil, err
 	}
-	cost := s.calculateOpenAIVideoCost(ctx, info.Model, apiKey, result, rateMultiplier)
-	if cost == nil || cost.TotalCost < 0 || cost.ActualCost < 0 {
-		return nil, fmt.Errorf("seedance video pricing could not be resolved")
+	actualUnitPrice := *unitPrice * rateMultiplier
+	if !validSeedanceAccountCost(actualUnitPrice) {
+		return nil, fmt.Errorf("seedance video sales price exceeds the supported range")
 	}
-	duration := float64(billingSeconds)
-	holdAmount := QuantizeUsageBillingAmount(cost.ActualCost)
+	holdAmount := actualUnitPrice * float64(billingSeconds)
+	if !validSeedanceAccountCost(holdAmount) {
+		return nil, fmt.Errorf("seedance video hold exceeds the supported range")
+	}
+	holdAmount = QuantizeUsageBillingAmount(holdAmount)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		holdAmount = 0
 	}
 	return &SeedanceVideoPricingSnapshot{
-		TotalCostPerSecond:  cost.TotalCost / duration,
-		ActualCostPerSecond: cost.ActualCost / duration,
+		TotalCostPerSecond:  *unitPrice,
+		ActualCostPerSecond: actualUnitPrice,
 		RateMultiplier:      rateMultiplier,
 		HoldAmount:          holdAmount,
 	}, nil
+}
+
+func (s *OpenAIGatewayService) GetSeedanceVideoSalesPrice(ctx context.Context, apiKey *APIKey, info SeedanceVideoRequestInfo) (*float64, error) {
+	if s == nil || apiKey == nil {
+		return nil, fmt.Errorf("seedance sales pricing dependencies are unavailable")
+	}
+	price, _, err := ResolveSeedanceSalesPrice(ctx, s.channelService, apiKey.Group, info.Model, info.Resolution)
+	if err != nil {
+		return nil, err
+	}
+	if price == nil || !validSeedanceAccountCost(*price) {
+		return nil, fmt.Errorf("seedance sales price is not configured for this model and resolution")
+	}
+	return price, nil
 }
 
 func NewSeedanceVideoHoldID() string {

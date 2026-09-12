@@ -370,7 +370,7 @@
             </div>
 
             <!-- Model Mapping -->
-            <div>
+            <div v-if="section.platform !== 'seedance'">
               <div class="mb-1 flex items-center justify-between">
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelMapping', 'Model Mapping') }}</label>
                 <button type="button" @click="addMappingEntry(sIdx)" class="text-xs text-primary-600 hover:text-primary-700">
@@ -419,10 +419,14 @@
 
             <!-- Model Pricing -->
             <div>
+              <p v-if="section.platform === 'seedance'" class="mb-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                {{ t('admin.channels.form.seedanceSalesHint') }}
+              </p>
               <div class="mb-1 flex items-center justify-between">
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelPricing', 'Model Pricing') }}</label>
                 <div class="flex items-center gap-2">
                   <button
+                    v-if="section.platform !== 'seedance'"
                     type="button"
                     @click="syncLatestModels(sIdx)"
                     :disabled="syncingPlatform === section.platform"
@@ -430,7 +434,12 @@
                   >
                     {{ syncingPlatform === section.platform ? t('admin.channels.form.syncingModels') : t('admin.channels.form.syncLatestModels') }}
                   </button>
-                  <button type="button" @click="addPricingEntry(sIdx)" class="text-xs text-primary-600 hover:text-primary-700">
+                  <button v-if="section.platform === 'seedance'" type="button"
+                    :disabled="importingSeedancePrices || section.model_pricing.length > 0 || !section.group_ids.length"
+                    class="text-xs text-primary-600 disabled:opacity-40" @click="importSeedanceSalesPrices(sIdx)">
+                    {{ t('admin.channels.form.importSeedanceSales') }}
+                  </button>
+                  <button type="button" :disabled="section.platform === 'seedance' && importingSeedancePrices" @click="addPricingEntry(sIdx)" class="text-xs text-primary-600 hover:text-primary-700 disabled:opacity-40">
                     + {{ t('common.add', 'Add') }}
                   </button>
                 </div>
@@ -447,6 +456,7 @@
                   :key="idx"
                   :entry="entry"
                   :platform="section.platform"
+                  :allowed-billing-modes="section.platform === 'seedance' ? ['video'] : undefined"
                   enable-time-pricing
                   enable-tier-multipliers
                   @update="updatePricingEntry(sIdx, idx, $event)"
@@ -456,7 +466,7 @@
             </div>
 
             <!-- Account Stats Pricing Rules (per-platform, always visible) -->
-            <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
+            <div v-if="section.platform !== 'seedance'" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-700 space-y-3">
               <div class="flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.channels.form.accountStatsPricingRules') }}
@@ -598,7 +608,7 @@
           <button
             type="submit"
             form="channel-form"
-            :disabled="submitting"
+            :disabled="submitting || importingSeedancePrices"
             class="btn btn-primary"
           >
             {{ submitting
@@ -650,6 +660,7 @@ import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
+import { isValidSeedanceCostEntry } from '@/components/admin/channel/seedanceCostPricing'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 
@@ -674,6 +685,7 @@ interface FormPricingRule {
   group_ids: number[]
   account_ids: number[]
   pricing: PricingFormEntry[]
+  legacySeedanceRule?: AccountStatsPricingRule
 }
 
 // ── Platform Section type ──
@@ -763,7 +775,7 @@ const form = reactive({
 let abortController: AbortController | null = null
 
 // ── Platform config ──
-const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax']
+const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'seedance', 'kimi', 'zhipu', 'deepseek', 'minimax']
 // Composite pricing/mapping may target every concrete schedulable provider.
 const compositePlatforms: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax']
 
@@ -857,7 +869,7 @@ function toggleGroupInSection(sectionIdx: number, groupId: number) {
 function addPricingEntry(sectionIdx: number) {
   form.platforms[sectionIdx].model_pricing.push({
     models: [],
-    billing_mode: 'token',
+    billing_mode: form.platforms[sectionIdx].platform === 'seedance' ? 'video' : 'token',
     input_price: null,
     output_price: null,
     cache_write_price: null,
@@ -875,6 +887,45 @@ function addPricingEntry(sectionIdx: number) {
 }
 
 const syncingPlatform = ref<string | null>(null)
+const importingSeedancePrices = ref(false)
+let seedanceImportGeneration = 0
+
+function invalidateSeedanceImport() {
+  seedanceImportGeneration++
+  importingSeedancePrices.value = false
+}
+
+async function importSeedanceSalesPrices(sectionIdx: number) {
+  const section = form.platforms[sectionIdx]
+  if (!showDialog.value || submitting.value || importingSeedancePrices.value || !section?.enabled ||
+    section.platform !== 'seedance' || section.model_pricing.length > 0 || !section.group_ids.length) return
+  const generation = ++seedanceImportGeneration
+  const groupIds = [...section.group_ids]
+  const isCurrent = () => generation === seedanceImportGeneration && showDialog.value &&
+    form.platforms[sectionIdx] === section && section.enabled && section.model_pricing.length === 0 &&
+    groupIds.length === section.group_ids.length && groupIds.every(id => section.group_ids.includes(id))
+  importingSeedancePrices.value = true
+  try {
+    const result = await adminAPI.channels.previewSeedanceSalesImport(groupIds)
+    if (!isCurrent()) return
+    if (!result.model_pricing.length) {
+      appStore.showError(t('admin.channels.form.noLegacySeedanceSales'))
+      return
+    }
+    for (const pricing of result.model_pricing) {
+      addPricingEntry(sectionIdx)
+      const entry = section.model_pricing[section.model_pricing.length - 1]
+      entry.models = [...pricing.models]
+      entry.per_request_price = pricing.per_request_price
+      entry.intervals = apiIntervalsToForm(pricing.intervals || [])
+    }
+    appStore.showSuccess(t('admin.channels.form.seedanceSalesImported'))
+  } catch (error) {
+    if (isCurrent()) appStore.showError(extractApiErrorMessage(error, t('admin.channels.form.seedanceSalesImportFailed')))
+  } finally {
+    if (generation === seedanceImportGeneration) importingSeedancePrices.value = false
+  }
+}
 
 async function syncLatestModels(sectionIdx: number) {
   const platform = form.platforms[sectionIdx].platform
@@ -965,7 +1016,7 @@ function addAccountStatsRule(sectionIdx: number) {
 function addRulePricingEntry(sectionIdx: number, ruleIndex: number) {
   form.platforms[sectionIdx].account_stats_pricing_rules[ruleIndex].pricing.push({
     models: [],
-    billing_mode: 'token',
+    billing_mode: form.platforms[sectionIdx].platform === 'seedance' ? 'video' : 'token',
     input_price: null,
     output_price: null,
     cache_write_price: null,
@@ -1074,6 +1125,11 @@ function accountStatsRulesToAPI(): AccountStatsPricingRule[] {
   for (const section of form.platforms) {
     if (!section.enabled) continue
     for (const rule of section.account_stats_pricing_rules) {
+      // The Seedance rule editor is hidden; preserve its original prices and metadata.
+      if (section.platform === 'seedance' && rule.legacySeedanceRule) {
+        rules.push(rule.legacySeedanceRule)
+        continue
+      }
       rules.push({
         name: rule.name,
         group_ids: rule.group_ids,
@@ -1102,6 +1158,14 @@ function accountStatsRulesToAPI(): AccountStatsPricingRule[] {
 }
 
 // ── Form ↔ API conversion ──
+function unchangedLegacySeedancePricing(section: PlatformSection): ChannelModelPricing[] | null {
+  if (section.platform !== 'seedance' || !editingChannel.value) return null
+  const original = (editingChannel.value.model_pricing || []).filter(price => price.platform === 'seedance')
+  if (!original.some(price => price.billing_mode !== 'video')) return null
+  const initial = apiToForm(editingChannel.value).find(value => value.platform === 'seedance')?.model_pricing
+  return JSON.stringify(section.model_pricing) === JSON.stringify(initial) ? original : null
+}
+
 function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[], model_mapping: Record<string, Record<string, string>>, features_config: Record<string, unknown> } {
   const group_ids: number[] = []
   const model_pricing: ChannelModelPricing[] = []
@@ -1121,6 +1185,11 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
     }
 
     // Model pricing with platform tag
+    const legacySeedancePricing = unchangedLegacySeedancePricing(section)
+    if (legacySeedancePricing) {
+      model_pricing.push(...legacySeedancePricing)
+      continue
+    }
     for (const entry of section.model_pricing) {
       if (entry.models.length === 0) continue
       model_pricing.push({
@@ -1228,7 +1297,7 @@ function apiToForm(channel: Channel): PlatformSection[] {
     const pricing = (channel.model_pricing || [])
       .filter(p => (p.platform || 'anthropic') === platform)
       .map(p => ({
-        models: p.models || [],
+        models: [...(p.models || [])],
         billing_mode: p.billing_mode,
         input_price: perTokenToMTok(p.input_price),
         output_price: perTokenToMTok(p.output_price),
@@ -1350,6 +1419,7 @@ function handleSort(key: string, order: 'asc' | 'desc') {
 
 // ── Dialog ──
 function resetForm() {
+  invalidateSeedanceImport()
   form.name = ''
   form.description = ''
   form.status = 'active'
@@ -1371,6 +1441,7 @@ async function openCreateDialog() {
 }
 
 async function openEditDialog(channel: Channel) {
+  invalidateSeedanceImport()
   editingChannel.value = channel
   form.name = channel.name
   form.description = channel.description || ''
@@ -1418,6 +1489,7 @@ function distributeRulesToPlatforms(apiRules: AccountStatsPricingRule[]) {
     if (!section) continue
 
     const formRule: FormPricingRule = {
+      ...(section.platform === 'seedance' ? { legacySeedanceRule: apiRule } : {}),
       name: apiRule.name || '',
       group_ids: [...(apiRule.group_ids || [])],
       account_ids: [...(apiRule.account_ids || [])],
@@ -1473,13 +1545,14 @@ function closeDialog() {
 }
 
 async function handleSubmit() {
-  if (submitting.value) return
+  if (submitting.value || importingSeedancePrices.value) return
   if (!form.name.trim()) {
     appStore.showError(t('admin.channels.nameRequired', 'Please enter a channel name'))
     return
   }
 
   // Check for pricing entries with empty models (would be silently skipped)
+  const pricingSections = form.platforms.filter(section => section.enabled && !unchangedLegacySeedancePricing(section))
   for (const section of form.platforms.filter(s => s.enabled)) {
     if (section.group_ids.length === 0) {
       const platformLabel = t('admin.groups.platforms.' + section.platform, section.platform)
@@ -1487,6 +1560,7 @@ async function handleSubmit() {
       activeTab.value = section.platform
       return
     }
+    if (unchangedLegacySeedancePricing(section)) continue
     for (const entry of section.model_pricing) {
       if (entry.models.length === 0) {
         const platformLabel = t('admin.groups.platforms.' + section.platform, section.platform)
@@ -1498,7 +1572,14 @@ async function handleSubmit() {
   }
 
   // Check model pattern conflicts per platform (duplicate / wildcard overlap)
-  for (const section of form.platforms.filter(s => s.enabled)) {
+  for (const section of pricingSections) {
+    if (section.platform === 'seedance') {
+      if (section.model_pricing.some(entry => entry.billing_mode !== 'video' || !isValidSeedanceCostEntry(entry))) {
+        appStore.showError(t('admin.channels.form.invalidSeedanceSales'))
+        activeTab.value = section.platform
+        return
+      }
+    }
     // Collect all pricing models for this platform
     const allModels: string[] = []
     for (const entry of section.model_pricing) {
@@ -1529,7 +1610,7 @@ async function handleSubmit() {
   }
 
   // 校验 per_request/image 模式必须有价格 (只校验启用的平台)
-  for (const section of form.platforms.filter(s => s.enabled)) {
+  for (const section of pricingSections) {
     for (const entry of section.model_pricing) {
       if (entry.models.length === 0) continue
       if ((entry.billing_mode === 'per_request' || entry.billing_mode === 'image') &&
@@ -1542,7 +1623,7 @@ async function handleSubmit() {
   }
 
   // 校验区间合法性（范围、重叠等）
-  for (const section of form.platforms.filter(s => s.enabled)) {
+  for (const section of pricingSections) {
     for (const entry of section.model_pricing) {
       if (!isValidPositiveMultiplier(entry.fast_multiplier) ||
           !isValidPositiveMultiplier(entry.flex_multiplier) ||
@@ -1566,7 +1647,7 @@ async function handleSubmit() {
   }
 
   // 校验时间段定价，并切换到对应平台便于修正
-  for (const section of form.platforms.filter(s => s.enabled)) {
+  for (const section of pricingSections) {
     for (const entry of section.model_pricing) {
       const timePricingError = validateTimePricing(entry.time_pricing, t)
       if (timePricingError) {
@@ -1672,6 +1753,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  invalidateSeedanceImport()
   clearTimeout(searchTimeout)
   abortController?.abort()
   document.removeEventListener('click', handleRuleAccountClickOutside)

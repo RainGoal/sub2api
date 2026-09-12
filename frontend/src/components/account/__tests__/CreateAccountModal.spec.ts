@@ -69,6 +69,8 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import AccountModelCostPricing from '../AccountModelCostPricing.vue'
+import { createAccountModelCostEntry } from '../accountModelCostPricing'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -514,6 +516,35 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     })
     expect(createAccountMock.mock.calls[0]?.[0]?.upstream_billing_probe_enabled).toBeUndefined()
     expect(probeUpstreamBillingMock).not.toHaveBeenCalled()
+  })
+
+  it('saves purchase rates on the created supplier account independently of its multiplier', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Video vendor')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+    wrapper.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [{
+      ...createAccountModelCostEntry('seedance'), models: ['seedance-2.0'], per_request_price: 0.04,
+    }])
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.model_cost_pricing).toEqual([
+      expect.objectContaining({ platform: 'seedance', models: ['seedance-2.0'], billing_mode: 'video', per_request_price: 0.04 }),
+    ])
+    expect(createAccountMock.mock.calls[0]?.[0]?.rate_multiplier).toBe(1)
+  })
+
+  it('rejects incomplete purchase prices and clears them when the platform changes', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Video vendor')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+    wrapper.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [createAccountModelCostEntry('seedance')])
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.getComponent(AccountModelCostPricing).props('modelValue')).toEqual([])
   })
 
   it('switches a Seedance account to the fflink video protocol', async () => {

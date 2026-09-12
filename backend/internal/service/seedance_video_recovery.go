@@ -270,7 +270,7 @@ func (s *SeedanceVideoRecoveryService) settleCompleted(ctx context.Context, pend
 	}
 	rateMultiplier := pending.RateMultiplier
 	subscriptionBilling := pending.IsSubscriptionBilling
-	if err := s.gateway.RecordUsage(ctx, &OpenAIRecordUsageInput{
+	if err := s.gateway.RecordSeedanceVideoUsage(ctx, pending, &OpenAIRecordUsageInput{
 		Result: result, APIKey: apiKey, User: apiKey.User, Account: account, Subscription: subscription,
 		InboundEndpoint: "/v1/videos", UpstreamEndpoint: "/v1/videos/{task_id}",
 		RequestPayloadHash: pending.RequestPayloadHash, CostOverride: cost,

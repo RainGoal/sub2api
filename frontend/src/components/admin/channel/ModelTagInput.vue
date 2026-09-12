@@ -33,6 +33,14 @@
     <p class="mt-1 text-xs text-gray-400">
       {{ t('admin.channels.form.modelInputHint', 'Press Enter to add, supports paste for batch import.') }}
     </p>
+    <div v-if="platform === 'seedance'" class="mt-2 flex flex-wrap gap-1.5">
+      <button v-for="model in SEEDANCE_MODEL_OPTIONS" :key="model.id" type="button"
+        class="rounded border border-gray-200 px-2 py-1 text-xs disabled:opacity-40 dark:border-dark-600"
+        :disabled="models.some(value => normalizeSeedanceModelID(value) === model.id)"
+        @click="emit('update:models', [...models, model.id])">
+        {{ model.label }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -41,6 +49,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { getPlatformTagClass } from './types'
+import { SEEDANCE_MODEL_OPTIONS, normalizeSeedanceModelID } from '@/constants/videoProviders'
 
 const { t } = useI18n()
 

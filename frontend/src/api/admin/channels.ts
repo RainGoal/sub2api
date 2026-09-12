@@ -204,5 +204,10 @@ export async function syncPricingModels(platform: string): Promise<SyncPricingMo
   return data
 }
 
-const channelsAPI = { list, getById, create, update, remove, getModelDefaultPricing, syncPricingModels }
+export async function previewSeedanceSalesImport(groupIds: number[]): Promise<{ model_pricing: ChannelModelPricing[] }> {
+  const { data } = await apiClient.post<{ model_pricing: ChannelModelPricing[] }>('/admin/channels/seedance-pricing/import-preview', { group_ids: groupIds })
+  return data
+}
+
+const channelsAPI = { list, getById, create, update, remove, getModelDefaultPricing, syncPricingModels, previewSeedanceSalesImport }
 export default channelsAPI

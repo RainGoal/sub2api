@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
@@ -641,6 +642,13 @@ func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Co
 	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)
 	if upstreamModel == "" {
 		return false
+	}
+	// Seedance model selection accepts provider aliases, while sales prices use
+	// canonical IDs. Match the same model identity during account restriction.
+	if account != nil && account.Platform == PlatformSeedance {
+		if canonical, ok := videoprovider.CanonicalModel(upstreamModel); ok {
+			upstreamModel = canonical
+		}
 	}
 	return s.channelService.IsModelRestricted(ctx, groupID, upstreamModel)
 }

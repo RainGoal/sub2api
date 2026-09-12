@@ -99,8 +99,9 @@ type channelCache struct {
 	groupPlatform           map[int64]string                                    // groupID → platform
 
 	// 冷路径（CRUD 操作）
-	byID     map[int64]*Channel
-	loadedAt time.Time
+	byID       map[int64]*Channel
+	loadedAt   time.Time
+	loadFailed bool // Distinguishes a failed load from a confirmed absence of channels.
 }
 
 // ChannelMappingResult 渠道映射查找结果
@@ -279,6 +280,7 @@ func expandMappingToCache(cache *channelCache, ch *Channel, gid int64, platform 
 // 通过回退 loadedAt 使剩余 TTL = channelErrorTTL。
 func (s *ChannelService) storeErrorCache() {
 	errorCache := newEmptyChannelCache()
+	errorCache.loadFailed = true
 	errorCache.loadedAt = time.Now().Add(-(channelCacheTTL - channelErrorTTL))
 	s.cache.Store(errorCache)
 }
@@ -844,6 +846,10 @@ func (s *ChannelService) Create(ctx context.Context, input *CreateChannelInput) 
 	}
 	channel.normalizeBillingModelSource()
 
+	if err := normalizeSeedanceSalesPricing(channel.ModelPricing); err != nil {
+		return nil, err
+	}
+	preserveSeedanceSalesOwnership(channel)
 	if err := validateChannelConfig(channel.ModelPricing, channel.ModelMapping); err != nil {
 		return nil, err
 	}
@@ -882,10 +888,24 @@ func (s *ChannelService) Update(ctx context.Context, id int64, input *UpdateChan
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
+	ownedSeedanceSales := channelOwnsSeedanceSalesPricing(channel)
+	previousPricing := channel.ModelPricing
 	if err := s.applyUpdateInput(ctx, channel, input); err != nil {
 		return nil, err
 	}
 
+	if input.ModelPricing != nil && !seedanceSalesPricingUnchanged(previousPricing, channel.ModelPricing) {
+		if err := normalizeSeedanceSalesPricing(channel.ModelPricing); err != nil {
+			return nil, err
+		}
+	}
+	if ownedSeedanceSales {
+		if channel.FeaturesConfig == nil {
+			channel.FeaturesConfig = make(map[string]any)
+		}
+		channel.FeaturesConfig[seedanceSalesPricingKey] = true
+	}
+	preserveSeedanceSalesOwnership(channel)
 	if err := validateChannelConfig(channel.ModelPricing, channel.ModelMapping); err != nil {
 		return nil, err
 	}

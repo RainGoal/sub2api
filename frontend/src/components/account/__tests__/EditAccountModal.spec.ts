@@ -55,6 +55,8 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import AccountModelCostPricing from '../AccountModelCostPricing.vue'
+import { accountModelCostPricingToAPI, createAccountModelCostEntry } from '../accountModelCostPricing'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -443,6 +445,61 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'gpt-5.2': 'gpt-5.2'
     })
+  })
+
+  it('keeps saved purchase prices readable and omits them from unrelated edits', async () => {
+    const account = buildAccount()
+    account.extra = {
+      unrelated_setting: 'retained',
+      model_cost_pricing: accountModelCostPricingToAPI([{
+        ...createAccountModelCostEntry('openai'), models: ['vendor-model'], input_price: 2.5,
+      }], 'openai'),
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.getComponent(AccountModelCostPricing).props('modelValue')[0].input_price).toBe(2.5)
+    await wrapper.get('form#edit-account-form input[type="text"]').setValue('Renamed vendor')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ unrelated_setting: 'retained' })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('model_cost_pricing')
+    expect(account.extra.model_cost_pricing[0].input_price).toBe(0.0000025)
+  })
+
+  it('saves and explicitly clears this account purchase prices while preserving extra fields', async () => {
+    const account = {
+      ...buildAccount(), platform: 'seedance', rate_multiplier: 3,
+      credentials: { api_key: 'sk-video', video_provider: 'fflink_v1' },
+      extra: { unrelated_setting: 'retained' },
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const entry = { ...createAccountModelCostEntry('seedance'), models: ['seedance-2.0'], per_request_price: 0.06 }
+    wrapper.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [entry])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload.rate_multiplier).toBe(3)
+    expect(payload.extra).toMatchObject({
+      unrelated_setting: 'retained',
+      model_cost_pricing: [expect.objectContaining({ platform: 'seedance', per_request_price: 0.06 })],
+    })
+    wrapper.unmount()
+
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const withCosts = mountModal({ ...account, extra: payload.extra })
+    withCosts.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [])
+    await withCosts.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ unrelated_setting: 'retained', model_cost_pricing: [] })
+    withCosts.unmount()
+  })
+
+  it('rejects incomplete account purchase pricing before submitting', async () => {
+    updateAccountMock.mockReset()
+    const wrapper = mountModal()
+    wrapper.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [createAccountModelCostEntry('openai')])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
   })
 
   it('rehydrates and updates the selected Seedance video protocol', async () => {

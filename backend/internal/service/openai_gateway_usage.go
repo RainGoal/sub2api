@@ -51,6 +51,10 @@ type OpenAIRecordUsageInput struct {
 	// the request payload and does not replace the transport request type.
 	NativeCompactionV2 bool
 	ChannelUsageFields
+
+	// Statistics overrides freeze upstream cost without changing user or account quotas.
+	AccountStatsCostOverride           *float64
+	AccountStatsRateMultiplierOverride *float64
 }
 
 // CyberPolicyUsageInput 是 cyber 拒绝、未走正常 RecordUsage 的请求记录用量的入参。
@@ -483,12 +487,44 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.SubscriptionID = &subscription.ID
 	}
 
-	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	// Seedance uses the account price frozen before task creation. Historical
+	// tasks without that snapshot retain their previous statistics behavior.
+	if input.AccountStatsCostOverride == nil && !account.IsSeedance() {
+		accountCostInput := CostInput{
+			Model: sentModel, Tokens: tokens, RequestCount: 1, PricingAt: pricingAt,
+			ServiceTier: serviceTier, ReasoningEffort: optionalStringValue(result.ReasoningEffort),
+			SizeTier: NormalizeImageBillingTierOrDefault(result.ImageSize),
+		}
+		if isVideoUsage {
+			accountCostInput.SizeTier = NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
+			accountCostInput.UsageUnits = float64(max(1, result.VideoCount)) * float64(NormalizeVideoBillingUnitsDuration(
+				result.VideoProvider, billingModel, result.VideoDurationSeconds, result.VideoBillingDurationSeconds))
+		}
+		accountCost, err := resolveAccountModelCostWithImages(ctx, s.billingService, account,
+			accountCostInput, result.ImageCount, result.ImageSizeBreakdown)
+		if err != nil {
+			// Account statistics must not cancel an already successful request's
+			// customer billing. The saved configuration is validated separately.
+			logger.L().Warn("account purchase cost unavailable; using legacy estimate",
+				zap.Int64("account_id", account.ID), zap.String("model", accountCostInput.Model),
+				zap.String("request_id", requestID), zap.Error(err))
+		}
+		if accountCost != nil {
+			one := 1.0
+			usageLog.AccountStatsCost, usageLog.AccountRateMultiplier = accountCost, &one
+		}
+	}
+	if apiKey.GroupID != nil && input.AccountStatsCostOverride == nil && usageLog.AccountStatsCost == nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
 			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
 			tokens, cost.TotalCost, pricingAt,
 		)
+	}
+	if input.AccountStatsCostOverride != nil {
+		usageLog.AccountStatsCost = input.AccountStatsCostOverride
+	}
+	if input.AccountStatsRateMultiplierOverride != nil {
+		usageLog.AccountRateMultiplier = input.AccountStatsRateMultiplierOverride
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
@@ -831,6 +867,14 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 		result.VideoDurationSeconds,
 		result.VideoBillingDurationSeconds,
 	)
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.Platform == PlatformSeedance {
+		price, _, err := ResolveSeedanceSalesPrice(ctx, s.channelService, apiKey.Group, billingModel, resolution)
+		if err != nil || price == nil {
+			return nil
+		}
+		total := *price * float64(videoCount*durationSeconds)
+		return &CostBreakdown{TotalCost: total, ActualCost: total * multiplier, BillingMode: string(BillingModeVideo)}
+	}
 	resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey)
 	if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModeVideo {
 		gid := apiKey.Group.ID
