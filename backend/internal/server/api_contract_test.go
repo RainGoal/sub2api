@@ -824,6 +824,13 @@ func TestAPIContracts(t *testing.T) {
 						"api_key_acl_trust_forwarded_ip": false,
 					"forwarded_client_ip_headers": [],
 					"contact_info": "support",
+					"community_contact": {
+						"group_name": {"zh-CN": "", "en-US": ""},
+						"description": {"zh-CN": "", "en-US": ""},
+						"group_number": "",
+						"invite_url": "",
+						"qr_image_url": ""
+					},
 					"doc_url": "https://docs.example.com",
 					"auth_source_default_email_balance": 0,
 					"auth_source_default_email_concurrency": 5,
@@ -1171,6 +1178,13 @@ func TestAPIContracts(t *testing.T) {
 					"api_key_acl_trust_forwarded_ip": false,
 					"forwarded_client_ip_headers": [],
 					"contact_info": "",
+					"community_contact": {
+						"group_name": {"zh-CN": "", "en-US": ""},
+						"description": {"zh-CN": "", "en-US": ""},
+						"group_number": "",
+						"invite_url": "",
+						"qr_image_url": ""
+					},
 					"doc_url": "",
 					"home_content": "",
 					"hide_ccs_import_button": false,

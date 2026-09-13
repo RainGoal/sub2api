@@ -19,7 +19,7 @@
 
 ## 个人版本与发布
 
-- 个人发布版本独立于上游版本，当前个人版本为 `v0.1.35`。
+- 个人发布版本独立于上游版本，当前个人版本为 `v0.1.36`。
 - 个人版本的唯一依据是 `origin` 上严格匹配 `v0.1.<整数>` 的 Tag；不得依据
   `upstream` Tag、本地混合 Tag 列表或 `backend/cmd/server/VERSION` 推导个人版本。
 - 创建新版本前必须先读取 `origin` 的全部个人版本 Tag，取最大的补丁号并加一。
@@ -103,8 +103,13 @@ git config rerere.autoupdate true
 ```powershell
 gofmt -w <changed-go-files>
 go test ./...
+go test -tags=unit ./...
 golangci-lint run --timeout=30m ./...
 ```
+
+`unit` 标签必须覆盖全部包，不能用无标签全量测试或定向用例代替；修改接口响应字段时同步检查 `backend/internal/server/api_contract_test.go` 的契约预期。
+
+后端发布前还需通过 `make test-integration`（等价于 `go test -tags=integration ./...`）。该测试需要 Docker 启动隔离的 PostgreSQL 与 Redis；本地不具备环境时应明确记录，并确认远端完整 CI 通过，不能将自动跳过视为验证完成。
 
 涉及内嵌前端或静态资源时执行：
 
