@@ -341,6 +341,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySiteSubtitle] = settings.SiteSubtitle
 	updates[SettingKeyAPIBaseURL] = settings.APIBaseURL
 	updates[SettingKeyContactInfo] = settings.ContactInfo
+	communityContact, err := normalizeCommunityContact(settings.CommunityContact)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_COMMUNITY_CONTACT", err.Error())
+	}
+	settings.CommunityContact = communityContact
+	communityContactJSON, err := json.Marshal(communityContact)
+	if err != nil {
+		return nil, fmt.Errorf("marshal community contact: %w", err)
+	}
+	updates[SettingKeyCommunityContact] = string(communityContactJSON)
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)

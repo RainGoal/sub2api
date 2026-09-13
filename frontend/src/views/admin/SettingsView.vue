@@ -6528,6 +6528,13 @@
                 </p>
               </div>
 
+              <CommunityContactSettings
+                v-model="form.community_contact"
+                :disabled="saving || loadFailed"
+                :error="communityContactError"
+                @update:model-value="communityContactError = null"
+              />
+
               <!-- Doc URL -->
               <div>
                 <label
@@ -8776,7 +8783,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, onMounted, watch, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
 import {
@@ -8807,6 +8814,7 @@ import type {
 } from "@/api/admin/settings";
 import type {
   AdminGroup,
+  CommunityContact,
   LoginAgreementDocument,
   NotifyEmailEntry,
   Proxy,
@@ -8825,6 +8833,12 @@ import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
+import CommunityContactSettings from "@/views/admin/settings/CommunityContactSettings.vue";
+import {
+  normalizeCommunityContact,
+  validateCommunityContact,
+  type CommunityContactValidationError,
+} from "@/views/admin/settings/communityContact";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
@@ -9493,6 +9507,7 @@ type SettingsForm = Omit<
   | "wechat_connect_mp_enabled"
   | "wechat_connect_mobile_enabled"
 > & {
+  community_contact: CommunityContact;
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
@@ -9538,6 +9553,7 @@ type SettingsForm = Omit<
 };
 
 const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
+const communityContactError = ref<CommunityContactValidationError | null>(null);
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,
@@ -9577,6 +9593,7 @@ const form = reactive<SettingsForm>({
   site_subtitle: "Subscription to API Conversion Platform",
   api_base_url: "",
   contact_info: "",
+  community_contact: normalizeCommunityContact(),
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,
@@ -10789,6 +10806,8 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.community_contact = normalizeCommunityContact(settings.community_contact);
+    communityContactError.value = null;
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11022,6 +11041,17 @@ function findDuplicateDefaultSubscription(
 }
 
 async function saveSettings() {
+  if (saving.value) return;
+  const contactError = validateCommunityContact(form.community_contact);
+  communityContactError.value = contactError;
+  if (contactError) {
+    activeTab.value = "general";
+    appStore.showError(t(`admin.settings.site.communityContact.errors.${contactError.message}`));
+    await nextTick();
+    document.getElementById(`community-contact-${contactError.field}`)?.focus();
+    return;
+  }
+  form.community_contact = normalizeCommunityContact(form.community_contact);
   saving.value = true;
   try {
     const normalizedTableDefaultPageSize = Math.floor(
@@ -11213,6 +11243,7 @@ async function saveSettings() {
       site_subtitle: form.site_subtitle,
       api_base_url: form.api_base_url,
       contact_info: form.contact_info,
+      community_contact: form.community_contact,
       doc_url: form.doc_url,
       home_content: form.home_content,
       compact_home_enabled: form.compact_home_enabled,
@@ -11535,6 +11566,7 @@ async function saveSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.community_contact = normalizeCommunityContact(updated.community_contact);
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
     form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(

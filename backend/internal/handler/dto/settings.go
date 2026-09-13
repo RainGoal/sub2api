@@ -164,6 +164,8 @@ type SystemSettings struct {
 	CustomMenuItems             []CustomMenuItem `json:"custom_menu_items"`
 	CustomEndpoints             []CustomEndpoint `json:"custom_endpoints"`
 
+	CommunityContact service.CommunityContactSettings `json:"community_contact"`
+
 	DefaultConcurrency           int                          `json:"default_concurrency"`
 	DefaultBalance               float64                      `json:"default_balance"`
 	AffiliateRebateRate          float64                      `json:"affiliate_rebate_rate"`
@@ -352,6 +354,8 @@ type DefaultSubscriptionSetting struct {
 }
 
 type PublicSettings struct {
+	CommunityContact service.CommunityContactSettings `json:"community_contact"`
+
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	ForceEmailOnThirdPartySignup        bool                     `json:"force_email_on_third_party_signup"`

@@ -207,6 +207,14 @@ export interface LoginAgreementDocument {
   content_md: string
 }
 
+export interface CommunityContact {
+  group_name: { 'zh-CN': string; 'en-US': string }
+  description: { 'zh-CN': string; 'en-US': string }
+  group_number: string
+  invite_url: string
+  qr_image_url: string
+}
+
 export interface PublicSettings {
   registration_enabled: boolean
   email_verify_enabled: boolean
@@ -236,6 +244,7 @@ export interface PublicSettings {
   site_subtitle: string
   api_base_url: string
   contact_info: string
+  community_contact?: CommunityContact
   doc_url: string
   home_content: string
   compact_home_enabled: boolean

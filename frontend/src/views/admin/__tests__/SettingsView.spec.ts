@@ -720,6 +720,90 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("normalizes legacy community settings and saves a complete empty object", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, contact_info: "support@example.com" });
+    const wrapper = mountView();
+    await flushPromises();
+    const fields = wrapper.get('[data-testid="community-contact-settings"]').findAll("input, textarea");
+    expect(fields).toHaveLength(7);
+    expect(fields.every((field) => (field.element as HTMLInputElement).value === "")).toBe(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      contact_info: "support@example.com",
+      community_contact: {
+        group_name: { "zh-CN": "", "en-US": "" },
+        description: { "zh-CN": "", "en-US": "" },
+        group_number: "", invite_url: "", qr_image_url: "",
+      },
+    }));
+  });
+
+  it("loads partial community settings and saves both languages without changing other contact info", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      contact_info: "support@example.com",
+      community_contact: { group_name: { "zh-CN": "测试群" }, group_number: "123456" },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    expect((wrapper.get('[id="community-contact-group_name.zh-CN"]').element as HTMLInputElement).value).toBe("测试群");
+    expect((wrapper.get('[id="community-contact-description.en-US"]').element as HTMLTextAreaElement).value).toBe("");
+    await wrapper.get('[id="community-contact-group_name.en-US"]').setValue(" Test Group ");
+    await wrapper.get('[id="community-contact-description.zh-CN"]').setValue("  测试介绍  ");
+    await wrapper.get('[id="community-contact-description.en-US"]').setValue(" Test description ");
+    await wrapper.get('[id="community-contact-invite_url"]').setValue(" https://example.com/join?code=AbC ");
+    await wrapper.get('[id="community-contact-qr_image_url"]').setValue(" /images/qr.png ");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      contact_info: "support@example.com",
+      community_contact: {
+        group_name: { "zh-CN": "测试群", "en-US": "Test Group" },
+        description: { "zh-CN": "测试介绍", "en-US": "Test description" },
+        group_number: "123456",
+        invite_url: "https://example.com/join?code=AbC",
+        qr_image_url: "/images/qr.png",
+      },
+    }));
+    expect((wrapper.get('[id="community-contact-group_name.en-US"]').element as HTMLInputElement).value).toBe("Test Group");
+  });
+
+  it("blocks unsafe community URLs and returns to the invalid field's tab", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const invite = wrapper.get('[id="community-contact-invite_url"]');
+    await invite.setValue("https://user:pass@example.com/join");
+    await openSecurityTab(wrapper);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith("admin.settings.site.communityContact.errors.inviteUrlInvalid");
+    expect(invite.attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get("#settings-tab-general").attributes("aria-selected")).toBe("true");
+    await invite.setValue("https://example.com/join");
+    expect(invite.attributes("aria-invalid")).toBe("false");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables community fields during save and prevents duplicate submissions", async () => {
+    let finishSave!: (value: typeof baseSettingsResponse) => void;
+    updateSettings.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="community-contact-settings"]').attributes("disabled")).toBeDefined();
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    finishSave({ ...baseSettingsResponse });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="community-contact-settings"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[id="community-contact-group_name.en-US"]').exists()).toBe(true);
+  });
+
   it("submits the compact home page toggle", async () => {
     const wrapper = mountView();
     await flushPromises();

@@ -19,7 +19,7 @@
 
 ## 个人版本与发布
 
-- 个人发布版本独立于上游版本，当前个人版本为 `v0.1.34`。
+- 个人发布版本独立于上游版本，当前个人版本为 `v0.1.35`。
 - 个人版本的唯一依据是 `origin` 上严格匹配 `v0.1.<整数>` 的 Tag；不得依据
   `upstream` Tag、本地混合 Tag 列表或 `backend/cmd/server/VERSION` 推导个人版本。
 - 创建新版本前必须先读取 `origin` 的全部个人版本 Tag，取最大的补丁号并加一。
@@ -88,6 +88,11 @@ git config rerere.autoupdate true
 ```
 
 不要对已经共享的 `feat/my-sub` 强制 rebase、改写历史或使用破坏性 reset。同步冲突优先保留上游安全修复，再以最小补丁恢复个人定制行为。
+
+## 本地 UI 预览
+
+- 用户已允许本地 UI 预览直接连接生产 Sub2API，后端地址为 `https://back.yusflow.com`。
+- `wsapi-front` 使用 `VITE_BACKEND_PROXY_TARGET=https://back.yusflow.com` 启动 Vite，预览地址为 `http://127.0.0.1:5175/`；切换代理目标后需要重启 Vite。完整启动命令见 `D:\Code\Other\wsapi-front\AGENTS.md` 的“本地开发”部分。
 
 ## 修改与验证
 
