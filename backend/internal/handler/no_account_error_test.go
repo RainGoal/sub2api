@@ -76,6 +76,29 @@ func TestClassifySelectionFailureError_RateLimitedPool(t *testing.T) {
 	require.Equal(t, fallback, classifySelectionFailureError(fmt.Errorf("no available accounts"), fallback))
 }
 
+func TestClassifyClaudeCodeOnlySelectionError(t *testing.T) {
+	t.Run("policy rejection", func(t *testing.T) {
+		c := newTestGinContextWithRequest()
+		cls, ok := classifyClaudeCodeOnlySelectionError(c, fmt.Errorf("select account: %w", service.ErrClaudeCodeOnly))
+
+		require.True(t, ok)
+		require.Equal(t, http.StatusForbidden, cls.Status)
+		require.Equal(t, "permission_error", cls.ErrType)
+		require.Contains(t, cls.Message, "restricted to Claude Code clients")
+		require.True(t, service.HasOpsClientBusinessLimited(c))
+		require.Equal(t, service.OpsClientBusinessLimitedReasonLocalPolicyDenied, service.OpsClientBusinessLimitedReason(c))
+	})
+
+	t.Run("other selection error", func(t *testing.T) {
+		c := newTestGinContextWithRequest()
+		cls, ok := classifyClaudeCodeOnlySelectionError(c, service.ErrNoAvailableAccounts)
+
+		require.False(t, ok)
+		require.Equal(t, noAccountErrorClassification{}, cls)
+		require.False(t, service.HasOpsClientBusinessLimited(c))
+	})
+}
+
 func TestClassifyNoAccountError_NilAPIKey_Falls503(t *testing.T) {
 	c := newTestGinContextWithRequest()
 	fd := &fakeDiagnoser{resp: service.ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: false}}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -35,6 +36,21 @@ type noAccountErrorClassification struct {
 }
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
+
+func classifyClaudeCodeOnlySelectionError(
+	c *gin.Context,
+	err error,
+) (noAccountErrorClassification, bool) {
+	if !errors.Is(err, service.ErrClaudeCodeOnly) {
+		return noAccountErrorClassification{}, false
+	}
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	return noAccountErrorClassification{
+		Status:  http.StatusForbidden,
+		ErrType: "permission_error",
+		Message: "This group is restricted to Claude Code clients (/v1/messages only)",
+	}, true
+}
 
 // classifySelectionFailureError preserves the scheduler's compact reason when
 // every model-capable account is temporarily rate limited.
