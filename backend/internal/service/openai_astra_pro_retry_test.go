@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,20 +29,24 @@ func newOpenAIAstraProRetryContext(body []byte) (*gin.Context, *httptest.Respons
 // TestOpenAIGatewayService_OAuthAstraProModeRejectionPassesThrough verifies that
 // when the Codex OAuth upstream rejects an Astra pro+max request with a
 // deterministic HTTP 400 on error.param=reasoning.mode, the gateway passes the
-// client error through unchanged (upstream type/code/param/message, code not
-// treated as official), makes exactly one upstream call, keeps reasoning.mode=pro
+// client error through with type/code/param preserved and a private display
+// message (code not treated as official), makes exactly one upstream call, keeps reasoning.mode=pro
 // and reasoning.effort=max in the sent body, and does not replay without mode.
 func TestOpenAIGatewayService_OAuthAstraProModeRejectionPassesThrough(t *testing.T) {
 	body := []byte(`{"model":"gpt-6-astra","reasoning":{"mode":"pro","effort":"max"},"input":"hello"}`)
+	const upstreamMessage = "reasoning.mode is not supported for private-C"
 	upstream := &httpUpstreamRecorder{resp: newOpenAIRejectedFieldTestResponse(
 		http.StatusBadRequest,
-		`{"error":{"type":"invalid_request_error","code":"model_specific_rejection","message":"reasoning.mode is not supported for this model","param":"reasoning.mode"}}`,
+		`{"error":{"type":"invalid_request_error","code":"model_specific_rejection","message":"`+upstreamMessage+`","param":"reasoning.mode"}}`,
 	)}
 	svc := newOpenAIRejectedFieldTestService(upstream)
 	c, recorder := newOpenAIAstraProRetryContext(body)
 
-	_, err := svc.Forward(context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body)
+	result, err := svc.Forward(context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body)
 	require.Error(t, err)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Len(t, upstream.bodies, 1, "deterministic 400 must not trigger a retry")
 	require.Len(t, upstream.requests, 1)
@@ -56,7 +61,10 @@ func TestOpenAIGatewayService_OAuthAstraProModeRejectionPassesThrough(t *testing
 	require.Equal(t, "invalid_request_error", gjson.Get(respJSON, "error.type").String())
 	require.Equal(t, "model_specific_rejection", gjson.Get(respJSON, "error.code").String())
 	require.Equal(t, "reasoning.mode", gjson.Get(respJSON, "error.param").String())
-	require.Equal(t, "reasoning.mode is not supported for this model", gjson.Get(respJSON, "error.message").String())
+	require.Equal(t, "Upstream rejected the request", gjson.Get(respJSON, "error.message").String())
+	require.NotContains(t, respJSON, "private-C")
+	require.ErrorContains(t, err, upstreamMessage)
+	require.Equal(t, upstreamMessage, c.GetString(OpsUpstreamErrorMessageKey))
 }
 
 // TestOpenAIGatewayService_OAuthAstraProModeKeptAcrossRejectedFieldRetry reuses

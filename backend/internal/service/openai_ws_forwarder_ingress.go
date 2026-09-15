@@ -194,6 +194,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		promptCacheKey           string
 		previousResponseID       string
 		originalModel            string
+		publicModel              string
 		imageBillingModel        string
 		imageSizeTier            string
 		imageInputSize           string
@@ -201,6 +202,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		requestedReasoningEffort *string
 	}
 	ingressSessionOriginalModel := ""
+	ingressSessionPublicModel := ""
 
 	applyPayloadMutation := func(current []byte, path string, value any) ([]byte, error) {
 		next, err := sjson.SetBytes(current, path, value)
@@ -287,7 +289,20 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		originalModel := strings.TrimSpace(values[1].String())
 		modelMissing := originalModel == ""
-		if originalModel == "" {
+		if openAIClientPrivacyApplies(account) {
+			modelMissing = !values[1].Exists()
+			if !modelMissing {
+				if values[1].Type != gjson.String {
+					return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model must be a string", nil)
+				}
+				// Validate the explicit field before session fallback or the first
+				// turn's public-name override can hide an invalid client value.
+				if err := ValidateOpenAIClientModel(values[1].Str); err != nil {
+					return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "a valid model is required in response.create", err)
+				}
+			}
+		}
+		if modelMissing {
 			// 入站 WS 长会话里，部分客户端只在第一轮 response.create 上声明
 			// model，后续 turn 复用同一 session-level model。为避免因省略
 			// model 直接断开用户连接，这里回落到上一轮已通过校验的客户端模型，
@@ -303,6 +318,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		promptCacheKey := strings.TrimSpace(values[2].String())
+		publicModel := originalModel
+		if modelMissing {
+			publicModel = ingressSessionPublicModel
+		}
+		if turn == 1 && hooks != nil && strings.TrimSpace(hooks.InitialRequestModel) != "" {
+			publicModel = strings.TrimSpace(hooks.InitialRequestModel)
+		}
+		if openAIClientPrivacyApplies(account) {
+			if err := ValidateOpenAIClientModel(publicModel); err != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "a valid model is required in response.create", err)
+			}
+		}
 		previousResponseID := strings.TrimSpace(values[3].String())
 		previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 		if previousResponseID != "" && previousResponseIDKind == OpenAIPreviousResponseIDKindMessageID {
@@ -453,7 +480,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			// 307-311), and the subsequent close handshake re-acquires the
 			// same writeFrameMu, so the error event is guaranteed to reach
 			// the kernel send buffer before any close frame is queued.
-			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
+			clientBlocked := openAIWSClientPolicyBlockedError(account, blocked)
+			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(clientBlocked)
 			if eventBytes != nil {
 				writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 				_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
@@ -461,12 +489,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
 				coderws.StatusPolicyViolation,
-				blocked.Message,
+				clientBlocked.Message,
 				blocked,
 			)
 		}
 		normalized = policyApplied
 		ingressSessionOriginalModel = originalModel
+		ingressSessionPublicModel = publicModel
 
 		return openAIWSClientPayload{
 			payloadRaw:               normalized,
@@ -475,6 +504,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			promptCacheKey:           promptCacheKey,
 			previousResponseID:       previousResponseID,
 			originalModel:            originalModel,
+			publicModel:              publicModel,
 			imageBillingModel:        imageBillingModel,
 			imageSizeTier:            imageSizeTier,
 			imageInputSize:           imageInputSize,
@@ -684,6 +714,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				grokCacheIdentity,
 				turn,
 				writeClientMessage,
+				currentBridgePayload.publicModel,
 			)
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
@@ -946,12 +977,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
-	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+	clientModels := newOpenAIWSClientModels(firstPayload.publicModel)
+	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string, publicModel string) (*OpenAIForwardResult, error) {
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
 		turnStart := time.Now()
+		clientModels.beginTurn(publicModel)
 		wroteDownstream := false
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
@@ -1000,6 +1033,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				mappedModelBytes = []byte(mappedModel)
 			}
 		}
+		clientPayloadFailure := func(err error) (*OpenAIForwardResult, error) {
+			lease.MarkBroken()
+			if !clientDisconnected {
+				_ = writeClientMessage(openAIWSClientPayloadFailureEvent(responseID))
+			}
+			return &OpenAIForwardResult{
+				RequestID: responseID, Usage: usage, Model: originalModel, UpstreamModel: mappedModel,
+				UpstreamResponseModel: responseModelObserver.Model(), UpstreamResponseModelConflict: responseModelObserver.Conflict(),
+				UpstreamResponseServiceTier: responseModelObserver.ServiceTier(),
+				ServiceTier:                 resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(payload)),
+				ReasoningEffort:             ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, mappedModel, originalModel), payload, mappedModel),
+				RequestedReasoningEffort:    requestedReasoningEffort, Stream: reqStream, OpenAIWSMode: true,
+				ImageCount: imageCounter.Count(), ImageOutputSizes: imageCounter.Sizes(),
+				ImageSize: imageSizeTier, ImageInputSize: imageInputSize, BillingModel: imageBillingModel,
+				ResponseHeaders: lease.HandshakeHeaders(), Duration: time.Since(turnStart), FirstTokenMs: firstTokenMs,
+			}, err
+		}
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
@@ -1012,6 +1062,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 				upstreamMessage = normalized
+			}
+			if openAIClientPrivacyApplies(account) && !clientModels.observe(coderws.MessageText, upstreamMessage) {
+				clientMessage, err := rewriteOpenAIClientPayload(upstreamMessage, clientModels.modelForPayload(upstreamMessage))
+				if err != nil {
+					return clientPayloadFailure(err)
+				}
+				if !clientDisconnected {
+					if err := writeClientMessage(clientMessage); err != nil {
+						return nil, wrapOpenAIWSIngressTurnError("write_client", err, wroteDownstream)
+					}
+				}
+				continue
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
@@ -1028,6 +1090,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {
 				parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
+			}
+			if openAIClientPrivacyApplies(account) && !json.Valid(upstreamMessage) {
+				return clientPayloadFailure(fmt.Errorf("%w: malformed websocket event", errOpenAIClientPayload))
 			}
 			if eventType == "error" || eventType == "response.failed" {
 				markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
@@ -1149,15 +1214,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageCounter.AddSSEData(upstreamMessage)
 
 			if !clientDisconnected {
-				if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(upstreamMessage, mappedModelBytes) {
-					upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
+				clientMessage := upstreamMessage
+				if openAIClientPrivacyApplies(account) {
+					updated, err := rewriteOpenAIClientPayload(clientMessage, clientModels.modelForPayload(upstreamMessage))
+					if err != nil {
+						return clientPayloadFailure(err)
+					}
+					clientMessage = updated
+				} else if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(upstreamMessage, mappedModelBytes) {
+					clientMessage = replaceOpenAIWSMessageModel(clientMessage, mappedModel, originalModel)
 				}
-				if openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {
-					if corrected, changed := s.toolCorrector.CorrectToolCallsInSSEBytes(upstreamMessage); changed {
-						upstreamMessage = corrected
+				if openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(clientMessage) {
+					if corrected, changed := s.toolCorrector.CorrectToolCallsInSSEBytes(clientMessage); changed {
+						clientMessage = corrected
 					}
 				}
-				replayCollector.AddEvent(eventType, upstreamMessage)
+				replayCollector.AddEvent(eventType, clientMessage)
 				// 客户端写出副本改写容量降载码：Codex 对 error/response.failed 中的
 				// server_is_overloaded / slow_down 判致命并终止会话，改写后走客户端
 				// 内置退避重试。HTTP/SSE（openai_gateway_response_handling.go）与
@@ -1169,7 +1241,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				// markOpenAIWSClientVisibleFailure 与 handleOpenAIWSTerminalTransientFailure
 				// 仍要按未改写的原始 payload 判定账号状态，这正是
 				// sanitizeOpenAICapacityShedErrorCodeForClient 注释里写明的前提。
-				clientMessage := upstreamMessage
 				if eventType == "error" || eventType == "response.failed" {
 					if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
 						clientMessage = rewritten
@@ -1197,6 +1268,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				} else {
 					wroteDownstream = true
 					markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
+					if isTerminalEvent {
+						clientModels.finishTerminal(upstreamMessage)
+					}
 				}
 			}
 			if isTerminalEvent {
@@ -1263,6 +1337,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	currentPayload := firstPayload.payloadRaw
 	currentOriginalModel := firstPayload.originalModel
+	currentPublicModel := firstPayload.publicModel
 	currentImageBillingModel := firstPayload.imageBillingModel
 	currentImageSizeTier := firstPayload.imageSizeTier
 	currentImageInputSize := firstPayload.imageInputSize
@@ -1770,7 +1845,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 
-		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
+		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort, currentPublicModel)
 		if relayErr != nil {
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {
@@ -1795,7 +1870,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				finalErr = unwrapped
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
-				hooks.AfterTurn(turn, nil, finalErr)
+				hooks.AfterTurn(turn, result, finalErr)
 			}
 			sessionLease.MarkBroken()
 			return finalErr
@@ -1932,6 +2007,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		currentPayload = nextPayload.payloadRaw
 		currentOriginalModel = nextPayload.originalModel
+		currentPublicModel = nextPayload.publicModel
 		currentImageBillingModel = nextPayload.imageBillingModel
 		currentImageSizeTier = nextPayload.imageSizeTier
 		currentImageInputSize = nextPayload.imageInputSize

@@ -264,7 +264,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
-			writeOpenAIFastPolicyBlockedResponse(c, blocked)
+			writeOpenAIFastPolicyBlockedResponse(c, blocked, account)
 		}
 		return nil, policyErr
 	}
@@ -356,6 +356,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	var resp *http.Response
 	var usage *OpenAIUsage
+	var clientPayloadErr error
 	var firstTokenMs *int
 	responseID := ""
 	imageCount := 0
@@ -446,7 +447,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 		if reqStream {
 			result, handleErr := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
-			if handleErr != nil {
+			if IsOpenAIClientPayloadError(handleErr) && result != nil {
+				clientPayloadErr = handleErr
+			} else if handleErr != nil {
 				if retryBody, fallbackModel, retry := s.applyOpenAIPassthroughCompactFallbackFromSignal(
 					c, account, requestedModel, body, handleErr, compactModelFallbackRetried, resp,
 				); retry {
@@ -473,7 +476,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			imageOutputSizes = result.imageOutputSizes
 		} else {
 			result, handleErr := s.handleNonStreamingResponsePassthrough(ctx, resp, c, account, reqModel, upstreamPassthroughModel)
-			if handleErr != nil {
+			if IsOpenAIClientPayloadError(handleErr) && result != nil {
+				clientPayloadErr = handleErr
+			} else if handleErr != nil {
 				if retryBody, fallbackModel, retry := s.applyOpenAIPassthroughCompactFallbackFromSignal(
 					c, account, requestedModel, body, handleErr, compactModelFallbackRetried, resp,
 				); retry {
@@ -502,7 +507,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	defer func() { _ = resp.Body.Close() }()
 	serviceTier := extractOpenAIServiceTierFromBody(body)
-	s.bindHTTPResponseAccount(ctx, c, account, responseID)
+	if clientPayloadErr == nil {
+		s.bindHTTPResponseAccount(ctx, c, account, responseID)
+	}
 
 	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 	if !account.IsShadow() {
@@ -541,7 +548,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		forwardResult.ImageOutputSizes = imageOutputSizes
 		forwardResult.BillingModel = imageBillingModel
 	}
-	return forwardResult, nil
+	return forwardResult, clientPayloadErr
 }
 
 func logOpenAIPassthroughInstructionsRejected(
@@ -981,7 +988,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
 	// 脱敏后的上游消息，而不是抹成通用文案。
 	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
-		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
+		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, openAIClientErrorMessageForAccount(account, resp.StatusCode, body, upstreamMsg))
 	} else {
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
 	}
@@ -1833,11 +1840,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
+	clientModel := openAIClientRequestedModel(c, originalModel)
+	clientPrivacy := openAIClientPrivacyApplies(account)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	if clientPrivacy {
+		removeOpenAIClientDiagnosticHeaders(c.Writer.Header())
+	}
 
 	// SSE headers
 	c.Header("Content-Type", "text/event-stream")
@@ -1952,7 +1964,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if clientDisconnected || !writePendingLines() {
 			return
 		}
-		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
+		failure := buildOpenAIResponseFailedSSE(responseID, originalModel, bareErrorPayload, failedMessage)
+		if clientPrivacy {
+			failure = buildOpenAIClientResponseFailedSSE(responseID, clientModel, bareErrorPayload, failedMessage)
+		}
+		if _, err := fmt.Fprint(w, failure); err != nil {
 			clientDisconnected = true
 			return
 		}
@@ -1971,6 +1987,25 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	defer putSSEScannerBuf64K(scanBuf)
 	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
+	if clientPrivacy {
+		documentScanner = newOpenAIClientSSEScanner(scanner, maxLineSize)
+	}
+	failClientPayload := func(err error) {
+		stopKeepalive()
+		setOpsUpstreamError(c, http.StatusBadGateway, err.Error(), "")
+		failureDelivered = true
+		pendingLines = nil
+		flushPending = false
+		if clientDisconnected {
+			return
+		}
+		if !c.Writer.Written() {
+			_ = s.writeOpenAINonStreamingProtocolError(resp, c, "The upstream response could not be processed. Please try again.", account)
+		} else {
+			_, _ = fmt.Fprint(w, "\n"+buildOpenAIClientResponseFailedSSE(responseID, clientModel, nil, "The upstream response could not be processed. Please try again."))
+			flusher.Flush()
+		}
+	}
 
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
@@ -2009,7 +2044,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			rawEventType := effectiveOpenAISSEEventType(dataBytes, pendingSSEEventType)
 			observer.ObserveOpenAI(dataBytes, rawEventType)
-			if needModelReplace && strings.Contains(data, mappedModel) {
+			if clientPrivacy && trimmedData != "" && trimmedData != "[DONE]" && !gjson.ValidBytes(dataBytes) {
+				failClientPayload(errOpenAIClientPayload)
+				return resultWithUsage(), errOpenAIClientPayload
+			}
+			if !clientPrivacy && needModelReplace && strings.Contains(data, mappedModel) {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 				if replacedData, replaced := extractOpenAISSEDataLine(line); replaced {
 					dataBytes = []byte(replacedData)
@@ -2122,7 +2161,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 							c.JSON(status, gin.H{
 								"error": gin.H{
 									"type":    errType,
-									"message": errMsg,
+									"message": openAIClientErrorMessageForAccount(account, status, dataBytes, errMsg),
 								},
 							})
 							return resultWithUsage(), fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
@@ -2174,6 +2213,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			}
 			s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
 		}
+		if clientPrivacy {
+			clientLine, err := rewriteOpenAIClientSSELine(line, clientModel)
+			if err != nil {
+				failClientPayload(err)
+				return resultWithUsage(), err
+			}
+			line = clientLine
+		}
 		if line == "" {
 			pendingSSEEventType = ""
 			if suppressCurrentEvent {
@@ -2213,6 +2260,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			responseFailedPending = false
 			failureDelivered = true
 		}
+	}
+	if err := documentScanner.Err(); IsOpenAIClientPayloadError(err) {
+		failClientPayload(err)
+		return resultWithUsage(), err
 	}
 	ensureResponseFailedTerminal()
 	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
@@ -2340,17 +2391,31 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if providerSemanticTimeoutHitOpenAI(account, *usage) {
 		return nil, rejectProviderSemanticTimeoutWithWriter(c, account,
 			providerSemanticTimeoutOpenAIReport("openai.responses.passthrough_json", originalModel, string(body), *usage),
-			func() { _ = s.writeOpenAINonStreamingProtocolError(resp, c, providerSemanticTimeoutMessage) })
+			func() { _ = s.writeOpenAINonStreamingProtocolError(resp, c, providerSemanticTimeoutMessage, account) })
 	}
 	logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, "json", false)
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	if openAIClientPrivacyApplies(account) {
+		removeOpenAIClientDiagnosticHeaders(c.Writer.Header())
+	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/json"
 	}
-	if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
+	if openAIClientPrivacyApplies(account) {
+		clientBody, clientErr := rewriteOpenAIClientPayload(body, openAIClientRequestedModel(c, originalModel))
+		if clientErr != nil {
+			_ = s.writeOpenAINonStreamingProtocolError(resp, c, "The upstream response could not be processed. Please try again.", account)
+			return &openaiNonStreamingResultPassthrough{
+				OpenAIUsage: usage, usage: usage, responseID: extractOpenAIResponseIDFromJSONBytes(body),
+				imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
+				imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
+			}, clientErr
+		}
+		body = clientBody
+	} else if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 		body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 	}
 	body, err = restoreOpenAIResponsesNamespacePayload(c, body)
@@ -2380,6 +2445,16 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // rewrite model fields back to the original requested model.
 func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
 	bodyText := string(body)
+	if openAIClientPrivacyApplies(account) {
+		if err := s.validateOpenAIClientSSEBody(bodyText); err != nil {
+			usage := s.parseSSEUsageFromBody(bodyText)
+			_ = s.writeOpenAINonStreamingProtocolError(resp, c, "The upstream response could not be processed. Please try again.", account)
+			return &openaiNonStreamingResultPassthrough{
+				OpenAIUsage: usage, usage: usage,
+				imageCount: countOpenAIImageOutputsFromSSEBody(bodyText), imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
+			}, err
+		}
+	}
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
@@ -2392,7 +2467,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolErrorWithPayload(resp, c, msg, terminalPayload, account)
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
@@ -2412,7 +2487,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		}
 		finalResponse = supplementCompactionItemFromSSE(c, finalResponse, bodyText)
 		body = finalResponse
-		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
+		if !openAIClientPrivacyApplies(account) && originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 			body = s.replaceModelInResponseBody(body, mappedModel, originalModel)
 		}
 		// Correct tool calls in final response
@@ -2424,7 +2499,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		restoredBody = restoreCodexToolNamesFromContext(c, restoredBody)
 		body = restoredBody
 	} else {
-		if originalModel != "" && mappedModel != "" && originalModel != mappedModel {
+		if !openAIClientPrivacyApplies(account) && originalModel != "" && mappedModel != "" && originalModel != mappedModel {
 			bodyText = s.replaceModelInSSEBody(bodyText, mappedModel, originalModel)
 		}
 		body = []byte(bodyText)
@@ -2433,10 +2508,31 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	if providerSemanticTimeoutHitOpenAI(account, *usage) {
 		return nil, rejectProviderSemanticTimeoutWithWriter(c, account,
 			providerSemanticTimeoutOpenAIReport("openai.responses.passthrough_sse_to_json", originalModel, bodyText, *usage),
-			func() { _ = s.writeOpenAINonStreamingProtocolError(resp, c, providerSemanticTimeoutMessage) })
+			func() { _ = s.writeOpenAINonStreamingProtocolError(resp, c, providerSemanticTimeoutMessage, account) })
 	}
 
+	if openAIClientPrivacyApplies(account) {
+		var clientBody []byte
+		var clientErr error
+		if ok {
+			clientBody, clientErr = rewriteOpenAIClientPayload(body, openAIClientRequestedModel(c, originalModel))
+		} else {
+			maxEventBytes := defaultMaxLineSize
+			if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+				maxEventBytes = s.cfg.Gateway.MaxLineSize
+			}
+			clientBody, clientErr = rewriteOpenAIClientSSEBody(bodyText, openAIClientRequestedModel(c, originalModel), maxEventBytes)
+		}
+		if clientErr != nil {
+			_ = s.writeOpenAINonStreamingProtocolError(resp, c, "The upstream response could not be processed. Please try again.", account)
+			return &openaiNonStreamingResultPassthrough{OpenAIUsage: usage, usage: usage}, clientErr
+		}
+		body = clientBody
+	}
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	if openAIClientPrivacyApplies(account) {
+		removeOpenAIClientDiagnosticHeaders(c.Writer.Header())
+	}
 	logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, usage, terminalType, false)
 
 	contentType := "application/json; charset=utf-8"

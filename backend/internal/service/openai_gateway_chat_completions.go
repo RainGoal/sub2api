@@ -164,6 +164,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(SetOpenAIClientRequestedModel(c, originalModel)); err != nil {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Invalid model in request")
+			return nil, err
+		}
+	}
 
 	// 2. Resolve model mapping early so compat prompt_cache_key injection can
 	// derive a stable seed from the final upstream model family.
@@ -316,7 +322,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-			writeChatCompletionsError(c, http.StatusForbidden, "permission_error", blocked.Message)
+			clientMessage := openAIClientErrorMessageForAccount(account, http.StatusForbidden, []byte(`{"error":{"code":"policy_violation"}}`), blocked.Message)
+			writeChatCompletionsError(c, http.StatusForbidden, "permission_error", clientMessage)
 		}
 		return nil, policyErr
 	}
@@ -503,6 +510,14 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
+	clientModel := originalModel
+	if openAIClientPrivacyApplies(account) {
+		clientModel = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(clientModel); err != nil {
+			writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai chat_completions buffered", requestID)
 	if err != nil {
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
@@ -535,7 +550,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			if clientMsg == "" {
 				clientMsg = "Request blocked by upstream cyber-security policy"
 			}
-			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", clientMsg)
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", openAIClientErrorMessageForAccount(account, http.StatusBadRequest, payload, clientMsg))
 			return nil, fmt.Errorf("openai cyber_policy: %s", msg)
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
@@ -552,10 +567,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 				errMsg = message
 			}
 			MarkResponseCommitted(c)
-			writeChatCompletionsError(c, status, errType, errMsg)
+			writeChatCompletionsError(c, status, errType, openAIClientErrorMessageForAccount(account, status, payload, errMsg))
 			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
-		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
+		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", openAIClientErrorMessageForAccount(account, http.StatusBadGateway, payload, message))
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
@@ -577,9 +592,11 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
-	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, originalModel)
+	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, clientModel)
 
-	if s.responseHeaderFilter != nil {
+	if openAIClientPrivacyApplies(account) {
+		writeOpenAIClientResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	} else if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	// 非流式响应必须为标准 JSON。上游被强制流式，其响应头 Content-Type 为
@@ -670,10 +687,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
+	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header, account)
 
 	state := apicompat.NewResponsesEventToChatState()
 	state.Model = originalModel
+	if openAIClientPrivacyApplies(account) {
+		state.Model = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(state.Model); err != nil {
+			writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
 	// 网关作为计费链路的一环，不能把下游 usage 输出绑定到客户端是否显式请求。
 	// raw Chat Completions 直转路径已经强制透出 usage，这里保持同样行为，避免级联代理计费为 0。
 	state.IncludeUsage = true
@@ -794,6 +818,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					if clientMsg == "" {
 						clientMsg = "Request blocked by upstream cyber-security policy"
 					}
+					clientMsg = openAIClientErrorMessageForAccount(account, http.StatusBadRequest, payloadBytes, clientMsg)
 					if _, err := fmt.Fprint(c.Writer, buildChatStreamErrorSSE(code, clientMsg)); err == nil {
 						_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
 						if fl, ok := c.Writer.(http.Flusher); ok {
@@ -827,6 +852,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				defaultStatus, defaultErrType, defaultMsg = status, errType, errMsg
 				MarkResponseCommitted(c)
 			}
+			defaultMsg = openAIClientErrorMessageForAccount(account, defaultStatus, payloadBytes, defaultMsg)
 			errorPayload, _ := json.Marshal(gin.H{
 				"error": gin.H{
 					"type":    defaultErrType,

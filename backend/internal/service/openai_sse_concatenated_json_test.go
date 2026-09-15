@@ -151,13 +151,13 @@ func TestOpenAIWSv2RejectsMalformedEventAfterWritingDownstream(t *testing.T) {
 
 	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "after downstream output")
-	require.Nil(t, result)
+	require.True(t, IsOpenAIClientPayloadError(err))
+	require.NotNil(t, result, "display failures preserve the already observed result")
 	require.True(t, captureConn.closed)
 	require.Contains(t, recorder.Body.String(), `"delta":"ok"`)
 	require.NotContains(t, recorder.Body.String(), "unexpected-tail")
 	require.NotContains(t, recorder.Body.String(), "response.in_progress")
-	assertOpenAISSEFrames(t, recorder.Body.String(), []string{"response.output_text.delta"})
+	assertOpenAISSEFrames(t, recorder.Body.String(), []string{"response.output_text.delta", "error"})
 }
 
 func testOpenAIWSv2RejectsMalformedEventBeforeWritingDownstream(t *testing.T, malformedMessage []byte) {
@@ -214,11 +214,14 @@ func testOpenAIWSv2RejectsMalformedEventBeforeWritingDownstream(t *testing.T, ma
 
 	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`))
 	require.Error(t, err)
+	require.True(t, IsOpenAIClientPayloadError(err))
 	var fallbackErr *openAIWSFallbackError
-	require.ErrorAs(t, err, &fallbackErr)
-	require.Equal(t, "invalid_event_json", fallbackErr.Reason)
-	require.Nil(t, result)
-	require.Empty(t, recorder.Body.String())
+	require.NotErrorAs(t, err, &fallbackErr, "display failure must not cause another upstream generation")
+	require.NotNil(t, result)
+	assertOpenAISSEFrames(t, recorder.Body.String(), []string{"error"})
+	require.NotContains(t, recorder.Body.String(), "unexpected-tail")
+	require.NotContains(t, recorder.Body.String(), `"delta":"ok"`)
+	require.Len(t, captureConn.writes, 1)
 	require.True(t, captureConn.closed)
 }
 

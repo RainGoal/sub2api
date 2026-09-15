@@ -619,7 +619,9 @@ func TestForwardAsChatCompletions_StreamBareErrorAfterOutputDoesNotFailOver(t *t
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
 	require.Contains(t, rec.Body.String(), "partial")
-	require.Contains(t, rec.Body.String(), "temporary upstream failure")
+	require.Contains(t, err.Error(), "temporary upstream failure")
+	require.Contains(t, rec.Body.String(), "Upstream request failed")
+	require.NotContains(t, rec.Body.String(), "temporary upstream failure")
 	require.NotContains(t, rec.Body.String(), "[DONE]")
 }
 

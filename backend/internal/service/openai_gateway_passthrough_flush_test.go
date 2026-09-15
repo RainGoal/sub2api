@@ -185,8 +185,10 @@ func TestOpenAIStreamingPassthroughNonRetryableFailedBeforeOutputFlushesAtBounda
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
 	require.NotNil(t, result)
-	require.Equal(t, upstream, recorder.Body.String())
-	require.Equal(t, []int{len(upstream)}, writer.flushBodyLengths)
+	expected := "event: response.failed\n" +
+		`data: {"error":{"code":"content_policy","message":"The request was rejected by the safety policy."},"type":"response.failed","usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6}}` + "\n\n"
+	require.Equal(t, expected, recorder.Body.String())
+	require.Equal(t, []int{len(expected)}, writer.flushBodyLengths)
 	require.Equal(t, 6, result.usage.InputTokens)
 	require.Zero(t, result.usage.OutputTokens)
 }
@@ -245,8 +247,10 @@ func TestOpenAIStreamingPassthroughFailedAfterOutputFlushesAtBoundaryAndKeepsUsa
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
 	require.NotNil(t, result)
-	require.Equal(t, upstream, recorder.Body.String())
-	require.Equal(t, []int{len(firstOutput), len(upstream)}, writer.flushBodyLengths)
+	expected := firstOutput + "event: response.failed\n" +
+		`data: {"error":{"code":"server_error","message":"Upstream request failed"},"type":"response.failed","usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}` + "\n\n"
+	require.Equal(t, expected, recorder.Body.String())
+	require.Equal(t, []int{len(firstOutput), len(expected)}, writer.flushBodyLengths)
 	require.Equal(t, 7, result.usage.InputTokens)
 	require.Equal(t, 2, result.usage.OutputTokens)
 }

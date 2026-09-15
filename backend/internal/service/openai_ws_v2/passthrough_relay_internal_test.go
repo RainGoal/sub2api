@@ -127,6 +127,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 			drop,
 			nil,
 			nil,
@@ -154,6 +155,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			time.Now(),
 			time.Now,
 			&relayState{},
+			nil,
 			nil,
 			nil,
 			nil,
@@ -196,6 +198,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 			drop,
 			nil,
 			dropped,
@@ -225,6 +228,40 @@ func TestRunIdleWatchdog_NoTimeoutWhenDisabled(t *testing.T) {
 		t.Fatal("unexpected idle timeout signal")
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func TestRunUpstreamToClient_NewTurnRateLimitAfterTerminalWrite(t *testing.T) {
+	t.Parallel()
+	state := &relayState{}
+	stop := errors.New("new turn was rate limited before output")
+	exitCh := make(chan relayExitSignal, 1)
+	upstream := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_first"}}`)},
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"error","error":{"code":"rate_limit_exceeded"}}`)},
+	}, true)
+	runUpstreamToClient(
+		context.Background(), upstream,
+		func(coderws.MessageType, []byte) error { return nil }, time.Now(), time.Now, state,
+		nil, nil, nil,
+		func(_ coderws.MessageType, payload []byte, wroteDownstream bool) error {
+			if gjson.GetBytes(payload, "type").String() == "error" {
+				require.False(t, wroteDownstream, "completed turn must not overwrite the next turn's reset")
+				return stop
+			}
+			return nil
+		},
+		nil,
+		func(_ coderws.MessageType, _ []byte, writeErr error) {
+			require.NoError(t, writeErr)
+			// The terminal callback releases the lifecycle lock; an immediate
+			// new response.create may reset this flag before the callback returns.
+			state.turnWroteDownstream.Store(false)
+		},
+		nil, nil, nil, nil, func() {}, nil, exitCh,
+	)
+	sig := <-exitCh
+	require.ErrorIs(t, sig.err, stop)
+	require.False(t, state.turnWroteDownstream.Load())
 }
 
 func TestHelperFunctionsCoverage(t *testing.T) {

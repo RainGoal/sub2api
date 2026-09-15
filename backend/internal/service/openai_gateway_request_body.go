@@ -1726,22 +1726,27 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context, 
 
 // writeOpenAIFastPolicyBlockedResponse writes a 403 JSON response for a
 // request blocked by the OpenAI fast policy.
-func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlockedError) {
+func writeOpenAIFastPolicyBlockedResponse(c *gin.Context, err *OpenAIFastBlockedError, accounts ...*Account) {
 	if c == nil || err == nil {
 		return
 	}
 	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	var account *Account
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	clientMessage := openAIClientErrorMessageForAccount(account, http.StatusForbidden, []byte(`{"error":{"code":"policy_violation"}}`), err.Message)
 	// body-signal compact 心跳可能已把响应头提交为 200（长排队后才进入
 	// Forward），此时以 response.failed 终止事件回传；未提交时先停拍再写
 	// JSON，保持原状态码语义（#3887）。
 	if StopOpenAICompactSSEKeepaliveCommitted(c) {
-		writeOpenAICompactSSEFailureMessage(c, http.StatusForbidden, "permission_error", err.Message)
+		writeOpenAICompactSSEFailureMessage(c, http.StatusForbidden, "permission_error", clientMessage)
 		return
 	}
 	c.JSON(http.StatusForbidden, gin.H{
 		"error": gin.H{
 			"type":    "permission_error",
-			"message": err.Message,
+			"message": clientMessage,
 		},
 	})
 }

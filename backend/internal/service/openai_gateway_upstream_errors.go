@@ -451,7 +451,7 @@ func openAICapacityShedClientMessage(upstreamMsg string, body []byte) string {
 	} {
 		candidate = sanitizeUpstreamErrorMessage(strings.TrimSpace(candidate))
 		if candidate != "" && isOpenAICapacityShedMessage(candidate) {
-			return candidate
+			return OpenAIClientErrorMessage(http.StatusServiceUnavailable, body, candidate)
 		}
 	}
 	return "Upstream service is temporarily overloaded, please retry later"
@@ -521,7 +521,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
-	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
+	// cyber_policy 硬阻断：保留错误协议和状态，不重包成通用 502，不冷却账号。
 	// 当前请求恒透传（需求1）；标记供 handler 事后写风控/邮件。400 cyber 不可 failover
 	// （shouldFailoverUpstreamError(400)=false），故走到此处即可安全早返回。
 	if hit, code, cyberMsg := detectOpenAICyberPolicy(body); hit {
@@ -533,11 +533,23 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		})
 		setOpsUpstreamError(c, resp.StatusCode, cyberMsg, truncateString(string(body), 2048))
 		writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		clientBody := body
+		if openAIClientPrivacyApplies(account) {
+			removeOpenAIClientDiagnosticHeaders(c.Writer.Header())
+			var privacyErr error
+			clientBody, privacyErr = sanitizeOpenAIClientErrorPayload(body, resp.StatusCode)
+			if privacyErr == nil {
+				clientBody, privacyErr = rewriteOpenAIClientModel(clientBody, openAIClientRequestedModel(c, gjson.GetBytes(requestBody, "model").String()))
+			}
+			if privacyErr != nil {
+				clientBody, _ = json.Marshal(gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": OpenAIClientErrorMessage(resp.StatusCode, body, cyberMsg)}})
+			}
+		}
 		contentType := resp.Header.Get("Content-Type")
 		if contentType == "" {
 			contentType = "application/json"
 		}
-		c.Data(resp.StatusCode, contentType, body)
+		c.Data(resp.StatusCode, contentType, clientBody)
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
 		}
@@ -614,10 +626,14 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
+		clientMsg := errMsg
+		if openAIClientPrivacyApplies(account) {
+			clientMsg = OpenAIClientErrorMessage(resp.StatusCode, body, errMsg)
+		}
 		c.JSON(status, gin.H{
 			"error": gin.H{
 				"type":    errType,
-				"message": errMsg,
+				"message": clientMsg,
 			},
 		})
 		if upstreamMsg == "" {
@@ -703,7 +719,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	// 回真实状态码 + invalid_request_error + 真实 message；/v1/images 还额外透传
 	// code/param。原生 Responses 是唯一漏掉的一条。
 	if isOpenAIDeterministicClientError(resp.StatusCode) {
-		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, upstreamMsg)
+		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, upstreamMsg, account)
 		if upstreamMsg == "" {
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
@@ -737,7 +753,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		errMsg = "Upstream request failed"
 	}
 	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
-		errMsg = upstreamMsg
+		errMsg = openAIClientErrorMessageForAccount(account, resp.StatusCode, body, upstreamMsg)
 	}
 
 	c.JSON(statusCode, gin.H{
@@ -788,6 +804,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		if clientMsg == "" {
 			clientMsg = "Request blocked by upstream cyber-security policy"
 		}
+		clientMsg = openAIClientErrorMessageForAccount(account, resp.StatusCode, body, clientMsg)
 		writeError(c, resp.StatusCode, "invalid_request_error", clientMsg)
 		if cyberMsg == "" {
 			return nil, fmt.Errorf("openai cyber_policy: %d", resp.StatusCode)
@@ -824,7 +841,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		http.StatusBadGateway, "api_error", "Upstream request failed",
 	); matched {
 		MarkResponseCommitted(c)
-		writeError(c, status, errType, errMsg)
+		writeError(c, status, errType, openAIClientErrorMessageForAccount(account, resp.StatusCode, body, errMsg))
 		if upstreamMsg == "" {
 			upstreamMsg = errMsg
 		}
@@ -904,6 +921,6 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		errType = "api_error"
 	}
 
-	writeError(c, resp.StatusCode, errType, upstreamMsg)
+	writeError(c, resp.StatusCode, errType, openAIClientErrorMessageForAccount(account, resp.StatusCode, body, upstreamMsg))
 	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 }

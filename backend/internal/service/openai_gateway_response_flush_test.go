@@ -381,7 +381,7 @@ func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T)
 		require.Equal(t, 3, result.usage.InputTokens)
 		gotBody, flushes := recorder.snapshot()
 		expectedBody := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n" +
-			"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"}}}\n"
+			"data: {\"response\":{\"error\":{\"code\":\"safety_error\",\"message\":\"The request was rejected by the safety policy.\"}},\"type\":\"response.failed\"}\n"
 		require.Equal(t, expectedBody, gotBody)
 		require.Len(t, flushes, 2)
 		require.Contains(t, flushes[1], "response.failed")
@@ -543,6 +543,7 @@ func TestOpenAIResponseFlush_ReusedTypeKeepsSSEBytesAndTerminalSemantics(t *test
 		name       string
 		body       string
 		flushCount int
+		invalid    bool
 	}{
 		{
 			name:       "whitespace around done",
@@ -550,9 +551,9 @@ func TestOpenAIResponseFlush_ReusedTypeKeepsSSEBytesAndTerminalSemantics(t *test
 			flushCount: 1,
 		},
 		{
-			name:       "invalid JSON before done",
-			body:       "data: {\"type\":\n\ndata: [DONE]\n\n",
-			flushCount: 2,
+			name:    "invalid JSON before done",
+			body:    "data: {\"type\":\n\ndata: [DONE]\n\n",
+			invalid: true,
 		},
 	}
 
@@ -562,6 +563,14 @@ func TestOpenAIResponseFlush_ReusedTypeKeepsSSEBytesAndTerminalSemantics(t *test
 
 			result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(tt.body)), config.GatewayConfig{})
 
+			if tt.invalid {
+				require.ErrorIs(t, err, errOpenAIClientPayload)
+				require.NotNil(t, result)
+				gotBody, flushes := recorder.snapshot()
+				require.JSONEq(t, `{"error":{"type":"upstream_error","message":"Upstream request failed"}}`, gotBody)
+				require.Empty(t, flushes)
+				return
+			}
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			gotBody, flushes := recorder.snapshot()

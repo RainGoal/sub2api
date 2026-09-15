@@ -128,7 +128,7 @@ func TestHandleErrorResponse_Deterministic400IsNotRewrappedAs502(t *testing.T) {
 	require.Equal(t, "invalid_function_parameters", gjson.Get(body, "error.code").String())
 	require.Equal(t, "input[8].tools[1].tools[2].parameters", gjson.Get(body, "error.param").String(),
 		"param 是客户端定位哪个字段非法的唯一线索")
-	require.Contains(t, gjson.Get(body, "error.message").String(), "Invalid schema for function 'automation_update'")
+	require.Equal(t, "Invalid schema for function parameters.", gjson.Get(body, "error.message").String())
 	require.NotContains(t, body, "Upstream request failed")
 
 	// 确定性请求错误不该换号重试——换任何账号都是同样的结果。
@@ -275,7 +275,8 @@ func TestHandleErrorResponse_PassthroughRuleStillWinsOver400Branch(t *testing.T)
 
 	require.Error(t, err)
 	require.Equal(t, http.StatusTeapot, rec.Code, "命中透传规则时必须按规则的状态码回写")
-	require.Equal(t, "自定义文案", gjson.Get(rec.Body.String(), "error.message").String())
+	require.Equal(t, "Invalid schema for function parameters.", gjson.Get(rec.Body.String(), "error.message").String(),
+		"规则仍决定状态码，但不能绕过公开诊断净化")
 }
 
 func TestIsOpenAIDeterministicClientError(t *testing.T) {
@@ -307,14 +308,14 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 			wantType:    "invalid_request_error",
 			wantCode:    "invalid_function_parameters",
 			wantParam:   "input[8].tools[1].tools[2].parameters",
-			wantMessage: "Invalid schema for function 'automation_update'",
+			wantMessage: "Invalid schema for function parameters.",
 		},
 		{
 			name:        "upstream_type_preserved",
 			body:        `{"error":{"type":"invalid_prompt","message":"blocked"}}`,
 			upstreamMsg: "blocked",
 			wantType:    "invalid_prompt",
-			wantMessage: "blocked",
+			wantMessage: "The request was rejected by the safety policy.",
 		},
 		{
 			name:        "empty_body_falls_back",
@@ -324,12 +325,12 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 			wantMessage: openAIUpstreamClientErrorFallbackMessage,
 		},
 		{
-			// 调用方传入的 message 已脱敏，必须原样使用，不得回落读取原始 body。
+			// 调用方做过凭据脱敏，公开展示还需要模型身份净化，原始秘密不能回流。
 			name:        "sanitized_message_wins_over_raw_body",
 			body:        `{"error":{"message":"failed for key=secret123"}}`,
 			upstreamMsg: "failed for key=***",
 			wantType:    "invalid_request_error",
-			wantMessage: "failed for key=***",
+			wantMessage: openAIUpstreamClientErrorFallbackMessage,
 		},
 	}
 
@@ -354,6 +355,50 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 				require.Equal(t, tc.wantParam, gjson.Get(body, "error.param").String())
 			}
 			require.NotContains(t, body, "secret123", "原始 body 里的敏感串不得泄漏")
+		})
+	}
+}
+
+func TestHandleErrorResponse_ClientPrivacyKeepsOriginalDiagnostics(t *testing.T) {
+	for _, code := range []string{"context_length_exceeded", "invalid_function_parameters", "cyber_policy"} {
+		t.Run(code, func(t *testing.T) {
+			c, rec := newOpenAIUpstreamErrorTestContext(t)
+			SetOpenAIClientRequestedModel(c, "public-A")
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{LogUpstreamErrorBody: true}}}
+			body := `{"error":{"type":"invalid_request_error","code":"` + code + `","message":"internal-C rejected the request","param":"input[8].tools[1].parameters","debug":"internal-C"},"debug":"internal-C"}`
+			_, err := svc.handleErrorResponse(context.Background(), newOpenAIUpstreamErrorResponse(400, body), c, newOpenAIUpstreamErrorTestAccount(), nil)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "internal-C", "internal diagnostics retain the provider message")
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.NotContains(t, rec.Body.String(), "internal-C")
+			require.Equal(t, code, gjson.Get(rec.Body.String(), "error.code").String())
+			require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+			require.Contains(t, c.GetString(OpsUpstreamErrorMessageKey), "internal-C")
+			require.Contains(t, c.GetString(OpsUpstreamErrorDetailKey), "internal-C")
+			var failoverErr *UpstreamFailoverError
+			require.False(t, errors.As(err, &failoverErr), "public presentation must not trigger retries")
+		})
+	}
+}
+
+func TestHandleCompatErrorResponse_ClientPrivacyIsOpenAIOnly(t *testing.T) {
+	for _, platform := range []string{PlatformOpenAI, PlatformDeepseek} {
+		t.Run(platform, func(t *testing.T) {
+			c, rec := newOpenAIUpstreamErrorTestContext(t)
+			account := &Account{ID: 1, Platform: platform, Type: AccountTypeAPIKey}
+			body := `{"error":{"type":"invalid_request_error","code":"invalid_value","message":"internal-C rejected the value"}}`
+			writeError := func(c *gin.Context, status int, errType, message string) {
+				c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
+			}
+			_, err := (&OpenAIGatewayService{}).handleCompatErrorResponse(newOpenAIUpstreamErrorResponse(400, body), c, account, writeError)
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Contains(t, c.GetString(OpsUpstreamErrorMessageKey), "internal-C")
+			if platform == PlatformOpenAI {
+				require.NotContains(t, rec.Body.String(), "internal-C")
+			} else {
+				require.Contains(t, rec.Body.String(), "internal-C")
+			}
 		})
 	}
 }

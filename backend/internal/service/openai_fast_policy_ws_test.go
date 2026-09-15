@@ -680,7 +680,7 @@ func TestWSResponseCreate_IngressBlockSendsErrorEventAndSkipsUpstream(t *testing
 	// B1 regression: event_id + error.code must be populated.
 	require.Equal(t, "policy_violation", gjson.GetBytes(event, "error.code").String())
 	require.NotEmpty(t, gjson.GetBytes(event, "event_id").String(), "event_id must be present so clients can correlate")
-	require.Contains(t, gjson.GetBytes(event, "error.message").String(), "ws priority blocked for testing")
+	require.Equal(t, "Request blocked by policy.", gjson.GetBytes(event, "error.message").String())
 
 	// Next read must surface the close frame (as a CloseError). This
 	// asserts the [error event, close] ordering — i.e. the close did NOT
@@ -700,6 +700,10 @@ func TestWSResponseCreate_IngressBlockSendsErrorEventAndSkipsUpstream(t *testing
 		var closeErr *OpenAIWSClientCloseError
 		require.True(t, errors.As(serverErr, &closeErr), "block 应返回 OpenAIWSClientCloseError，得到 %T: %v", serverErr, serverErr)
 		require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
+		require.Equal(t, "Request blocked by policy.", closeErr.Reason())
+		var blockedErr *OpenAIFastBlockedError
+		require.ErrorAs(t, serverErr, &blockedErr)
+		require.Equal(t, "ws priority blocked for testing", blockedErr.Message)
 	case <-time.After(5 * time.Second):
 		t.Fatal("等待 ingress 关闭超时")
 	}

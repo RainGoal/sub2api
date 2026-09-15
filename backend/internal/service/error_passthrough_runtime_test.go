@@ -196,7 +196,8 @@ func TestOpenAIHandleErrorResponse_AppliesRuleFor422(t *testing.T) {
 	errField, ok := payload["error"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "upstream_error", errField["type"])
-	assert.Equal(t, "OpenAI上游失败", errField["message"])
+	assert.Equal(t, "Invalid schema for function parameters.", errField["message"])
+	assert.Equal(t, "Invalid schema for field messages", c.GetString(OpsUpstreamErrorMessageKey))
 }
 
 func TestGeminiWriteGeminiMappedError_AppliesRuleFor422(t *testing.T) {

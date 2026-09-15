@@ -67,9 +67,10 @@ func TestProxyResponsesWebSocketFromClient_RewritesCapacityShedCodeForClient(t *
 			},
 			wantContains: []string{
 				`"code":"workspace_suspended"`,
-				"workspace is suspended",
+				`"type":"invalid_request_error"`,
+				openAIUpstreamClientErrorFallbackMessage,
 			},
-			wantAbsent: []string{"server_error"},
+			wantAbsent: []string{"server_error", "workspace is suspended"},
 		},
 	}
 

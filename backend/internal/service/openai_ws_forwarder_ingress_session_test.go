@@ -621,6 +621,65 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_FollowupCreateCa
 	require.Equal(t, "resp_omit_model_1", gjson.Get(requestToJSONString(captureConn.writes[1]), "previous_response_id").String())
 }
 
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_RejectsExplicitInvalidModel(t *testing.T) {
+	for _, phase := range []string{"first", "followup"} {
+		for _, tc := range []struct{ name, model string }{
+			{"null", `null`},
+			{"empty", `""`},
+			{"spaces", `"   "`},
+			{"whitespace", `" \t\r\n "`},
+			{"number", `123`},
+			{"boolean", `false`},
+			{"object", `{}`},
+			{"array", `[]`},
+			{"control_character", `"client\u0000model"`},
+			{"leading_control_character", `"\tclient-model"`},
+		} {
+			t.Run(phase+"/"+tc.name, func(t *testing.T) {
+				svc, account, dialer := newWSClientModelPrivacyService(t, [][]byte{
+					[]byte(`{"type":"response.completed","response":{"id":"resp_first","model":"private-first"}}`),
+					[]byte(`{"type":"response.completed","response":{"id":"resp_second","model":"private-second"}}`),
+				})
+				svc.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+				svc.cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				server, serverErr := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(*gin.Context) *OpenAIWSIngressHooks {
+					return &OpenAIWSIngressHooks{InitialRequestModel: "public-first"}
+				})
+				defer server.Close()
+				invalid := `{"type":"response.create","model":` + tc.model + `,"stream":false}`
+				first := invalid
+				wantWrites := 0
+				if phase == "followup" {
+					first = `{"type":"response.create","model":"client-first","stream":false}`
+					wantWrites = 1
+				}
+				client := dialPassthroughLifecycleClientWithPayload(t, server, first)
+				defer func() { _ = client.CloseNow() }()
+				if phase == "followup" {
+					firstResponse := readWSClientModelPrivacyFrame(t, client, coderws.MessageText)
+					require.Equal(t, "public-first", gjson.GetBytes(firstResponse, "response.model").String())
+					writeWSClientModelPrivacyFrame(t, client, coderws.MessageText, invalid)
+				}
+				readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+				_, payload, readErr := client.Read(readCtx)
+				cancelRead()
+				require.Error(t, readErr, "invalid explicit model reached upstream: %s", payload)
+				select {
+				case err := <-serverErr:
+					var closeErr *OpenAIWSClientCloseError
+					require.ErrorAs(t, err, &closeErr)
+					require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
+				case <-time.After(3 * time.Second):
+					t.Fatal("invalid explicit model did not end ingress")
+				}
+				require.Len(t, dialer.conn.writes, wantWrites, "invalid requests must be rejected before upstream execution")
+			})
+		}
+	}
+}
+
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridgeRespectsResponsesLite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1137,8 +1196,14 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridg
 		},
 		{
 			name:      "other event type",
-			payload:   `{"type":"session.update","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
+			payload:   `{"type":"session.update","model":"gpt-5.1","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
 			threshold: 1,
+		},
+		{
+			name:            "missing public model",
+			payload:         `{"type":"response.create","padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`,
+			threshold:       1024,
+			wantRelayReject: true,
 		},
 		{
 			name:            "malformed data",

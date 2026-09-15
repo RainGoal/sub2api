@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -2312,7 +2311,10 @@ func TestOpenAIStreamingPolicyResponseFailedBeforeOutputPassesThrough(t *testing
 	require.False(t, errors.As(err, &failoverErr))
 	require.True(t, c.Writer.Written())
 	require.Contains(t, rec.Body.String(), "response.failed")
-	require.Contains(t, rec.Body.String(), "high-risk cyber activity")
+	require.Contains(t, err.Error(), "high-risk cyber activity", "internal diagnostics retain the upstream reason")
+	require.Contains(t, rec.Body.String(), `"type":"safety_error"`)
+	require.Contains(t, rec.Body.String(), "The request was rejected by the safety policy.")
+	require.NotContains(t, rec.Body.String(), "high-risk cyber activity")
 }
 
 func TestOpenAIStreamingClientDisconnectDrainsUpstreamUsage(t *testing.T) {
@@ -2734,15 +2736,15 @@ func TestOpenAIStreamingTooLong(t *testing.T) {
 		_, _ = pw.Write([]byte(payload))
 	}()
 
-	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 2}, time.Now(), "model", "model")
+	result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 2}, time.Now(), "model", "model")
 	_ = pr.Close()
 
-	if !errors.Is(err, bufio.ErrTooLong) {
-		t.Fatalf("expected ErrTooLong, got %v", err)
-	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "response_too_large") {
-		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
-	}
+	require.ErrorIs(t, err, errOpenAIClientPayload)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "presentation size failures must not repeat the upstream request")
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.JSONEq(t, `{"error":{"type":"upstream_error","message":"Upstream request failed"}}`, rec.Body.String())
 }
 
 func TestOpenAINonStreamingContentTypePassThrough(t *testing.T) {
@@ -3821,7 +3823,7 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.failed","error":{"message":"upstream rejected request"}}`,
+		`data: {"type":"response.failed","error":{"message":"upstream rejected request for private-C"}}`,
 		`data: [DONE]`,
 	}, "\n"))
 
@@ -3829,7 +3831,11 @@ func TestHandleSSEToJSON_ResponseFailedWithoutAccountReturnsProtocolError(t *tes
 	require.Nil(t, usage)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Contains(t, rec.Body.String(), "upstream rejected request")
+	require.JSONEq(t, `{"error":{"type":"upstream_error","message":"Upstream request failed"}}`, rec.Body.String())
+	require.ErrorContains(t, err, "upstream rejected request for private-C")
+	require.Equal(t, "upstream rejected request for private-C", c.GetString(OpsUpstreamErrorMessageKey))
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
 	require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 }
 
@@ -3944,7 +3950,7 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
-	cyberBody := `{"error":{"code":"cyber_policy","message":"flagged for cyber policy"}}`
+	cyberBody := `{"error":{"code":"cyber_policy","message":"private-C flagged for cyber policy"}}`
 	resp := &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -3960,7 +3966,17 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadRequest, gotStatus)
 	require.Equal(t, "invalid_request_error", gotType)
-	require.Contains(t, gotMsg, "flagged for cyber policy")
+	require.Equal(t, "Request blocked by upstream cyber-security policy", gotMsg)
+	require.NotContains(t, gotMsg, "private-C")
 	require.NotContains(t, gotMsg, "Upstream request failed")
-	require.NotNil(t, GetOpsCyberPolicy(c))
+	mark := GetOpsCyberPolicy(c)
+	require.NotNil(t, mark)
+	require.Equal(t, "cyber_policy", mark.Code)
+	require.Equal(t, "private-C flagged for cyber policy", mark.Message)
+	require.Equal(t, cyberBody, mark.Body)
+	require.Equal(t, http.StatusBadRequest, mark.UpstreamStatus)
+	require.Equal(t, mark.Message, c.GetString(OpsUpstreamErrorMessageKey))
+	require.ErrorContains(t, err, mark.Message)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
 }

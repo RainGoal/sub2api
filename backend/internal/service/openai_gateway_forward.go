@@ -149,6 +149,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	requestView := newOpenAIRequestView(body)
 	reqModel, reqStream, promptCacheKey := requestView.Model, requestView.Stream, requestView.PromptCacheKey
 	originalModel := reqModel
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(SetOpenAIClientRequestedModel(c, originalModel)); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+				"type": "invalid_request_error", "message": "model must be a non-empty valid string", "param": "model",
+			}})
+			return nil, err
+		}
+	}
 
 	if account.Platform == PlatformGrok {
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
@@ -436,7 +444,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err := validateOpenAIResponsesImageModel(decoded, upstreamModel); err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "model"}})
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": openAIClientErrorMessageForAccount(account, http.StatusBadRequest, nil, err.Error()), "param": "model"}})
 			return nil, err
 		}
 		if hasOpenAIImageGenerationTool(decoded) {
@@ -459,7 +467,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err := validateCodexSparkInput(decoded, upstreamModel); err != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error(), "param": "input"}})
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": openAIClientErrorMessageForAccount(account, http.StatusBadRequest, nil, err.Error()), "param": "input"}})
 			return nil, err
 		}
 	}
@@ -649,7 +657,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					msg = fmt.Sprintf("openai service_tier=%s is not allowed for model %s", normTier, upstreamModel)
 				}
 				blocked := &OpenAIFastBlockedError{Message: msg}
-				writeOpenAIFastPolicyBlockedResponse(c, blocked)
+				writeOpenAIFastPolicyBlockedResponse(c, blocked, account)
 				return nil, blocked
 			case BetaPolicyActionFilter:
 				markPatchDelete("service_tier")
@@ -888,6 +896,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if wsErr == nil {
 				break
 			}
+			if IsOpenAIClientPayloadError(wsErr) {
+				break
+			}
 			if c != nil && c.Writer != nil && c.Writer.Written() {
 				break
 			}
@@ -965,6 +976,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				)
 			}
 			break
+		}
+		if IsOpenAIClientPayloadError(wsErr) {
+			if wsResult != nil {
+				wsResult.UpstreamModel = upstreamModel
+				if wsResult.BillingModel == "" {
+					wsResult.BillingModel = billingModel
+				}
+				if wsResult.ImageCount > 0 {
+					wsResult.ImageSize = imageSizeTier
+					wsResult.ImageInputSize = imageInputSize
+					wsResult.BillingModel = imageBillingModel
+				}
+			}
+			return wsResult, wsErr
 		}
 		if wsErr == nil {
 			firstTokenMs := int64(0)
@@ -1194,6 +1219,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Handle normal response
 		var usage *OpenAIUsage
+		var clientPayloadErr error
 		var firstTokenMs *int
 		responseID := ""
 		imageCount := 0
@@ -1201,7 +1227,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		var imageOutputSizes []string
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
-			if err != nil {
+			if IsOpenAIClientPayloadError(err) && streamResult != nil {
+				clientPayloadErr = err
+			} else if err != nil {
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
@@ -1248,7 +1276,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			searchCount = streamResult.searchCount
 		} else {
 			nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
-			if err != nil {
+			if IsOpenAIClientPayloadError(err) && nonStreamResult != nil {
+				clientPayloadErr = err
+			} else if err != nil {
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
@@ -1270,7 +1300,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageOutputSizes = nonStreamResult.imageOutputSizes
 			searchCount = nonStreamResult.searchCount
 		}
-		s.bindHTTPResponseAccount(ctx, c, account, responseID)
+		if clientPayloadErr == nil {
+			s.bindHTTPResponseAccount(ctx, c, account, responseID)
+		}
 
 		// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
 		// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
@@ -1317,7 +1349,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if searchCount > 0 && account != nil && account.IsGrok() {
 			forwardResult.SearchCount = searchCount
 		}
-		return forwardResult, nil
+		return forwardResult, clientPayloadErr
 	}
 }
 

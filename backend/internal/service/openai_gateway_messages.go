@@ -67,6 +67,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 	anthropicDigestReq := cloneAnthropicRequestForDigest(&anthropicReq)
 	originalModel := anthropicReq.Model
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(SetOpenAIClientRequestedModel(c, originalModel)); err != nil {
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid model in request")
+			return nil, err
+		}
+	}
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	normalizedModel := anthropicReq.Model
 	clientStream := anthropicReq.Stream // client's original stream preference
@@ -294,7 +300,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-			writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+			clientMessage := openAIClientErrorMessageForAccount(account, http.StatusForbidden, []byte(`{"error":{"code":"policy_violation"}}`), blocked.Message)
+			writeAnthropicError(c, http.StatusForbidden, "forbidden_error", clientMessage)
 		}
 		return nil, policyErr
 	}
@@ -574,6 +581,14 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
+	clientModel := originalModel
+	if openAIClientPrivacyApplies(account) {
+		clientModel = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(clientModel); err != nil {
+			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, c, "openai messages buffered", requestID)
 	if err != nil {
 		var readErr *openAICompatBufferedReadError
@@ -609,7 +624,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 			if clientMsg == "" {
 				clientMsg = "Request blocked by upstream cyber-security policy"
 			}
-			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", clientMsg)
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", openAIClientErrorMessageForAccount(account, http.StatusBadRequest, payload, clientMsg))
 			return nil, fmt.Errorf("openai cyber_policy: %s", msg)
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
@@ -626,10 +641,10 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 				errMsg = message
 			}
 			MarkResponseCommitted(c)
-			writeAnthropicError(c, status, errType, errMsg)
+			writeAnthropicError(c, status, errType, openAIClientErrorMessageForAccount(account, status, payload, errMsg))
 			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
-		writeAnthropicError(c, http.StatusBadGateway, "api_error", message)
+		writeAnthropicError(c, http.StatusBadGateway, "api_error", openAIClientErrorMessageForAccount(account, http.StatusBadGateway, payload, message))
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	// [provider-semantic-timeout] 上游 200 但 usage=1000/1000 视为超时占位响应；可整体移除。
@@ -646,9 +661,11 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	// accumulated delta events so the client receives the full content.
 	acc.SupplementResponseOutput(finalResponse)
 
-	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, originalModel)
+	anthropicResp := apicompat.ResponsesToAnthropic(finalResponse, clientModel)
 
-	if s.responseHeaderFilter != nil {
+	if openAIClientPrivacyApplies(account) {
+		writeOpenAIClientResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	} else if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.Header("Content-Type", "application/json; charset=utf-8")
@@ -922,10 +939,17 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
+	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header, account)
 
 	state := apicompat.NewResponsesEventToAnthropicState()
 	state.Model = originalModel
+	if openAIClientPrivacyApplies(account) {
+		state.Model = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(state.Model); err != nil {
+			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
 	var usage OpenAIUsage
 	responseID := ""
 	var firstTokenMs *int
@@ -1046,6 +1070,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 						if clientMsg == "" {
 							clientMsg = "Request blocked by upstream cyber-security policy"
 						}
+						clientMsg = openAIClientErrorMessageForAccount(account, http.StatusBadRequest, payloadBytes, clientMsg)
 						if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE("invalid_request_error", clientMsg)); err == nil {
 							c.Writer.Flush()
 						}
@@ -1080,11 +1105,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				}
 				if !clientDisconnected {
 					if !clientOutputStarted {
-						writeAnthropicError(c, errStatus, errType, errMsg)
+						writeAnthropicError(c, errStatus, errType, openAIClientErrorMessageForAccount(account, errStatus, payloadBytes, errMsg))
 						clientOutputStarted = true
 					} else {
 						writeStreamHeaders()
-						if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, errMsg)); err == nil {
+						if _, err := fmt.Fprint(c.Writer, buildAnthropicStreamErrorSSE(errType, openAIClientErrorMessageForAccount(account, errStatus, payloadBytes, errMsg))); err == nil {
 							c.Writer.Flush()
 						}
 					}

@@ -873,6 +873,7 @@ func TestPassthroughLifecycle_SecondTurnTimeoutIsNotFailoverSafe(t *testing.T) {
 	defer server.Close()
 	clientConn := dialPassthroughLifecycleClient(t, server)
 	defer func() { _ = clientConn.CloseNow() }()
+	_ = requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
 
 	completed, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
@@ -881,6 +882,7 @@ func TestPassthroughLifecycle_SecondTurnTimeoutIsNotFailoverSafe(t *testing.T) {
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_first"}`))
 	cancelWrite()
 	require.NoError(t, err)
+	_ = requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
 	upstream.Send(`{"type":"response.created","response":{"id":"resp_second","model":"gpt-5.1"}}`)
 
 	created, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)

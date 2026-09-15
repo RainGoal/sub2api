@@ -45,14 +45,16 @@ func (s *OpenAIGatewayService) newUpstreamSSEScanner(r io.Reader) *bufio.Scanner
 // newStreamHeaderWriter 返回幂等的 SSE 响应头写入闭包：首次调用时透传过滤后的
 // 上游响应头并写入标准 SSE 头 + 200 状态码，后续调用为 no-op。延迟到首个事件
 // 写出前才提交响应头，使上游早期失败仍可改走 failover 或非流式错误响应。
-func (s *OpenAIGatewayService) newStreamHeaderWriter(c *gin.Context, upstream http.Header) func() {
+func (s *OpenAIGatewayService) newStreamHeaderWriter(c *gin.Context, upstream http.Header, accounts ...*Account) func() {
 	headersWritten := false
 	return func() {
 		if headersWritten {
 			return
 		}
 		headersWritten = true
-		if s.responseHeaderFilter != nil {
+		if len(accounts) > 0 && openAIClientPrivacyApplies(accounts[0]) {
+			writeOpenAIClientResponseHeaders(c.Writer.Header(), upstream, s.responseHeaderFilter)
+		} else if s.responseHeaderFilter != nil {
 			responseheaders.WriteFilteredHeaders(c.Writer.Header(), upstream, s.responseHeaderFilter)
 		}
 		c.Writer.Header().Set("Content-Type", "text/event-stream")

@@ -432,7 +432,7 @@ func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testi
 	MarkOpenAINativeCompactionV2(c)
 
 	failed := "event: response.failed\n" +
-		`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"model_not_found","message":"model not found"}}}` + "\n\n"
+		`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"model_not_found","message":"model not found: private-C"}}}` + "\n\n"
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(failed))},
 		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(failed))},
@@ -460,7 +460,10 @@ func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testi
 	var compactSignal *openAICompactFallbackSignal
 	require.False(t, errors.As(err, &compactSignal))
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "model not found")
+	require.Equal(t, "The requested model is unavailable.", gjson.Get(recorder.Body.String(), "error.message").String())
+	require.Equal(t, "model_not_found", gjson.Get(recorder.Body.String(), "error.code").String())
+	require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
+	require.NotContains(t, recorder.Body.String(), "private-C")
 	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
 	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
@@ -469,6 +472,8 @@ func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testi
 	require.Equal(t, "retry", events[0].Kind)
 	require.Equal(t, "compact_model_fallback", events[0].Reason)
 	require.Equal(t, "http_error", events[1].Kind)
+	require.Contains(t, events[0].Message, "model not found: private-C")
+	require.Contains(t, events[1].Message, "model not found: private-C")
 	for _, ev := range events {
 		require.Nil(t, ev.ProxyID)
 		require.Equal(t, opsProxyNameDirect, ev.ProxyName)

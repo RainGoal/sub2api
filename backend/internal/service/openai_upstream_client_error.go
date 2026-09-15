@@ -33,23 +33,43 @@ func isOpenAIDeterministicClientError(statusCode int) bool {
 // input[8].tools[1].tools[2].parameters 的路径），靠 code 判断是否值得重试。归一成
 // {type:"upstream_error", message:"Upstream request failed"} 会把这些信息全部抹掉。
 //
-// upstreamMsg 由调用方传入，调用方已做过 sanitizeUpstreamErrorMessage 与
-// redactAgentIdentitySensitiveBody；这里不重复清洗，也不回落读取原始 body 的
-// message，避免绕开那两道脱敏。
-func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
+// upstreamMsg 由调用方完成凭据脱敏和服务端诊断记录。本函数只对最后写给客户端
+// 的副本应用模型身份隐私规则，不覆盖分类、调度和管理员记录所使用的原文。
+func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string, accounts ...*Account) {
+	var account *Account
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	writeOpenAIUpstreamClientErrorWithPrivacy(c, statusCode, body, upstreamMsg, openAIClientPrivacyApplies(account))
+}
+
+func writeOpenAIUpstreamClientErrorWithPrivacy(c *gin.Context, statusCode int, body []byte, upstreamMsg string, private bool) {
 	errorPayload := gin.H{"type": openAIUpstreamClientErrorFallbackType}
 	if errType := strings.TrimSpace(gjson.GetBytes(body, "error.type").String()); errType != "" {
-		errorPayload["type"] = errType
+		if !private || isOpenAIClientErrorToken(errType) {
+			errorPayload["type"] = errType
+		}
 	}
 	if code := strings.TrimSpace(extractUpstreamErrorCode(body)); code != "" {
-		errorPayload["code"] = code
+		if !private || isOpenAIClientErrorToken(code) {
+			errorPayload["code"] = code
+		}
 	}
 	if param := strings.TrimSpace(gjson.GetBytes(body, "error.param").String()); param != "" {
-		errorPayload["param"] = param
+		if private {
+			param = openAIClientErrorParam(param)
+		}
+		if param != "" {
+			errorPayload["param"] = param
+		}
 	}
 	message := strings.TrimSpace(upstreamMsg)
 	if message == "" {
 		message = openAIUpstreamClientErrorFallbackMessage
+	}
+	if private {
+		message = OpenAIClientErrorMessage(statusCode, body, message)
+		removeOpenAIClientDiagnosticHeaders(c.Writer.Header())
 	}
 	errorPayload["message"] = message
 
@@ -59,5 +79,7 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 // WriteOpenAIUpstreamClientError preserves a structured deterministic upstream
 // client error when the handler has exhausted all eligible accounts.
 func WriteOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
-	writeOpenAIUpstreamClientError(c, statusCode, body, upstreamMsg)
+	// Shared handlers also serve images, embeddings and other providers. Only
+	// conversation requests with a captured public model use this boundary.
+	writeOpenAIUpstreamClientErrorWithPrivacy(c, statusCode, body, upstreamMsg, HasOpenAIClientRequestedModel(c))
 }

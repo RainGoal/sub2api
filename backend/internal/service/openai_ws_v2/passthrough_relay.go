@@ -80,13 +80,16 @@ type RelayOptions struct {
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
 	OnTurnComplete                  func(turn RelayTurnResult)
-	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
-	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)
-	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
-	BeforeRelayCancel               func(exit RelayExit)
-	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
-	OnTrace                         func(event RelayTraceEvent)
-	Now                             func() time.Time
+	// False forwards a known late frame without charging or settling it again.
+	// The default retains the relay's existing observation behavior.
+	ShouldObserveUpstreamFrame func(msgType coderws.MessageType, payload []byte) bool
+	BeforeWriteClient          func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
+	BeforeClientWrite          func(msgType coderws.MessageType, payload []byte)
+	AfterClientWrite           func(msgType coderws.MessageType, payload []byte, writeErr error)
+	BeforeRelayCancel          func(exit RelayExit)
+	ReadClientFrame            func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	OnTrace                    func(event RelayTraceEvent)
+	Now                        func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -303,6 +306,7 @@ func Relay(
 			state,
 			options.OnUsageParseFailure,
 			options.OnTurnComplete,
+			options.ShouldObserveUpstreamFrame,
 			options.BeforeWriteClient,
 			options.BeforeClientWrite,
 			options.AfterClientWrite,
@@ -529,6 +533,7 @@ func runUpstreamToClient(
 	state *relayState,
 	onUsageParseFailure func(eventType string, usageRaw string),
 	onTurnComplete func(turn RelayTurnResult),
+	shouldObserveUpstreamFrame func(msgType coderws.MessageType, payload []byte) bool,
 	beforeWriteClient func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error,
 	beforeClientWrite func(msgType coderws.MessageType, payload []byte),
 	afterClientWrite func(msgType coderws.MessageType, payload []byte, writeErr error),
@@ -570,7 +575,8 @@ func runUpstreamToClient(
 			return
 		}
 		markActivity()
-		if beforeWriteClient != nil {
+		observeFrame := shouldObserveUpstreamFrame == nil || shouldObserveUpstreamFrame(msgType, payload)
+		if observeFrame && beforeWriteClient != nil {
 			wroteDownstreamInTurn := wroteDownstream
 			if state != nil {
 				wroteDownstreamInTurn = state.turnWroteDownstream.Load()
@@ -593,21 +599,23 @@ func runUpstreamToClient(
 			}
 		}
 		observedEvent := observedUpstreamEvent{}
-		switch msgType {
-		case coderws.MessageText:
-			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-			if shouldFinalizePendingBareError(state, payload, eventType) {
-				emitTurnComplete(onTurnComplete, state, finalizePendingBareError(state, nowFn()))
-			}
-			observedEvent = observeUpstreamMessage(state, payload, startAt, nowFn, onUsageParseFailure)
-		case coderws.MessageBinary:
-			// Binary frames remain opaque for usage/result observation, but a JSON
-			// terminal still settles relay lifecycle. Otherwise the pending-turn
-			// disconnect guard would turn an already-delivered terminal into a false
-			// missing-terminal failure when the upstream closes normally.
-			if isTerminalEvent(strings.TrimSpace(gjson.GetBytes(payload, "type").String())) {
-				state.consumePendingTurnStartedAt()
-				openAIWSRelayDiscardActiveTurnTiming(state)
+		if observeFrame {
+			switch msgType {
+			case coderws.MessageText:
+				eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+				if shouldFinalizePendingBareError(state, payload, eventType) {
+					emitTurnComplete(onTurnComplete, state, finalizePendingBareError(state, nowFn()))
+				}
+				observedEvent = observeUpstreamMessage(state, payload, startAt, nowFn, onUsageParseFailure)
+			case coderws.MessageBinary:
+				// Binary frames remain opaque for usage/result observation, but a JSON
+				// terminal still settles relay lifecycle. Otherwise the pending-turn
+				// disconnect guard would turn an already-delivered terminal into a false
+				// missing-terminal failure when the upstream closes normally.
+				if isTerminalEvent(strings.TrimSpace(gjson.GetBytes(payload, "type").String())) {
+					state.consumePendingTurnStartedAt()
+					openAIWSRelayDiscardActiveTurnTiming(state)
+				}
 			}
 		}
 		emitTurnComplete(onTurnComplete, state, observedEvent)
@@ -637,6 +645,14 @@ func runUpstreamToClient(
 			beforeClientWrite(msgType, payload)
 		}
 		writeErr := writeClient(msgType, payload)
+		if writeErr == nil {
+			wroteDownstream = true
+			if observeFrame && state != nil {
+				state.turnWroteDownstream.Store(true)
+			}
+		}
+		// The callback may release the completed turn and let a new request
+		// reset its output flag. Never update that flag after releasing it.
 		if afterClientWrite != nil {
 			afterClientWrite(msgType, payload, writeErr)
 		}
@@ -651,10 +667,6 @@ func runUpstreamToClient(
 			})
 			exitCh <- relayExitSignal{stage: "write_client", err: writeErr, wroteDownstream: wroteDownstream}
 			return
-		}
-		wroteDownstream = true
-		if state != nil {
-			state.turnWroteDownstream.Store(true)
 		}
 		if afterWriteClient != nil {
 			afterWriteClient(msgType, payload)

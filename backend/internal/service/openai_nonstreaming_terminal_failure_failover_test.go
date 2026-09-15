@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -114,8 +116,8 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 	}{
 		{
 			name:    "invalid_request",
-			data:    `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"}}`,
-			wantMsg: "unknown parameter foo",
+			data:    `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo for private-C"}}`,
+			wantMsg: "Upstream rejected the request",
 		},
 		{
 			name:    "context_window",
@@ -124,27 +126,52 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 		},
 		{
 			name:    "content_policy",
-			data:    `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
-			wantMsg: "blocked by our content policy",
+			data:    `{"type":"response.failed","error":{"type":"content_policy_violation","message":"private-C blocked by our content policy"}}`,
+			wantMsg: "The request was rejected by the safety policy.",
+		},
+		{
+			name:    "safety_type",
+			data:    `{"type":"response.failed","error":{"type":"safety_error","message":"private-C flagged this request"}}`,
+			wantMsg: "The request was rejected by the safety policy.",
+		},
+		{
+			name:    "content_policy_code",
+			data:    `{"type":"response.failed","error":{"code":"content_policy","message":"private-C blocked this request"}}`,
+			wantMsg: "The request was rejected by the safety policy.",
 		},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c, rec := newNonStreamingFailoverContext(t)
-			svc := newNonStreamingFailoverService()
+		for _, passthrough := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%t", tc.name, passthrough), func(t *testing.T) {
+				c, rec := newNonStreamingFailoverContext(t)
+				svc := newNonStreamingFailoverService()
 
-			result, err := svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
-				newNonStreamingFailoverAccount(), sseTerminalBody("response.failed", tc.data), "model", "model")
-
-			require.Nil(t, result)
-			require.Error(t, err)
-			var failoverErr *UpstreamFailoverError
-			require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
-			require.Equal(t, http.StatusBadGateway, rec.Code)
-			require.Contains(t, rec.Body.String(), tc.wantMsg)
-			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
-		})
+				var err error
+				if passthrough {
+					var result *openaiNonStreamingResultPassthrough
+					result, err = svc.handlePassthroughSSEToJSON(newNonStreamingSSEResponse(), c,
+						newNonStreamingFailoverAccount(), sseTerminalBody("response.failed", tc.data), "model", "model")
+					require.Nil(t, result)
+				} else {
+					var result *openaiNonStreamingResult
+					result, err = svc.handleSSEToJSON(newNonStreamingSSEResponse(), c,
+						newNonStreamingFailoverAccount(), sseTerminalBody("response.failed", tc.data), "model", "model")
+					require.Nil(t, result)
+				}
+				require.Error(t, err)
+				var failoverErr *UpstreamFailoverError
+				require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
+				require.Equal(t, http.StatusBadGateway, rec.Code)
+				require.Equal(t, tc.wantMsg, gjson.Get(rec.Body.String(), "error.message").String())
+				require.Equal(t, "upstream_error", gjson.Get(rec.Body.String(), "error.type").String())
+				require.NotContains(t, rec.Body.String(), "private-C")
+				upstreamMessage := extractOpenAISSEErrorMessage([]byte(tc.data))
+				require.ErrorContains(t, err, upstreamMessage)
+				require.Equal(t, upstreamMessage, c.GetString(OpsUpstreamErrorMessageKey))
+				require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+			})
+		}
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func wsAllowlistGroup(enabled bool, models ...string) *service.Group {
@@ -173,7 +175,13 @@ func TestOpenAIResponsesWebSocket_SessionUpdateToAllowedModelStillWorks(t *testi
 		secondPayload: `{"type":"response.create","stream":false}`,
 		group:         wsAllowlistGroup(true, "gpt-5.4"),
 	})
-	if len(got.clientEvents) < 2 {
-		t.Fatalf("expected at least two completed events, got %d", len(got.clientEvents))
+	require.Len(t, got.clientEvents, 3)
+	require.Equal(t, "session.updated", gjson.GetBytes(got.clientEvents[1], "type").String())
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(got.clientEvents[1], "session.model").String())
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(got.clientEvents[2], "response.model").String())
+	require.Len(t, got.logs, 2, "session updates must not add a generated usage record")
+	for _, usage := range got.logs {
+		require.Equal(t, 2, usage.InputTokens)
+		require.Equal(t, 1, usage.OutputTokens)
 	}
 }

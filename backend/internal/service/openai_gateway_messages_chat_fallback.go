@@ -48,6 +48,12 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return nil, fmt.Errorf("missing model in request")
 	}
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(SetOpenAIClientRequestedModel(c, originalModel)); err != nil {
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid model in request")
+			return nil, err
+		}
+	}
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	clientStream := anthropicReq.Stream
 
@@ -149,6 +155,14 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	clientModel := originalModel
+	if openAIClientPrivacyApplies(account) {
+		clientModel = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(clientModel); err != nil {
+			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeAnthropicError)
 	if err != nil {
 		return nil, err
@@ -159,9 +173,11 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 		return nil, rejectAnthropicSemanticTimeout(c, account,
 			providerSemanticTimeoutOpenAIReport("openai.messages.cc_fallback_buffered", originalModel, string(ccBody), usage))
 	}
-	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, originalModel)
+	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, clientModel)
 
-	if s.responseHeaderFilter != nil {
+	if openAIClientPrivacyApplies(account) {
+		writeOpenAIClientResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	} else if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.JSON(http.StatusOK, anthropicResp)
@@ -193,9 +209,17 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
+	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header, account)
 
-	anthropicState := apicompat.NewChatCompletionsToAnthropicStreamState(originalModel)
+	clientModel := originalModel
+	if openAIClientPrivacyApplies(account) {
+		clientModel = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(clientModel); err != nil {
+			writeAnthropicError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
+	anthropicState := apicompat.NewChatCompletionsToAnthropicStreamState(clientModel)
 	clientDisconnected := false
 
 	// 与 responses 兄弟不同：客户端断开后仍继续做事件转换（喂 anthropicState），

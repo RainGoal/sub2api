@@ -347,8 +347,8 @@ func TestForwardAsAnthropic_ForceChatCompletionsEmptyStreamStillFramesMessage(t 
 }
 
 // Non-failover 4xx responses must go through the shared compat error handler:
-// status-specific Anthropic error type, upstream message preserved, and ops
-// upstream-error events recorded (previously this branch bypassed all three).
+// status-specific Anthropic error type, a public client diagnostic, and the
+// original upstream message in ops events.
 func TestForwardAsAnthropic_ForceChatCompletionsNonFailover400UsesSharedErrorHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -375,7 +375,8 @@ func TestForwardAsAnthropic_ForceChatCompletionsNonFailover400UsesSharedErrorHan
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "error", gjson.Get(rec.Body.String(), "type").String())
 	require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
-	require.Equal(t, "invalid roles", gjson.Get(rec.Body.String(), "error.message").String())
+	require.Equal(t, "Upstream rejected the request", gjson.Get(rec.Body.String(), "error.message").String())
+	require.Contains(t, err.Error(), "invalid roles")
 
 	statusVal, ok := c.Get(OpsUpstreamStatusCodeKey)
 	require.True(t, ok, "shared handler must record the upstream status for ops")

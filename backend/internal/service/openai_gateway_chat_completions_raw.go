@@ -68,6 +68,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return nil, fmt.Errorf("missing model in request")
 	}
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(SetOpenAIClientRequestedModel(c, originalModel)); err != nil {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Invalid model in request")
+			return nil, err
+		}
+	}
 	clientStream := gjson.GetBytes(body, "stream").Bool()
 
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
@@ -99,7 +105,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-			writeChatCompletionsError(c, http.StatusForbidden, "permission_error", blocked.Message)
+			clientMessage := openAIClientErrorMessageForAccount(account, http.StatusForbidden, []byte(`{"error":{"code":"policy_violation"}}`), blocked.Message)
+			writeChatCompletionsError(c, http.StatusForbidden, "permission_error", clientMessage)
 		}
 		return nil, policyErr
 	}
@@ -284,8 +291,22 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	requestID := resp.Header.Get("x-request-id")
-	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
-	scanner := s.newUpstreamSSEScanner(resp.Body)
+	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header, account)
+	sourceScanner := s.newUpstreamSSEScanner(resp.Body)
+	var scanner interface {
+		Scan() bool
+		Text() string
+		Err() error
+	} = sourceScanner
+	privacyApplies := openAIClientPrivacyApplies(account)
+	clientModel := openAIClientRequestedModel(c, originalModel)
+	if privacyApplies {
+		maxEventBytes := defaultMaxLineSize
+		if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
+			maxEventBytes = s.cfg.Gateway.MaxLineSize
+		}
+		scanner = newOpenAIClientSSEScanner(sourceScanner, maxEventBytes)
+	}
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
@@ -296,6 +317,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	var clientPayloadErr error
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -355,6 +377,31 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
 		line = stripEmptyChatToolCallIdentityFromSSELine(line)
+		if privacyApplies && !clientDisconnected {
+			if payload, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(payload) != "" && strings.TrimSpace(payload) != "[DONE]" {
+				if openAIClientHasErrorFields(gjson.Parse(payload)) {
+					s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", []byte(payload), extractOpenAISSEErrorMessage([]byte(payload)))
+				}
+				clientPayload, err := rewriteOpenAIClientPayload([]byte(payload), clientModel)
+				if err != nil {
+					clientPayloadErr = err
+					break
+				}
+				line = "data: " + string(clientPayload)
+			} else if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+				// Some compatible upstreams return a JSON body despite stream=true.
+				// Keep that wire shape without letting it bypass the display boundary.
+				if openAIClientHasErrorFields(gjson.Parse(line)) {
+					s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", []byte(line), extractOpenAISSEErrorMessage([]byte(line)))
+				}
+				clientPayload, err := rewriteOpenAIClientPayload([]byte(line), clientModel)
+				if err != nil {
+					clientPayloadErr = err
+					break
+				}
+				line = string(clientPayload)
+			}
+		}
 
 		writeLine(line)
 		if line == "" {
@@ -388,6 +435,20 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	scanErr := scanner.Err()
+	if errors.Is(scanErr, errOpenAIClientPayload) && clientPayloadErr == nil {
+		clientPayloadErr = scanErr
+	}
+	if clientPayloadErr != nil {
+		if !clientDisconnected {
+			if !c.Writer.Written() {
+				writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			} else {
+				_, _ = c.Writer.WriteString("data: {\"error\":{\"type\":\"upstream_error\",\"code\":\"response_processing_error\",\"message\":\"Unable to process the upstream response\"}}\n\ndata: [DONE]\n\n")
+				c.Writer.Flush()
+			}
+		}
+		return resultWithUsage(), clientPayloadErr
+	}
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
 			zap.Error(scanErr),
@@ -539,20 +600,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		upstreamRequestID := firstNonEmpty(requestID, resp.Header.Get("xai-request-id"))
 		return nil, newGrokMissingUsageFailoverError(c, account, upstreamRequestID)
 	}
-	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
-
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		c.Writer.Header().Set("Content-Type", ct)
-	} else {
-		c.Writer.Header().Set("Content-Type", "application/json")
-	}
-	c.Writer.WriteHeader(http.StatusOK)
-	_, _ = c.Writer.Write(respBody)
-
-	return &OpenAIForwardResult{
+	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
 		Usage:                         usage,
@@ -565,8 +613,35 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		ReasoningEffort:               reasoningEffort,
 		ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                        false,
-		Duration:                      time.Since(startTime),
-	}, nil
+	}
+	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
+	if openAIClientPrivacyApplies(account) {
+		if openAIClientHasErrorFields(gjson.ParseBytes(respBody)) {
+			s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", respBody, extractOpenAISSEErrorMessage(respBody))
+		}
+		respBody, err = rewriteOpenAIClientPayload(respBody, openAIClientRequestedModel(c, originalModel))
+		if err != nil {
+			writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Unable to process the upstream response")
+			result.Duration = time.Since(startTime)
+			return result, err
+		}
+	}
+
+	if openAIClientPrivacyApplies(account) {
+		writeOpenAIClientResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	} else if s.responseHeaderFilter != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		c.Writer.Header().Set("Content-Type", ct)
+	} else {
+		c.Writer.Header().Set("Content-Type", "application/json")
+	}
+	c.Writer.WriteHeader(http.StatusOK)
+	_, _ = c.Writer.Write(respBody)
+
+	result.Duration = time.Since(startTime)
+	return result, nil
 }
 
 // buildOpenAIChatCompletionsURL 拼接上游 Chat Completions 端点 URL。

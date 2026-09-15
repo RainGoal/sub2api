@@ -419,6 +419,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	grokCacheIdentity string,
 	turn int,
 	writeClientMessage func([]byte) error,
+	clientPublicModel ...string,
 ) (*OpenAIForwardResult, error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
@@ -433,6 +434,24 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, errors.New("client websocket writer is nil")
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
+	publicModel := strings.TrimSpace(originalModel)
+	if len(clientPublicModel) > 0 {
+		publicModel = strings.TrimSpace(clientPublicModel[0])
+	}
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(publicModel); err != nil {
+			return nil, err
+		}
+		rawClientWriter := writeClientMessage
+		writeClientMessage = func(message []byte) error {
+			clientMessage, err := rewriteOpenAIClientPayload(message, publicModel)
+			if err != nil {
+				_ = rawClientWriter(openAIWSClientPayloadFailureEvent(openAIWSClientResponseID(message)))
+				return err
+			}
+			return rawClientWriter(clientMessage)
+		}
+	}
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
@@ -603,9 +622,13 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if account.Platform != PlatformGrok && (shouldFailover || shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody)) {
 			s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, actualModel)
 		}
-		clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg)
+		clientErrorMessage := upstreamMsg
+		if openAIClientPrivacyApplies(account) {
+			clientErrorMessage = OpenAIClientErrorMessage(resp.StatusCode, respBody, upstreamMsg)
+		}
+		clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, clientErrorMessage)
 		if writeErr := writeClientMessage(clientError); writeErr == nil {
-			markOpenAIWSClientVisibleFailure(c, "error", clientError)
+			markOpenAIWSClientVisibleFailure(c, "error", buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg))
 		}
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
@@ -695,6 +718,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 	defer putSSEScannerBuf64K(scanBuf)
+	var streamScanner interface {
+		Scan() bool
+		Text() string
+		Err() error
+	} = scanner
+	if openAIClientPrivacyApplies(account) {
+		streamScanner = newOpenAIClientSSEScanner(scanner, maxLineSize)
+	}
 
 	pendingSSEEventType := ""
 	finalizeBareError := func() error {
@@ -728,8 +759,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		markOpenAIWSClientVisibleFailure(c, "response.failed", clientMessage)
 		return nil
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
+	for streamScanner.Scan() {
+		line := streamScanner.Text()
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
 			continue
@@ -787,7 +818,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		imageCounter.AddSSEData(upstreamMessage)
 
-		if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedData, mappedModel) {
+		if !openAIClientPrivacyApplies(account) && needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedData, mappedModel) {
 			upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
 		}
 		if s.toolCorrector != nil && openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {
@@ -901,6 +932,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				pendingClientMessageBytes = 0
 				for _, message := range messages {
 					if err := writeClientMessage(message); err != nil {
+						if IsOpenAIClientPayloadError(err) {
+							return resultWithUsage(), err
+						}
 						if isOpenAIWSClientDisconnectError(err) {
 							clientDisconnected = true
 							closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
@@ -963,12 +997,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if finalizeErr := finalizeBareError(); finalizeErr != nil {
 			return resultWithUsage(), finalizeErr
 		}
-		if scanErr := scanner.Err(); scanErr != nil {
+		if scanErr := streamScanner.Err(); scanErr != nil {
 			return resultWithUsage(), fmt.Errorf("read upstream http bridge stream after error event: %w", scanErr)
 		}
 		return resultWithUsage(), errors.New(bareErrorMessage)
 	}
-	if err := scanner.Err(); err != nil {
+	if err := streamScanner.Err(); err != nil {
+		if IsOpenAIClientPayloadError(err) {
+			_ = writeClientMessage(openAIWSClientPayloadFailureEvent(responseID))
+			return resultWithUsage(), err
+		}
 		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
 		if turn == 1 && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)

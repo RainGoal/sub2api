@@ -37,6 +37,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return nil, fmt.Errorf("missing model in request")
 	}
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(SetOpenAIClientRequestedModel(c, originalModel)); err != nil {
+			writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", "Invalid model in request")
+			return nil, err
+		}
+	}
 
 	clientStream := responsesReq.Stream
 	// custom 工具（如 codex 的 exec）降级为 function 工具转发，回程需按名字还原为
@@ -83,7 +89,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(err, &blocked) {
-			writeOpenAIFastPolicyBlockedResponse(c, blocked)
+			writeOpenAIFastPolicyBlockedResponse(c, blocked, account)
 		}
 		return nil, err
 	}
@@ -144,6 +150,14 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	clientModel := originalModel
+	if openAIClientPrivacyApplies(account) {
+		clientModel = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(clientModel); err != nil {
+			writeOpenAIResponsesFallbackError(c, http.StatusBadGateway, "api_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeOpenAIResponsesFallbackError)
 	if err != nil {
 		return nil, err
@@ -154,10 +168,12 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		return nil, rejectResponsesSemanticTimeout(c, account,
 			providerSemanticTimeoutOpenAIReport("openai.responses.cc_fallback_buffered", originalModel, string(ccBody), usage))
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, clientModel, customTools, functionTools, toolSearch, namespaceTools)
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
 
-	if s.responseHeaderFilter != nil {
+	if openAIClientPrivacyApplies(account) {
+		writeOpenAIClientResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	} else if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.JSON(http.StatusOK, responsesResp)
@@ -193,9 +209,17 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
-	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
+	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header, account)
 
-	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	clientModel := originalModel
+	if openAIClientPrivacyApplies(account) {
+		clientModel = openAIClientRequestedModel(c, originalModel)
+		if err := ValidateOpenAIClientModel(clientModel); err != nil {
+			writeOpenAIResponsesFallbackError(c, http.StatusBadGateway, "api_error", "Unable to process the upstream response")
+			return nil, err
+		}
+	}
+	state := apicompat.NewChatCompletionsToResponsesStreamState(clientModel)
 	state.CustomTools = customTools
 	state.FunctionTools = functionTools
 	state.ToolSearchDeclared = toolSearch

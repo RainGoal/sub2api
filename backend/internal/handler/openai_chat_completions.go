@@ -84,6 +84,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
 		return
 	}
+	if openAICompatibleRequestPlatform(c.Request.Context(), apiKey) == service.PlatformOpenAI {
+		if err := service.ValidateOpenAIClientModel(service.SetOpenAIClientRequestedModel(c, reqModel)); err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model must be a non-empty string without control characters")
+			return
+		}
+	}
 	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
 		respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
 		return
@@ -384,7 +390,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					)
 					continue
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
+				if !service.IsOpenAIClientPayloadError(err) {
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
+				}
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
@@ -403,10 +411,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 		}
-		if result != nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, result.FirstTokenMs)
-		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, nil)
+		if !service.IsOpenAIClientPayloadError(err) {
+			if result != nil {
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, result.FirstTokenMs)
+			} else {
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, result), true, nil)
+			}
 		}
 
 		submitChatUsage(result)

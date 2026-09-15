@@ -38,6 +38,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
+	publicModel := openAIClientRequestedModel(c, originalModel)
+	if openAIClientPrivacyApplies(account) {
+		if err := ValidateOpenAIClientModel(publicModel); err != nil {
+			return nil, err
+		}
+	}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
@@ -360,6 +366,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	responseID := ""
 	var finalResponse []byte
 	wroteDownstream := false
+	var clientPayloadErr error
 	needModelReplace := originalModel != mappedModel
 	var mappedModelBytes []byte
 	if needModelReplace && mappedModel != "" {
@@ -425,6 +432,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 			ClientDisconnect:              clientDisconnected,
+			ImageCount:                    imageCounter.Count(),
+			ImageOutputSizes:              imageCounter.Sizes(),
 		}
 	}
 
@@ -463,8 +472,18 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		lastFlushAt = time.Now()
 	}
 	emitStreamMessage := func(message []byte, forceFlush bool) {
-		if clientDisconnected {
+		if clientDisconnected || clientPayloadErr != nil {
 			return
+		}
+		if openAIClientPrivacyApplies(account) {
+			updated, err := rewriteOpenAIClientPayload(message, publicModel)
+			if err != nil {
+				clientPayloadErr = err
+				message = openAIWSClientPayloadFailureEvent(responseID)
+				forceFlush = true
+			} else {
+				message = updated
+			}
 		}
 		frame := make([]byte, 0, len(message)+8)
 		frame = append(frame, "data: "...)
@@ -559,6 +578,16 @@ readLoop:
 				len(message),
 				wroteDownstream,
 			)
+			if openAIClientPrivacyApplies(account) {
+				responseModelObserver.ObserveOpenAI(message, eventType)
+				parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
+				if reqStream {
+					emitStreamMessage(openAIWSClientPayloadFailureEvent(responseID), true)
+				} else if !clientDisconnected {
+					c.Data(http.StatusBadGateway, "application/json", openAIWSClientPayloadFailureEvent(""))
+				}
+				return resultWithUsage(), fmt.Errorf("%w: malformed websocket event", errOpenAIClientPayload)
+			}
 			if !wroteDownstream {
 				return nil, wrapOpenAIWSFallback("invalid_event_json", errors.New("upstream websocket returned malformed Responses event JSON"))
 			}
@@ -641,7 +670,7 @@ readLoop:
 		}
 
 		if !clientDisconnected {
-			if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(message, mappedModelBytes) {
+			if !openAIClientPrivacyApplies(account) && needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(message, mappedModelBytes) {
 				message = replaceOpenAIWSMessageModel(message, mappedModel, originalModel)
 			}
 			if openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(message) {
@@ -719,12 +748,19 @@ readLoop:
 				emitStreamMessage(message, true)
 			}
 			if !reqStream {
+				clientErrorMessage := errMsg
+				if openAIClientPrivacyApplies(account) {
+					clientErrorMessage = OpenAIClientErrorMessage(statusCode, message, errMsg)
+				}
 				c.JSON(statusCode, gin.H{
 					"error": gin.H{
 						"type":    "upstream_error",
-						"message": errMsg,
+						"message": clientErrorMessage,
 					},
 				})
+			}
+			if clientPayloadErr != nil {
+				return resultWithUsage(), clientPayloadErr
 			}
 			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}
@@ -757,6 +793,10 @@ readLoop:
 			if responseField.Exists() && responseField.Type == gjson.JSON {
 				finalResponse = []byte(responseField.Raw)
 			}
+		}
+		if clientPayloadErr != nil {
+			lease.MarkBroken()
+			return resultWithUsage(), clientPayloadErr
 		}
 
 		if isTerminalEvent {
@@ -795,11 +835,19 @@ readLoop:
 			return nil, errors.New("ws finished without final response")
 		}
 
-		if needModelReplace {
+		populateOpenAIUsageFromResponseJSON(finalResponse, usage)
+		if openAIClientPrivacyApplies(account) {
+			updated, err := rewriteOpenAIClientPayload(finalResponse, publicModel)
+			if err != nil {
+				lease.MarkBroken()
+				c.Data(http.StatusBadGateway, "application/json", openAIWSClientPayloadFailureEvent(""))
+				return resultWithUsage(), err
+			}
+			finalResponse = updated
+		} else if needModelReplace {
 			finalResponse = s.replaceModelInResponseBody(finalResponse, mappedModel, originalModel)
 		}
 		finalResponse = s.correctToolCallsInResponseBody(finalResponse)
-		populateOpenAIUsageFromResponseJSON(finalResponse, usage)
 		if responseID == "" {
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())
 		}
