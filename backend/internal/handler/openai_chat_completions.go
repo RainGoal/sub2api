@@ -90,6 +90,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 	}
+	canonicalBody := captureAPIKeyFallbackBody(apiKey, body)
 	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
 		respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
 		return
@@ -170,6 +171,30 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	// 分组利润控制：chat completions 文本入口请求级装门并固定 pricingAt。
 	ccPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(ccPricingCtx)
+	groupFallback := newAPIKeyGroupFallback(c, h.apiKeyService, h.billingCacheService, apiKey, canonicalBody, maxAccountSwitches)
+	tryGroupFallback := func(cause apiKeyGroupFallbackCause) bool {
+		var nextBody []byte
+		var nextMapping service.ChannelMappingResult
+		nextKey, fallbackErr := groupFallback.Try(c, apiKey, reqModel, &switchCount, cause, func(trial *gin.Context, key *service.APIKey) error {
+			var prepareErr error
+			nextBody, nextMapping, prepareErr = h.prepareOpenAIGroupFallback(trial, key, canonicalBody, reqModel, false)
+			return prepareErr
+		})
+		if fallbackErr != nil {
+			reqLog.Warn("gateway.api_key_group_fallback_rejected", zap.Error(fallbackErr))
+		}
+		if nextKey == nil {
+			return false
+		}
+		apiKey, subscription, body, channelMapping = nextKey, nil, nextBody, nextMapping
+		forwardModel = openAIChannelForwardModel(channelMapping, reqModel)
+		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
+		promptCacheKey = h.gatewayService.ExtractSessionID(c, body)
+		lastFailoverErr = nil
+		oauth429FailoverState = service.OpenAIOAuth429FailoverState{}
+		reqLog.Info("gateway.api_key_group_fallback", zap.Int64("group_id", *apiKey.GroupID), zap.Int("switch_count", switchCount))
+		return true
+	}
 
 	for {
 		if failoverClientGone(c) {
@@ -195,6 +220,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				reqLog.Info("openai_chat_completions.account_select_aborted_client_disconnected", zap.Error(err))
 				return
 			}
+			if groupFallback.enabled && !groupFallback.used {
+				cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel)
+				if tryGroupFallback(apiKeyGroupFallbackCause{SelectionErr: err, ModelNotFound: cls.ModelNotFound, ProfitVetoed: profitVetoCount > 0}) {
+					continue
+				}
+			}
 			reqLog.Warn("openai_chat_completions.account_select_failed",
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
@@ -218,6 +249,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel)
+			if tryGroupFallback(apiKeyGroupFallbackCause{SelectionErr: service.ErrNoAvailableAccounts, ModelNotFound: cls.ModelNotFound, ProfitVetoed: profitVetoCount > 0}) {
+				continue
+			}
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)
 			}
@@ -291,13 +325,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
+			usageKey, usageSubscription := apiKey, subscription
+			usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel)
 			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 					Result:             res,
-					APIKey:             apiKey,
-					User:               apiKey.User,
+					APIKey:             usageKey,
+					User:               usageKey.User,
 					Account:            account,
-					Subscription:       subscription,
+					Subscription:       usageSubscription,
 					InboundEndpoint:    inboundEndpoint,
 					UpstreamEndpoint:   upstreamEndpoint,
 					UserAgent:          userAgent,
@@ -305,15 +341,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					APIKeyService:      h.apiKeyService,
 					QuotaPlatform:      quotaPlatform,
 					SessionID:          sessionID,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
+					ChannelUsageFields: usageFields,
 					PricingAt:          pricingAt,
 					CyberBlocked:       cyberBlocked,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.openai_gateway.chat_completions"),
 						zap.Int64("user_id", subject.UserID),
-						zap.Int64("api_key_id", apiKey.ID),
-						zap.Any("group_id", apiKey.GroupID),
+						zap.Int64("api_key_id", usageKey.ID),
+						zap.Any("group_id", usageKey.GroupID),
 						zap.String("model", reqModel),
 						zap.Int64("account_id", account.ID),
 					).Error("openai_chat_completions.record_usage_failed", zap.Error(err))
@@ -373,6 +409,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
+					if switchCount >= groupFallback.PrimarySwitchLimit() && tryGroupFallback(apiKeyGroupFallbackCause{UpstreamErr: failoverErr, ProfitVetoed: profitVetoCount > 0}) {
+						continue
+					}
 					if switchCount >= maxAccountSwitches {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return

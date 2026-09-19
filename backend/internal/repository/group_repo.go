@@ -954,6 +954,10 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 	}
 
 	// 5. Soft-delete group itself.
+	// Clear optional fallback references atomically, preserving each key's primary group.
+	if _, err := exec.ExecContext(ctx, "UPDATE api_keys SET fallback_group_id = NULL, updated_at = NOW() WHERE fallback_group_id = $1", id); err != nil {
+		return nil, err
+	}
 	if _, err := txClient.Group.Delete().Where(group.IDEQ(id)).Exec(ctx); err != nil {
 		return nil, err
 	}

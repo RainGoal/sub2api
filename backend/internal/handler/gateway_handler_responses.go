@@ -167,7 +167,20 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
 	// 3. Account selection + failover loop
-	fs := NewFailoverState(h.maxAccountSwitches, false)
+	canonicalBody := captureAPIKeyFallbackBody(apiKey, body)
+	groupFallback := newAPIKeyGroupFallback(c, h.apiKeyService, h.billingCacheService, apiKey, canonicalBody, h.maxAccountSwitches)
+	fs := NewFailoverState(groupFallback.PrimarySwitchLimit(c), false)
+	tryGroupFallback := func(cause apiKeyGroupFallbackCause) bool {
+		nextKey, nextParsed, nextMapping := h.tryGatewayGroupFallback(c, groupFallback, apiKey, fs, reqModel, canonicalBody, parsedReq, cause)
+		if nextKey == nil {
+			return false
+		}
+		apiKey, parsedReq, channelMapping = nextKey, nextParsed, nextMapping
+		body = parsedReq.Body.Bytes()
+		subscription = nil
+		requestCtx = c.Request.Context()
+		return true
+	}
 
 	for {
 		if requestCtx.Err() != nil {
@@ -178,6 +191,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
 				cls = classifySelectionFailureError(err, cls)
+				if tryGroupFallback(apiKeyGroupFallbackCause{SelectionErr: err, ModelNotFound: cls.ModelNotFound, ProfitVetoed: fs.ProfitVetoCount() > 0}) {
+					continue
+				}
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -187,6 +203,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				}
 				h.responsesErrorResponse(c, cls.Status, cls.ErrType, message)
 				return
+			}
+			if tryGroupFallback(apiKeyGroupFallbackCause{SelectionErr: err, UpstreamErr: fs.LastFailoverErr, ProfitVetoed: fs.ProfitVetoCount() > 0}) {
+				continue
 			}
 			action := fs.HandleSelectionExhausted(requestCtx)
 			switch action {
@@ -294,6 +313,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				case FailoverContinue:
 					continue
 				case FailoverExhausted:
+					if tryGroupFallback(apiKeyGroupFallbackCause{UpstreamErr: fs.LastFailoverErr, ProfitVetoed: fs.ProfitVetoCount() > 0}) {
+						continue
+					}
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:

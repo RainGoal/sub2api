@@ -171,6 +171,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	body = parsedReq.Body.Bytes()
+	fallbackCanonicalBody := captureAPIKeyFallbackBody(apiKey, body)
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
 	bindRequestedReasoningEffort(c, body, reqModel)
@@ -619,6 +620,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	currentAPIKey := apiKey
 	currentSubscription := subscription
+	groupFallback := newAPIKeyGroupFallback(c, h.apiKeyService, h.billingCacheService, apiKey, fallbackCanonicalBody, h.maxAccountSwitches)
 	var fallbackGroupID *int64
 	if apiKey.Group != nil {
 		fallbackGroupID = apiKey.Group.FallbackGroupIDOnInvalidRequest
@@ -650,8 +652,23 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}()
 
 	for {
-		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
+		fs := NewFailoverState(groupFallback.PrimarySwitchLimit(c), hasBoundSession)
 		retryWithFallback := false
+		tryGroupFallback := func(cause apiKeyGroupFallbackCause) bool {
+			nextKey, nextParsed, nextMapping := h.tryGatewayGroupFallback(c, groupFallback, currentAPIKey, fs, reqModel, fallbackCanonicalBody, parsedReq, cause)
+			if nextKey == nil {
+				return false
+			}
+			currentAPIKey, parsedReq, channelMapping = nextKey, nextParsed, nextMapping
+			body = parsedReq.Body.Bytes()
+			currentSubscription = nil
+			hasBoundSession, sessionBoundAccountID = false, 0
+			for _, acc := range sessionSlotAccounts {
+				h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
+			}
+			sessionSlotAccounts = make(map[int64]*service.Account)
+			return true
+		}
 
 		for {
 			attemptParsedReq, err := parsedReq.CloneForBody(body)
@@ -675,6 +692,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						return
 					}
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
+					if tryGroupFallback(apiKeyGroupFallbackCause{SelectionErr: err, ModelNotFound: cls.ModelNotFound, ProfitVetoed: fs.ProfitVetoCount() > 0}) {
+						continue
+					}
 					if !cls.ModelNotFound {
 						markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					}
@@ -692,6 +712,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
 					return
+				}
+				if tryGroupFallback(apiKeyGroupFallbackCause{SelectionErr: err, UpstreamErr: fs.LastFailoverErr, ProfitVetoed: fs.ProfitVetoCount() > 0}) {
+					continue
 				}
 				action := fs.HandleSelectionExhausted(c.Request.Context())
 				switch action {
@@ -886,7 +909,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			// Bedrock CC 兼容：清理 body 专有字段 + 过滤 anthropic-beta header，适用于所有转发路径
-			if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)); err != nil {
+			if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, currentAPIKey.GroupID)); err != nil {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 				return
 			}
@@ -1056,6 +1079,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						delete(sessionSlotAccounts, account.ID)
 						continue
 					case FailoverExhausted:
+						if tryGroupFallback(apiKeyGroupFallbackCause{UpstreamErr: fs.LastFailoverErr, ProfitVetoed: fs.ProfitVetoCount() > 0}) {
+							continue
+						}
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
 						return
 					case FailoverCanceled:

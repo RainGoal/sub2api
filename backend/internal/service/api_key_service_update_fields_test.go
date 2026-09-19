@@ -57,6 +57,11 @@ func TestAPIKeyUpdate_OnlyDeclaresRequestedColumns(t *testing.T) {
 			want: APIKeyUpdateFields{Name: true},
 		},
 		{
+			name: "clear fallback only",
+			req:  UpdateAPIKeyRequest{FallbackGroupIDSet: true},
+			want: APIKeyUpdateFields{FallbackGroupID: true},
+		},
+		{
 			name: "quota only",
 			req:  UpdateAPIKeyRequest{Quota: &quota},
 			want: APIKeyUpdateFields{Quota: true},

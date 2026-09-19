@@ -43,6 +43,18 @@ func GatewayTokenRequestPricingAtFromContext(ctx context.Context) time.Time {
 	return pricingAt
 }
 
+// WithAPIKeyFallbackGroup changes the actual billing/routing group without
+// changing the request's pricing instant. Account selection installs a fresh
+// profit gate for the destination using this context.
+func WithAPIKeyFallbackGroup(ctx context.Context, group *Group) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = context.WithValue(ctx, ctxkey.Group, group)
+	ctx = context.WithValue(ctx, gatewayTokenRequestBillingGroupCtxKey{}, group)
+	return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, (*openAIProfitControlGate)(nil))
+}
+
 func gatewayTokenRequestBillingGroupFromContext(ctx context.Context) *Group {
 	if ctx == nil {
 		return nil

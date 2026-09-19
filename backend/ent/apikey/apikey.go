@@ -29,6 +29,8 @@ const (
 	FieldName = "name"
 	// FieldGroupID holds the string denoting the group_id field in the database.
 	FieldGroupID = "group_id"
+	// FieldFallbackGroupID holds the string denoting the fallback_group_id field in the database.
+	FieldFallbackGroupID = "fallback_group_id"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
@@ -102,6 +104,7 @@ var Columns = []string{
 	FieldKey,
 	FieldName,
 	FieldGroupID,
+	FieldFallbackGroupID,
 	FieldStatus,
 	FieldLastUsedAt,
 	FieldIPWhitelist,
@@ -211,6 +214,11 @@ func ByName(opts ...sql.OrderTermOption) OrderOption {
 // ByGroupID orders the results by the group_id field.
 func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGroupID, opts...).ToFunc()
+}
+
+// ByFallbackGroupID orders the results by the fallback_group_id field.
+func ByFallbackGroupID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFallbackGroupID, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.
