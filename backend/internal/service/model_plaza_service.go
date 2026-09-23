@@ -89,9 +89,10 @@ func NewModelPlazaService(
 // ListGroups 返回模型广场数据：每个活跃分组附带其可用模型与定价。
 //
 // 模型枚举口径与 ListAvailable 一致（Active 渠道、SupportedModels ∪ 全局定价回落、
-// 平台隔离），仅把顶层从渠道换成分组：
+// 平台隔离），并在分组启用模型白名单时按请求准入语义过滤，仅把顶层从渠道换成分组：
 //   - 渠道按 lower(name) 排序后遍历，保证同名模型去重结果确定；
 //   - 同分组同名模型「先见者胜」，仅当已存条目无定价而新条目有定价时升级替换；
+//   - 分组模型白名单逐条过滤完整模型记录，保留 Composite 分组同名、不同平台的定价；
 //   - token 模型的单价与阶梯按实收口径合成（见 ResolveContextPricingSchedule），
 //     图片计费模型的档位价按实收口径合成（见 plazaImageDisplayPricing）；
 //   - 每个模型附带官方参考价（查不到为 nil）；
@@ -194,6 +195,8 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
 		pg := byGroup[gid]
+		g := groupEnt[gid]
+		pg.Models = filterPlazaModelsByGroupAllowlist(pg.Models, g)
 		if len(pg.Models) == 0 {
 			continue
 		}
@@ -203,7 +206,6 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 			}
 			return pg.Models[i].Platform < pg.Models[j].Platform
 		})
-		g := groupEnt[gid]
 		for j := range pg.Models {
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
 			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
@@ -218,6 +220,19 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+func filterPlazaModelsByGroupAllowlist(models []PlazaModel, group *Group) []PlazaModel {
+	if group == nil || !group.ModelAllowlistEnabled() {
+		return models
+	}
+	filtered := models[:0]
+	for i := range models {
+		if group.ModelAllowlist.Allows(models[i].Name) {
+			filtered = append(filtered, models[i])
+		}
+	}
+	return filtered
 }
 
 // fillDisplayPricing 把模型的展示定价换成实收口径：

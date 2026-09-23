@@ -57,6 +57,59 @@ func TestListPlazaGroups_GroupCentricAggregation(t *testing.T) {
 	require.Equal(t, "claude-sonnet", out[0].Models[1].Name)
 }
 
+func TestListPlazaGroups_GroupModelAllowlist(t *testing.T) {
+	channel := plazaPricedChannel(1, "openai", []int64{10}, PlatformOpenAI,
+		"gpt-5.4", "gpt-5.5-codex", "gpt-image-1")
+
+	t.Run("disabled keeps existing model plaza behavior", func(t *testing.T) {
+		groups := []Group{{
+			ID: 10, Name: "all-models", Platform: PlatformOpenAI, RateMultiplier: 1,
+			ModelAllowlist: GroupModelAllowlist{Enabled: false, Models: []string{"gpt-5.4"}},
+		}}
+
+		out, err := newPlazaService([]Channel{channel}, groups, nil).ListGroups(context.Background())
+
+		require.NoError(t, err)
+		require.Len(t, out, 1)
+		require.Equal(t, []string{"gpt-5.4", "gpt-5.5-codex", "gpt-image-1"}, []string{
+			out[0].Models[0].Name,
+			out[0].Models[1].Name,
+			out[0].Models[2].Name,
+		})
+	})
+
+	t.Run("enabled intersects exact and wildcard entries with channel models", func(t *testing.T) {
+		groups := []Group{{
+			ID: 10, Name: "selected-models", Platform: PlatformOpenAI, RateMultiplier: 1,
+			ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"GPT-5.4", "gpt-5.5-*"}},
+		}}
+
+		out, err := newPlazaService([]Channel{channel}, groups, nil).ListGroups(context.Background())
+
+		require.NoError(t, err)
+		require.Len(t, out, 1)
+		require.Len(t, out[0].Models, 2)
+		require.Equal(t, []string{"gpt-5.4", "gpt-5.5-codex"}, []string{
+			out[0].Models[0].Name,
+			out[0].Models[1].Name,
+		})
+		require.InDelta(t, 3e-6, *out[0].Models[0].Pricing.InputPrice, 1e-12)
+		require.InDelta(t, 3e-6, *out[0].Models[1].Pricing.InputPrice, 1e-12)
+	})
+
+	t.Run("enabled with no channel match hides the empty group", func(t *testing.T) {
+		groups := []Group{{
+			ID: 10, Name: "no-models", Platform: PlatformOpenAI, RateMultiplier: 1,
+			ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-unsupported"}},
+		}}
+
+		out, err := newPlazaService([]Channel{channel}, groups, nil).ListGroups(context.Background())
+
+		require.NoError(t, err)
+		require.Empty(t, out)
+	})
+}
+
 func TestWithDefaultMaxReasoningEffortMultiplier_Fable51(t *testing.T) {
 	base := &ChannelModelPricing{BillingMode: BillingModeToken}
 	got := withDefaultMaxReasoningEffortMultiplier(base, "claude-fable-5-1")
@@ -139,6 +192,32 @@ func TestListPlazaGroups_CompositeIncludesConfiguredConcretePlatforms(t *testing
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.Len(t, out[0].Models, 2, "only concrete platforms are included and same-named models remain distinct")
+	require.Equal(t, PlatformAnthropic, out[0].Models[0].Platform)
+	require.Equal(t, PlatformOpenAI, out[0].Models[1].Platform)
+	require.InDelta(t, anthropicPrice, *out[0].Models[0].Pricing.InputPrice, 1e-12)
+	require.InDelta(t, openAIPrice, *out[0].Models[1].Pricing.InputPrice, 1e-12)
+}
+
+func TestListPlazaGroups_CompositeAllowlistPreservesSameModelAcrossPlatforms(t *testing.T) {
+	anthropicPrice := 3e-6
+	openAIPrice := 2e-6
+	ch := Channel{
+		ID: 1, Name: "multi", Status: StatusActive, GroupIDs: []int64{10},
+		ModelPricing: []ChannelModelPricing{
+			{Platform: PlatformAnthropic, Models: []string{"shared-model", "claude-hidden"}, InputPrice: &anthropicPrice},
+			{Platform: PlatformOpenAI, Models: []string{"shared-model", "gpt-hidden"}, InputPrice: &openAIPrice},
+		},
+	}
+	groups := []Group{{
+		ID: 10, Name: "composite", Platform: PlatformComposite, RateMultiplier: 1,
+		ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"shared-model"}},
+	}}
+
+	out, err := newPlazaService([]Channel{ch}, groups, nil).ListGroups(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Models, 2, "same model name on different platforms must keep both pricing rows")
 	require.Equal(t, PlatformAnthropic, out[0].Models[0].Platform)
 	require.Equal(t, PlatformOpenAI, out[0].Models[1].Platform)
 	require.InDelta(t, anthropicPrice, *out[0].Models[0].Pricing.InputPrice, 1e-12)
