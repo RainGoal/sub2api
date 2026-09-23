@@ -30,6 +30,31 @@ describe('account model purchase price form', () => {
     expect(validateAccountModelCostPricing(restored, 'openai', t)).toBeNull()
   })
 
+  it.each([
+    [undefined, { max: 3 }],
+    [{ max: 2, high: 1.5 }, { max: 2, high: 1.5 }],
+    [{}, {}],
+  ])('preserves legacy and explicit reasoning prices across editing: %j', (multipliers, expected) => {
+    const stored = {
+      platform: 'openai', models: ['vendor-model'], billing_mode: 'token', input_price: 0.000001,
+      intervals: [], max_reasoning_effort_multiplier: 3, reasoning_effort_multipliers: multipliers,
+    }
+    const entries = readAccountModelCostPricing({ [ACCOUNT_MODEL_COST_KEY]: [stored] })
+    expect(entries[0].reasoning_effort_multipliers).toEqual(expected)
+    const saved = accountModelCostPricingToAPI(entries, 'openai')[0]
+    expect(saved.reasoning_effort_multipliers ?? {}).toEqual(expected)
+    expect(saved).not.toHaveProperty('max_reasoning_effort_multiplier')
+    expect(validateAccountModelCostPricing(entries, 'openai', t)).toBeNull()
+  })
+
+  it('rejects invalid reasoning purchase multipliers', () => {
+    const entry = { ...createAccountModelCostEntry('openai'), models: ['vendor-model'], input_price: 1 }
+    for (const multipliers of [{ high: 0 }, { max: -1 }, { unsupported: 2 }]) {
+      entry.reasoning_effort_multipliers = multipliers
+      expect(validateAccountModelCostPricing([entry], 'openai', t)).not.toBeNull()
+    }
+  })
+
   it('preserves USD/second video tiers and normalizes the legacy model alias', () => {
     const entry = videoEntry(null)
     entry.models = ['bytedance/seedance-2.5']

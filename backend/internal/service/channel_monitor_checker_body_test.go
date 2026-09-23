@@ -189,7 +189,7 @@ func TestRunCheckForModel_OffMode_PreservesDefaultBody(t *testing.T) {
 	if ParseMetadataUserID(userID) == nil {
 		t.Errorf("Anthropic monitor should generate valid metadata.user_id, got %v", metadata["user_id"])
 	}
-	if h.lastHeaders.Get("User-Agent") != claude.DefaultHeaders["User-Agent"] {
+	if h.lastHeaders.Get("User-Agent") != claude.DefaultHeaders()["User-Agent"] {
 		t.Errorf("expected Claude Code User-Agent, got %q", h.lastHeaders.Get("User-Agent"))
 	}
 	if h.lastHeaders.Get("X-App") != "cli" {

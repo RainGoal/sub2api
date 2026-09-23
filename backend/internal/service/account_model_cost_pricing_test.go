@@ -50,6 +50,48 @@ func TestAccountModelCostValidation(t *testing.T) {
 	require.NoError(t, NormalizeAccountModelCostPricingExtra(PlatformOpenAI, nil))
 }
 
+func TestAccountModelCostReasoningUpgrade(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		multipliers map[string]float64
+		effort      string
+		want        float64
+	}{
+		{"legacy max", nil, "max", 3},
+		{"legacy other effort", nil, "high", 1},
+		{"new map wins", map[string]float64{"max": 2, "high": 1.5}, "max", 2},
+		{"new high effort", map[string]float64{"high": 1.5}, "high", 1.5},
+		{"cleared map stays cleared", map[string]float64{}, "max", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			price := map[string]any{"models": []string{"vendor-model"}, "billing_mode": "token",
+				"input_price": 0.01, "max_reasoning_effort_multiplier": 3.0}
+			if tc.multipliers != nil {
+				price["reasoning_effort_multipliers"] = tc.multipliers
+			}
+			account := &Account{Platform: PlatformOpenAI, Extra: map[string]any{
+				AccountModelCostPricingExtraKey: []any{price},
+			}}
+			input := CostInput{Model: "vendor-model", ReasoningEffort: tc.effort, Tokens: UsageTokens{InputTokens: 100}}
+			cost, err := ResolveAccountModelCost(context.Background(), newTestBillingService(), account, input)
+			require.NoError(t, err)
+			require.InDelta(t, tc.want, *cost, 1e-12)
+			require.NoError(t, NormalizeAccountModelCostPricingExtra(account.Platform, account.Extra))
+			cost, err = ResolveAccountModelCost(context.Background(), newTestBillingService(), account, input)
+			require.NoError(t, err)
+			require.InDelta(t, tc.want, *cost, 1e-12, "saving must preserve the purchase price")
+		})
+	}
+	for _, multiplier := range []float64{0, -1} {
+		err := NormalizeAccountModelCostPricingExtra(PlatformOpenAI, map[string]any{
+			AccountModelCostPricingExtraKey: []any{map[string]any{
+				"models": []string{"vendor-model"}, "input_price": 0.01, "max_reasoning_effort_multiplier": multiplier,
+			}},
+		})
+		require.Error(t, err)
+	}
+}
+
 func TestAccountModelCostTokenUsesOnlyPurchasePrices(t *testing.T) {
 	account := modelCostAccount(PlatformAnthropic, ChannelModelPricing{
 		Models: []string{"claude-fable-5-1"}, BillingMode: BillingModeToken,

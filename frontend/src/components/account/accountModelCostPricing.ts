@@ -3,8 +3,8 @@ import { normalizeSeedanceModelID } from '@/constants/videoProviders'
 import { isValidWildcardPattern } from '@/composables/useModelWhitelist'
 import {
   apiIntervalsToForm, createDefaultTimePricingForm, findModelConflict,
-  formIntervalsToAPI, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok,
-  toNullableNumber, validateIntervals, type PricingFormEntry,
+  formIntervalsToAPI, formReasoningEffortMultipliersToAPI, isValidPositiveMultiplier, mTokToPerToken, perTokenToMTok,
+  toNullableNumber, validateIntervals, validateReasoningEffortMultipliers, type PricingFormEntry,
 } from '@/components/admin/channel/types'
 import { isValidSeedanceCostEntry } from '@/components/admin/channel/seedanceCostPricing'
 
@@ -14,7 +14,7 @@ const tokenPriceFields = [
   'input_price', 'output_price', 'cache_write_price', 'cache_write_1h_price',
   'cache_read_price', 'image_input_price', 'image_output_price',
 ] as const
-const multiplierFields = ['fast_multiplier', 'flex_multiplier', 'max_reasoning_effort_multiplier'] as const
+const multiplierFields = ['fast_multiplier', 'flex_multiplier'] as const
 
 export function createAccountModelCostEntry(platform: string): PricingFormEntry {
   return {
@@ -28,11 +28,14 @@ export function createAccountModelCostEntry(platform: string): PricingFormEntry 
 export function readAccountModelCostPricing(extra: Record<string, unknown> | undefined): PricingFormEntry[] {
   const prices = extra?.[ACCOUNT_MODEL_COST_KEY]
   if (!Array.isArray(prices)) return []
-  return (prices as ChannelModelPricing[]).map(price => {
+  return (prices as (ChannelModelPricing & { max_reasoning_effort_multiplier?: number | null })[]).map(price => {
     const entry: PricingFormEntry = {
       ...createAccountModelCostEntry(price.platform), models: [...price.models],
       billing_mode: price.billing_mode, per_request_price: price.per_request_price,
       intervals: apiIntervalsToForm(price.intervals),
+      reasoning_effort_multipliers: price.reasoning_effort_multipliers
+        ? { ...price.reasoning_effort_multipliers }
+        : price.max_reasoning_effort_multiplier != null ? { max: price.max_reasoning_effort_multiplier } : null,
     }
     for (const field of tokenPriceFields) entry[field] = perTokenToMTok(price[field])
     for (const field of multiplierFields) entry[field] = price[field] ?? null
@@ -49,6 +52,7 @@ export function accountModelCostPricingToAPI(entries: PricingFormEntry[], platfo
       cache_write_price: null, cache_read_price: null, image_input_price: null, image_output_price: null,
       per_request_price: toNullableNumber(entry.per_request_price),
       intervals: formIntervalsToAPI(entry.intervals), time_pricing: null,
+      reasoning_effort_multipliers: formReasoningEffortMultipliersToAPI(entry.reasoning_effort_multipliers),
     }
     for (const field of tokenPriceFields) price[field] = mTokToPerToken(entry[field])
     for (const field of multiplierFields) price[field] = toNullableNumber(entry[field])
@@ -74,6 +78,8 @@ export function validateAccountModelCostPricing(
     if ([...tokenPriceFields, 'per_request_price']
       .some(field => !validPrice(entry[field as keyof PricingFormEntry]))) return invalid()
     if (multiplierFields.some(field => !isValidPositiveMultiplier(entry[field]))) return invalid()
+    const reasoningError = validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t)
+    if (reasoningError) return reasoningError
     if (platform === 'seedance' && !isValidSeedanceCostEntry(entry)) return invalid()
     const intervalError = validateIntervals(entry.intervals, entry.billing_mode, t)
     if (intervalError) return intervalError

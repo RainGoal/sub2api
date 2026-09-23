@@ -201,10 +201,7 @@ var providerAdapters = map[string]providerAdapter{
 		buildPath: func(string) string { return providerAnthropicPath },
 		buildBody: buildAnthropicClaudeCodeMonitorBody,
 		buildHeaders: func(apiKey string) map[string]string {
-			headers := make(map[string]string, len(claude.DefaultHeaders)+3)
-			for key, value := range claude.DefaultHeaders {
-				headers[key] = value
-			}
+			headers := claude.DefaultHeaders()
 			headers["x-api-key"] = apiKey
 			headers["anthropic-version"] = monitorAnthropicAPIVersion
 			headers["anthropic-beta"] = claude.APIKeyBetaHeader

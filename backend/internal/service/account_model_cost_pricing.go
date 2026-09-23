@@ -30,15 +30,25 @@ func NormalizeAccountModelCostPricingExtra(platform string, extra map[string]any
 	if err != nil || len(data) == 0 || data[0] != '[' {
 		return invalidAccountModelCost("model_cost_pricing must be an array")
 	}
-	var prices []ChannelModelPricing
-	if err := json.Unmarshal(data, &prices); err != nil {
+	var storedPrices []struct {
+		ChannelModelPricing
+		LegacyMaxMultiplier *float64 `json:"max_reasoning_effort_multiplier"`
+	}
+	if err := json.Unmarshal(data, &storedPrices); err != nil {
 		return invalidAccountModelCost("invalid model cost price list")
 	}
-	for i := range prices {
-		p := &prices[i]
+	prices := make([]ChannelModelPricing, len(storedPrices))
+	for i := range storedPrices {
+		p := &storedPrices[i].ChannelModelPricing
+		// Account extras predate the upstream reasoning map migration. Preserve
+		// negotiated max prices on read; an explicit map (even empty) wins.
+		if p.ReasoningEffortMultipliers == nil && storedPrices[i].LegacyMaxMultiplier != nil {
+			p.ReasoningEffortMultipliers = map[string]float64{"max": *storedPrices[i].LegacyMaxMultiplier}
+		}
 		if err := normalizeAccountModelCostEntry(platform, p); err != nil {
 			return invalidAccountModelCost(fmt.Sprintf("entry #%d: %v", i+1, err))
 		}
+		prices[i] = *p
 	}
 	if err := validatePricingEntries(prices); err != nil {
 		return err
@@ -97,9 +107,6 @@ func normalizeAccountModelCostEntry(platform string, p *ChannelModelPricing) err
 	}
 	if platform != PlatformSeedance && p.BillingMode != BillingModeToken && p.PerRequestPrice == nil {
 		return fmt.Errorf("media and per-request costs require a default unit price; tiers may override it")
-	}
-	if p.MaxReasoningEffortMultiplier != nil && *p.MaxReasoningEffortMultiplier <= 0 {
-		return fmt.Errorf("max reasoning multiplier must be positive")
 	}
 	seenTiers := make(map[string]bool)
 	for i := range p.Intervals {
@@ -199,9 +206,7 @@ func ResolveAccountModelCost(ctx context.Context, billing *BillingService, accou
 			tokens.ImageInputTokens = 0
 		}
 		cost = billing.computeTokenBreakdown(base, tokens, 1, input.ServiceTier, false).TotalCost
-		if pricing.MaxReasoningEffortMultiplier != nil && NormalizeMaxReasoningEffort(input.ReasoningEffort) == "max" {
-			cost *= *pricing.MaxReasoningEffortMultiplier
-		}
+		cost *= reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers)
 	} else {
 		unitPrice := pricing.PerRequestPrice
 		for _, tier := range pricing.Intervals {

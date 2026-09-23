@@ -251,9 +251,6 @@ func TestOpenAICompatClientModelPrivacyDoesNotChangeOtherPlatforms(t *testing.T)
 				require.NoError(t, err)
 				require.NotNil(t, result)
 				expectedModel := "route-model-B"
-				if route == "raw" {
-					expectedModel = "private-model-C"
-				}
 				require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"model":%q`, expectedModel))
 				require.NotContains(t, recorder.Body.String(), "public-model-A")
 				require.Equal(t, "private-model-C", recorder.Header().Get("X-Upstream-Model"))
