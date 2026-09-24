@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import type { OpenCodeGoUsageState } from '@/types'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, getOpenCodeUsageMock,
+  refreshOpenCodeUsageMock, setOpenCodeAutoRefreshMock } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
+  getOpenCodeUsageMock: vi.fn(),
+  refreshOpenCodeUsageMock: vi.fn(),
+  setOpenCodeAutoRefreshMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
 
@@ -28,6 +33,9 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
+      getOpenCodeGoUsage: getOpenCodeUsageMock,
+      refreshOpenCodeGoUsage: refreshOpenCodeUsageMock,
+      setOpenCodeGoUsageAutoRefresh: setOpenCodeAutoRefreshMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
     settings: {
@@ -464,6 +472,85 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ unrelated_setting: 'retained' })
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('model_cost_pricing')
     expect(account.extra.model_cost_pricing[0].input_price).toBe(0.0000025)
+  })
+
+  it.each(['load', 'refresh', 'toggle'] as const)(
+    'preserves and saves name and purchase-price drafts after OpenCode usage %s', async (action) => {
+      const originalCost = { ...createAccountModelCostEntry('openai'), models: ['gpt-5.2'], input_price: 5 }
+      const state: OpenCodeGoUsageState = {
+        account_id: 1, eligible: true, auto_refresh_enabled: false,
+        snapshot: { status: 'ok', fetched_at: '2026-09-24T00:00:00Z' },
+      }
+      const account = {
+        ...buildAccount(),
+        extra: { model_cost_pricing: accountModelCostPricingToAPI([originalCost], 'openai') },
+        opencode_go_usage: { ...state, snapshot: action === 'load' ? undefined : state.snapshot },
+      }
+      let resolveUsage!: (value: OpenCodeGoUsageState) => void
+      const response = new Promise<OpenCodeGoUsageState>(resolve => { resolveUsage = resolve })
+      const requestMock = { load: getOpenCodeUsageMock, refresh: refreshOpenCodeUsageMock, toggle: setOpenCodeAutoRefreshMock }[action]
+      requestMock.mockReset().mockReturnValueOnce(response)
+      updateAccountMock.mockReset().mockResolvedValue(account)
+      checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+      const wrapper = mountModal(account)
+      try {
+        await flushPromises()
+        const name = wrapper.get<HTMLInputElement>('form#edit-account-form input[type="text"]')
+        await name.setValue('Unsaved account name')
+        const costs = wrapper.getComponent(AccountModelCostPricing)
+        const draftCosts = [{ ...originalCost, input_price: 9 }]
+        costs.vm.$emit('update:modelValue', draftCosts)
+        if (action !== 'load') {
+          await wrapper.get(`[data-testid="opencode-go-${action === 'toggle' ? 'auto-refresh' : 'refresh'}"]`).trigger('click')
+        }
+        expect(requestMock).toHaveBeenCalledWith(...(action === 'toggle' ? [1, true] : [1]))
+        const nextState = { ...state, auto_refresh_enabled: action === 'toggle' }
+        resolveUsage(nextState)
+        await flushPromises()
+        const updated = wrapper.emitted('updated')?.at(-1)?.[0]
+        expect(updated).toMatchObject({ opencode_go_usage: nextState })
+        // AccountsView feeds the updated list row back into the open editor.
+        await wrapper.setProps({ account: { ...account, ...updated as object } })
+        expect(name.element.value).toBe('Unsaved account name')
+        expect(costs.props('modelValue')).toEqual(draftCosts)
+        await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+        await flushPromises()
+        expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+          name: 'Unsaved account name',
+          extra: { model_cost_pricing: accountModelCostPricingToAPI(draftCosts, 'openai') },
+        })
+      } finally {
+        wrapper.unmount()
+      }
+    }
+  )
+
+  it('rehydrates name and purchase prices when reopening or switching accounts', async () => {
+    const cost = { ...createAccountModelCostEntry('openai'), models: ['gpt-5.2'], input_price: 5 }
+    const account = {
+      ...buildAccount(), extra: { model_cost_pricing: accountModelCostPricingToAPI([cost], 'openai') },
+    }
+    const wrapper = mountModal(account)
+    try {
+      const name = () => wrapper.get<HTMLInputElement>('form#edit-account-form input[type="text"]')
+      const costs = () => wrapper.getComponent(AccountModelCostPricing)
+      await name().setValue('Draft name')
+      costs().vm.$emit('update:modelValue', [{ ...cost, input_price: 9 }])
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+      expect(name().element.value).toBe(account.name)
+      expect(costs().props('modelValue')[0].input_price).toBe(5)
+
+      await name().setValue('Another draft')
+      await wrapper.setProps({ account: {
+        ...account, id: 2, name: 'Second account',
+        extra: { model_cost_pricing: accountModelCostPricingToAPI([{ ...cost, input_price: 7 }], 'openai') },
+      } })
+      expect(name().element.value).toBe('Second account')
+      expect(costs().props('modelValue')[0].input_price).toBe(7)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('saves and explicitly clears this account purchase prices while preserving extra fields', async () => {

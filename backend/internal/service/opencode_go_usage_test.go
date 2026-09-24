@@ -561,6 +561,7 @@ func TestOpenCodeGoUsageGroupSharesStateAcrossSiblings(t *testing.T) {
 	require.Nil(t, differentState.Snapshot)
 
 	newSibling := openCodeGoUsageAccount(74)
+	newSibling.UpdatedAt = sibling.UpdatedAt.Add(time.Minute)
 	newSibling.Credentials = map[string]any{"base_url": "https://opencode.ai/zen/go/v1", "api_key": "shared-key"}
 	repo.mu.Lock()
 	repo.accounts[newSibling.ID] = newSibling
@@ -573,6 +574,68 @@ func TestOpenCodeGoUsageGroupSharesStateAcrossSiblings(t *testing.T) {
 	before := repo.groupResolveCalls.Load()
 	require.NoError(t, svc.ResolveOpenCodeGoUsageAccounts(context.Background(), []*Account{source, sibling, different, newSibling}))
 	require.Equal(t, before+1, repo.groupResolveCalls.Load(), "one list batch must issue one group lookup")
+}
+
+func TestOpenCodeGoUsageResolveKeepsSwitchAndSnapshotConsistent(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			now := time.Now().UTC()
+			previous := openCodeGoUsageAccount(71)
+			previous.Extra[OpenCodeGoUsageAutoRefreshExtraKey] = !enabled
+			previous.Extra[OpenCodeGoUsageSnapshotExtraKey] = &OpenCodeGoUsageSnapshot{
+				Status: OpenCodeGoUsageStatusOK, LastAttemptAt: now.Add(-time.Hour),
+			}
+			previous.UpdatedAt = now.Add(-time.Hour)
+			current := openCodeGoUsageAccount(72)
+			current.Credentials = mergeMap(nil, previous.Credentials)
+			current.Extra[OpenCodeGoUsageAutoRefreshExtraKey] = enabled
+			current.UpdatedAt = now.Add(-time.Minute)
+			newSibling := openCodeGoUsageAccount(73)
+			newSibling.Credentials = mergeMap(nil, previous.Credentials)
+			newSibling.Extra["model_cost_pricing"] = "keep-local-costs"
+			newSibling.UpdatedAt = now
+			repo := &openCodeGoUsageTestRepo{accounts: map[int64]*Account{
+				previous.ID: previous, current.ID: current, newSibling.ID: newSibling,
+			}}
+			svc := newOpenCodeGoUsageTestService(t, repo, nil, nil)
+			target, err := repo.GetByID(context.Background(), newSibling.ID)
+			require.NoError(t, err)
+			require.NoError(t, svc.ResolveOpenCodeGoUsageAccounts(context.Background(), []*Account{target}))
+			require.Equal(t, enabled, target.Extra[OpenCodeGoUsageAutoRefreshExtraKey])
+			require.NotContains(t, target.Extra, OpenCodeGoUsageSnapshotExtraKey,
+				"do not combine the latest switch with a snapshot from a different switch state")
+			require.Equal(t, "keep-local-costs", target.Extra["model_cost_pricing"])
+			require.NotContains(t, newSibling.Extra, OpenCodeGoUsageAutoRefreshExtraKey, "resolving must not mutate stored accounts")
+		})
+	}
+}
+
+func TestOpenCodeGoUsageRunDueAfterAddingSibling(t *testing.T) {
+	now := time.Now().UTC()
+	fetchedAt := now.Add(-time.Hour)
+	source := openCodeGoUsageAccount(71)
+	source.UpdatedAt = fetchedAt
+	source.Extra[OpenCodeGoUsageAutoRefreshExtraKey] = true
+	source.Extra[OpenCodeGoUsageSnapshotExtraKey] = &OpenCodeGoUsageSnapshot{
+		Status: OpenCodeGoUsageStatusOK, FetchedAt: &fetchedAt, LastAttemptAt: fetchedAt,
+	}
+	sibling := openCodeGoUsageAccount(72)
+	sibling.Credentials = mergeMap(nil, source.Credentials)
+	sibling.UpdatedAt = now
+	lastUsedAt := now.Add(-5 * time.Minute)
+	sibling.LastUsedAt = &lastUsedAt
+	due := cloneOpenCodeGoUsageTestAccount(*source)
+	due.LastUsedAt = sibling.LastUsedAt // SQL returns the group's latest activity.
+	repo := &openCodeGoUsageTestRepo{
+		accounts: map[int64]*Account{source.ID: source, sibling.ID: sibling}, due: []Account{due},
+	}
+	settings := &upstreamBillingProbeSettingRepo{values: map[string]string{
+		SettingKeyOpenCodeGoUsageSettings: `{"enabled":true,"interval_minutes":15}`,
+	}}
+	upstream := &openCodeGoUsageHTTPStub{body: []byte(openCodeGoUsageFixture)}
+	svc := newOpenCodeGoUsageTestService(t, repo, upstream, settings)
+	require.NoError(t, svc.RunDue(context.Background()))
+	require.Equal(t, int64(1), upstream.calls.Load(), "new sibling activity must still refresh the enabled group")
 }
 
 func TestOpenCodeGoUsageSetAutoRefreshAndSnapshotAreGroupScoped(t *testing.T) {

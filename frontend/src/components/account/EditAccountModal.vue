@@ -4630,7 +4630,9 @@ watch(
     if (!show || !newAccount) {
       return
     }
-    if (!wasShow || newAccount !== previousAccount) {
+    // Runtime usage updates replace the account object while this draft is open.
+    // Rehydrate only when opening the editor or switching to another account.
+    if (!wasShow || newAccount.id !== previousAccount?.id) {
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
     }

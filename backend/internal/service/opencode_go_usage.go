@@ -13,6 +13,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -501,6 +502,19 @@ func (s *OpenCodeGoUsageService) ResolveOpenCodeGoUsageAccounts(ctx context.Cont
 			continue
 		}
 		current := sources[fingerprint]
+		// New/key-switched siblings have no managed switch. They must inherit
+		// an existing explicit true or false instead of resetting the group.
+		if current != nil {
+			_, candidateHasAuto := candidate.Extra[OpenCodeGoUsageAutoRefreshExtraKey].(bool)
+			_, currentHasAuto := current.Extra[OpenCodeGoUsageAutoRefreshExtraKey].(bool)
+			if currentHasAuto && !candidateHasAuto {
+				continue
+			}
+			if candidateHasAuto && !currentHasAuto {
+				sources[fingerprint] = candidate
+				continue
+			}
+		}
 		if current == nil || candidate.UpdatedAt.After(current.UpdatedAt) ||
 			(candidate.UpdatedAt.Equal(current.UpdatedAt) && candidate.ID < current.ID) {
 			sources[fingerprint] = candidate
@@ -518,6 +532,12 @@ func (s *OpenCodeGoUsageService) ResolveOpenCodeGoUsageAccounts(ctx context.Cont
 		fingerprint, valid := openCodeGoUsageGroupFingerprint(candidate)
 		source := resolvedSources[fingerprint]
 		if !valid || source == nil {
+			continue
+		}
+		// Keep the switch/snapshot pair equal to a persisted member so writes
+		// retain their managed-state CAS. Never revive a cleared snapshot from
+		// a sibling with a different switch state.
+		if !reflect.DeepEqual(candidate.Extra[OpenCodeGoUsageAutoRefreshExtraKey], source.Extra[OpenCodeGoUsageAutoRefreshExtraKey]) {
 			continue
 		}
 		candidateSnapshot := decodeOpenCodeGoUsageSnapshot(candidate.Extra)
