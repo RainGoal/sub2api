@@ -13,6 +13,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLockAndMergeAccountProbeExtraPreservesCostPricingWithOpenCodeUsage(t *testing.T) {
+	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
+	account := openCodeGoUsageRepositoryAccount()
+	account.Extra = map[string]any{
+		"custom": "edited",
+		service.OpenCodeGoUsageAutoRefreshExtraKey: false,
+		service.OpenCodeGoUsageSnapshotExtraKey:    map[string]any{"status": "forged"},
+	}
+	const pricing = `[{"platform":"openai","models":["vendor-model"],"billing_mode":"per_request","per_request_price":0.04}]`
+	credentials, err := json.Marshal(account.Credentials)
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)SELECT.*extra -> 'model_cost_pricing'.*FOR NO KEY UPDATE`).
+		WithArgs(account.ID, account.Platform, account.Type, string(credentials), nil).
+		WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, true, "true", openCodeGoSnapshotJSON(), pricing))
+
+	got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "edited", got["custom"])
+	require.Equal(t, true, got[service.OpenCodeGoUsageAutoRefreshExtraKey])
+	snapshot, err := json.Marshal(got[service.OpenCodeGoUsageSnapshotExtraKey])
+	require.NoError(t, err)
+	require.JSONEq(t, openCodeGoSnapshotJSON(), string(snapshot))
+	cost, err := json.Marshal(got[service.AccountModelCostPricingExtraKey])
+	require.NoError(t, err)
+	require.JSONEq(t, pricing, string(cost))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestLockAndMergeAccountProbeExtraPreservesModelCostPricing(t *testing.T) {
 	const current = `[{"platform":"openai","models":["vendor-model"],"billing_mode":"per_request","per_request_price":0.04}]`
 	for _, tt := range []struct {
@@ -34,10 +63,8 @@ func TestLockAndMergeAccountProbeExtraPreservesModelCostPricing(t *testing.T) {
 			t.Cleanup(func() { _ = client.Close() })
 			mock.ExpectQuery(`(?s)SELECT.*extra -> 'model_cost_pricing'.*FOR NO KEY UPDATE`).
 				WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{}`, nil).
-				WillReturnRows(sqlmock.NewRows([]string{
-					"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled",
-					"snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "model_cost_pricing",
-				}).AddRow(true, false, true, nil, nil, nil, nil, nil, nil, tt.database))
+				WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
+					AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, tt.database))
 			account := &service.Account{ID: 27, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Extra: tt.input}
 			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
 			require.NoError(t, err)
