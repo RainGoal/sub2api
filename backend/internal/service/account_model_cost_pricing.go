@@ -206,7 +206,6 @@ func ResolveAccountModelCost(ctx context.Context, billing *BillingService, accou
 			tokens.ImageInputTokens = 0
 		}
 		cost = billing.computeTokenBreakdown(base, tokens, 1, input.ServiceTier, false).TotalCost
-		cost *= reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers)
 	} else {
 		unitPrice := pricing.PerRequestPrice
 		for _, tier := range pricing.Intervals {
@@ -227,6 +226,7 @@ func ResolveAccountModelCost(ctx context.Context, billing *BillingService, accou
 		}
 		cost = *unitPrice * units
 	}
+	cost *= reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers)
 	if cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
 		return nil, invalidAccountModelCost("account purchase cost exceeds the supported range")
 	}

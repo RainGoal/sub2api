@@ -1141,14 +1141,41 @@ func TestBuildChatStreamErrorSSE(t *testing.T) {
 
 func TestGPT6RawChatRejectsReasoningToolCalls(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
-		rec := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(rec)
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"public": model}}}
-		svc := &OpenAIGatewayService{}
-		_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, []byte(`{"model":"public","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup"}}]}`), "")
-		require.ErrorContains(t, err, "requires Responses")
-		require.Equal(t, 400, rec.Code)
+		for _, toolField := range []string{"tools", "functions"} {
+			for _, requestModel := range []string{"public", "private-route-model"} {
+				for _, effort := range []string{"", "high"} {
+					t.Run(model+"/"+toolField+"/"+requestModel+"/"+effort, func(t *testing.T) {
+						rec := httptest.NewRecorder()
+						c, _ := gin.CreateTestContext(rec)
+						c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+						if requestModel != "public" {
+							c.Request = c.Request.WithContext(WithCompositeRouteDecision(c.Request.Context(), CompositeRouteDecision{
+								Matched: true, PublicModel: "public", UpstreamModel: requestModel, TargetPlatform: PlatformOpenAI,
+							}))
+						}
+						account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+							Credentials: map[string]any{"model_mapping": map[string]any{requestModel: model}}}
+						toolPayload := `"tools":[{"type":"function","function":{"name":"lookup"}}]`
+						if toolField == "functions" {
+							toolPayload = `"functions":[{"name":"lookup"}]`
+						}
+						if effort != "" {
+							toolPayload += `,"reasoning_effort":"` + effort + `"`
+						}
+						body := []byte(`{"model":"` + requestModel + `","messages":[{"role":"user","content":"hello"}],` + toolPayload + `}`)
+						svc := &OpenAIGatewayService{}
+						_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
+						require.ErrorContains(t, err, model+" requires Responses")
+						require.Equal(t, http.StatusBadRequest, rec.Code)
+						require.Equal(t, "invalid_request_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+						require.Contains(t, rec.Body.String(), "public requires Responses")
+						require.Contains(t, rec.Body.String(), "reasoning_effort=none")
+						require.NotContains(t, rec.Body.String(), model)
+						require.NotContains(t, rec.Body.String(), "private-route-model")
+					})
+				}
+			}
+		}
 	}
 }
 

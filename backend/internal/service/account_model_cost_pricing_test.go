@@ -92,6 +92,51 @@ func TestAccountModelCostReasoningUpgrade(t *testing.T) {
 	}
 }
 
+func TestAccountModelCostReasoningAcrossBillingModes(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		mode        BillingMode
+		unitPrice   float64
+		multipliers map[string]float64
+		input       CostInput
+		want        float64
+		wantError   bool
+	}{
+		{"token once", BillingModeToken, 0.01, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "high", Tokens: UsageTokens{InputTokens: 100}}, 3, false},
+		{"per request", BillingModePerRequest, 0.4, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "high", RequestCount: 1}, 1.2, false},
+		{"image count", BillingModeImage, 0.4, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "high", RequestCount: 2}, 2.4, false},
+		{"video seconds", BillingModeVideo, 0.4, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "high", UsageUnits: 5}, 6, false},
+		{"no configured multiplier", BillingModePerRequest, 0.4, nil, CostInput{ReasoningEffort: "high"}, 0.4, false},
+		{"other effort", BillingModePerRequest, 0.4, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "low"}, 0.4, false},
+		{"no effort", BillingModePerRequest, 0.4, map[string]float64{"high": 3}, CostInput{}, 0.4, false},
+		{"free price", BillingModePerRequest, 0, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "high"}, 0, false},
+		{"multiplied cost overflow", BillingModePerRequest, math.MaxFloat64 / 2, map[string]float64{"high": 3}, CostInput{ReasoningEffort: "high"}, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pricing := ChannelModelPricing{Models: []string{"vendor-model"}, BillingMode: tc.mode,
+				ReasoningEffortMultipliers: tc.multipliers}
+			if tc.mode == BillingModeToken {
+				pricing.InputPrice = testPtrFloat64(tc.unitPrice)
+			} else {
+				pricing.PerRequestPrice = testPtrFloat64(tc.unitPrice)
+			}
+			account := modelCostAccount(PlatformOpenAI, pricing)
+			require.NoError(t, NormalizeAccountModelCostPricingExtra(account.Platform, account.Extra))
+			input := tc.input
+			input.Model = "vendor-model"
+			cost, err := ResolveAccountModelCost(context.Background(), newTestBillingService(), account, input)
+			if tc.wantError {
+				require.ErrorContains(t, err, "exceeds the supported range")
+				require.Nil(t, cost)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, cost)
+			require.InDelta(t, tc.want, *cost, 1e-12)
+		})
+	}
+}
+
 func TestAccountModelCostTokenUsesOnlyPurchasePrices(t *testing.T) {
 	account := modelCostAccount(PlatformAnthropic, ChannelModelPricing{
 		Models: []string{"claude-fable-5-1"}, BillingMode: BillingModeToken,
@@ -163,6 +208,31 @@ func TestAccountModelCostMediaAndMissingTier(t *testing.T) {
 	cost, err = ResolveAccountModelCost(context.Background(), nil, account, CostInput{Model: "seedance-2.0", UsageUnits: 120, RequestCount: 1})
 	require.NoError(t, err)
 	require.Equal(t, 0.4, *cost)
+}
+
+func TestAccountModelCostImageTiersApplyReasoningOnce(t *testing.T) {
+	account := modelCostAccount(PlatformOpenAI, ChannelModelPricing{Models: []string{"image-model"},
+		BillingMode: BillingModeImage, PerRequestPrice: testPtrFloat64(0.5),
+		ReasoningEffortMultipliers: map[string]float64{"high": 3},
+		Intervals: []PricingInterval{{TierLabel: "1K", PerRequestPrice: testPtrFloat64(0)},
+			{TierLabel: "2K", PerRequestPrice: testPtrFloat64(0.2)}}})
+	for _, tc := range []struct {
+		name  string
+		sizes map[string]int
+		want  float64
+	}{
+		{"no breakdown", nil, 4.5},
+		{"complete breakdown", map[string]int{"1K": 1, "2K": 2}, 1.2},
+		{"remaining use default", map[string]int{"1K": 1, "2K": 1}, 2.1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cost, err := resolveAccountModelCostWithImages(context.Background(), nil, account,
+				CostInput{Model: "image-model", SizeTier: "4K", ReasoningEffort: "high"}, 3, tc.sizes)
+			require.NoError(t, err)
+			require.NotNil(t, cost)
+			require.InDelta(t, tc.want, *cost, 1e-12)
+		})
+	}
 }
 
 func TestAccountModelCostRequiresDefaultsBeforeSaving(t *testing.T) {
