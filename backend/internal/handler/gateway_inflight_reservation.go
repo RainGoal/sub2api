@@ -57,6 +57,7 @@ func reserveInflightBalance(
 	if err != nil {
 		return inflightNoop, err
 	}
+	ctx, done = withFallbackInflightReprice(ctx, billing, estimator, apiKey, req, done)
 	c.Request = c.Request.WithContext(ctx)
 	return done, nil
 }

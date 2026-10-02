@@ -29,8 +29,8 @@ var (
 	// KEYS: [1]=zset [2]=hash
 	// ARGV: [1]=now_ms [2]=expire_at_ms [3]=member [4]=amount [5]=balance [6]=key_ttl_ms
 	// 返回 {allowed, inflight_sum(string), inflight_count}
-	// 规则：先清理已过期成员；若无在途预留则直接放行（与旧行为一致，外层已校验余额 > 阈值）；
-	// 否则要求 balance - sum(在途) >= amount。放行时登记预留。
+	// 同一 requestID 原子重估：排除自身旧预留，降价始终允许，0 清除预留。
+	// 无其他在途请求时保持首请求放行；否则涨价/新建须由剩余余额覆盖。
 	reserveInflightBalanceScript = redis.NewScript(`
 		local now = tonumber(ARGV[1])
 		local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now)
@@ -46,7 +46,18 @@ var (
 		local count = redis.call('ZCARD', KEYS[1])
 		local amount = tonumber(ARGV[4])
 		local balance = tonumber(ARGV[5])
-		if count > 0 and (balance - sum) < amount then
+		local previous = redis.call('HGET', KEYS[2], ARGV[3])
+		local previousAmount = tonumber(previous) or 0
+		if previous then
+			sum = sum - previousAmount
+			count = count - 1
+		end
+		if amount <= 0 then
+			redis.call('ZREM', KEYS[1], ARGV[3])
+			redis.call('HDEL', KEYS[2], ARGV[3])
+			return {1, tostring(sum), count}
+		end
+		if count > 0 and amount > previousAmount and (balance - sum) < amount then
 			return {0, tostring(sum), count}
 		end
 		redis.call('ZADD', KEYS[1], tonumber(ARGV[2]), ARGV[3])

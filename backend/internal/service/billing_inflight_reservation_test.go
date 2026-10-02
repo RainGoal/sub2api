@@ -210,10 +210,19 @@ func (m *memInflightCache) ReserveInflightBalance(_ context.Context, _ int64, id
 	defer m.mu.Unlock()
 	m.gc()
 	sum := 0.0
-	for _, v := range m.res {
-		sum += v
+	others := 0
+	for member, v := range m.res {
+		if member != id {
+			sum += v
+			others++
+		}
 	}
-	if len(m.res) > 0 && balance-sum < amount {
+	if amount <= 0 {
+		delete(m.res, id)
+		delete(m.exp, id)
+		return true, sum, nil
+	}
+	if others > 0 && amount > m.res[id] && balance-sum < amount {
 		return false, sum, nil
 	}
 	m.res[id] = amount

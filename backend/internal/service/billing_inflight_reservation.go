@@ -18,8 +18,9 @@ import (
 // BillingCache 的 Redis 实现同时实现此接口；未实现时在途预留自动关闭（fail-open）。
 type InflightBalanceReservationCache interface {
 	// ReserveInflightBalance 原子地：清理过期预留；若用户已有在途预留且
-	// balance - sum(在途) < amount 则拒绝；否则登记 requestID 的预留（ttl 后自动失效）。
-	// 返回是否放行以及登记前的在途合计。
+	// balance - sum(其他在途) < amount 则拒绝；否则登记 requestID 的预留（ttl 后自动失效）。
+	// 同一 requestID 原子替换，减少金额始终允许，amount=0 移除；拒绝保留旧值。
+	// 返回是否放行以及其他请求的在途合计。
 	ReserveInflightBalance(ctx context.Context, userID int64, requestID string, amount, balance float64, ttl time.Duration) (bool, float64, error)
 	// ReleaseInflightBalance 释放 requestID 的预留（幂等）。
 	ReleaseInflightBalance(ctx context.Context, userID int64, requestID string) error
@@ -59,6 +60,7 @@ type InflightReservation struct {
 	requestID string
 	amount    float64
 	ttl       time.Duration
+	mu        sync.Mutex // protects repricing against release, and amount reads
 
 	refs        atomic.Int64
 	releaseOnce sync.Once
@@ -73,6 +75,8 @@ func (r *InflightReservation) Amount() float64 {
 	if r == nil {
 		return 0
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.amount
 }
 
@@ -113,6 +117,8 @@ func (r *InflightReservation) Release() {
 	}
 	r.stopRenewal()
 	r.releaseOnce.Do(func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.refs.Store(0)
 		relCtx, relCancel := context.WithTimeout(context.Background(), inflightReservationReleaseTimeout)
 		defer relCancel()

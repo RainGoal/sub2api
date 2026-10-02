@@ -162,6 +162,14 @@ func (f *apiKeyGroupFallback) Try(c *gin.Context, current *service.APIKey, model
 	if c.Request.Context().Err() != nil || c.Writer.Written() {
 		return nil, nil
 	}
+	ctx, err := repriceFallbackInflight(trial.Request.Context(), key)
+	if err != nil {
+		return nil, err
+	}
+	if c.Request.Context().Err() != nil || c.Writer.Written() {
+		return nil, nil
+	}
+	trial.Request = trial.Request.WithContext(ctx)
 	*switchCount++
 	c.Request = trial.Request
 	for name, value := range trial.Keys {

@@ -99,6 +99,13 @@ func (m *handlerInflightCache) GetUserBalance(context.Context, int64) (float64, 
 	return m.balance, nil
 }
 
+func (m *handlerInflightCache) DeductUserBalance(_ context.Context, _ int64, amount float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.balance -= amount
+	return nil
+}
+
 func (m *handlerInflightCache) GetUserPlatformQuotaCache(context.Context, int64, string) (*service.UserPlatformQuotaCacheEntry, bool, error) {
 	return nil, false, nil
 }
@@ -107,10 +114,18 @@ func (m *handlerInflightCache) ReserveInflightBalance(_ context.Context, _ int64
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sum := 0.0
-	for _, v := range m.res {
-		sum += v
+	others := 0
+	for member, v := range m.res {
+		if member != id {
+			sum += v
+			others++
+		}
 	}
-	if len(m.res) > 0 && balance-sum < amount {
+	if amount <= 0 {
+		delete(m.res, id)
+		return true, sum, nil
+	}
+	if others > 0 && amount > m.res[id] && balance-sum < amount {
 		return false, sum, nil
 	}
 	m.res[id] = amount
