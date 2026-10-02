@@ -247,7 +247,7 @@ func TestSemanticTimeoutForwardAsChatCompletionsStreaming(t *testing.T) {
 
 	result, err := newSemanticTimeoutGatewayTestService().handleCCStreamingFromAnthropic(
 		semanticTimeoutResponse(anthropicTimeoutStream, "text/event-stream"), c,
-		semanticTimeoutAnthropicAccount(), "claude-test", "claude-test", nil, time.Now(), true,
+		semanticTimeoutAnthropicAccount(), "claude-test", "claude-test", nil, time.Now(),
 	)
 
 	require.ErrorIs(t, err, errProviderSemanticTimeout)

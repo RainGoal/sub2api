@@ -414,6 +414,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if err := NormalizeAccountModelCostPricingExtra(input.Platform, accountExtra); err != nil {
 		return nil, err
 	}
+	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
+		return nil, errors.New("typesafe accounts only support apikey credentials")
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -584,6 +587,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if err := NormalizeAccountModelCostPricingExtra(account.Platform, input.Extra); err != nil {
 		return nil, err
+	}
+	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
+		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
