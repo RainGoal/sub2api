@@ -70,6 +70,7 @@ type Handlers struct {
 	AsyncImage       *AsyncImageHandler
 	BatchImage       *BatchImageHandler
 	VideoAsset       *VideoAssetHandler
+	Studio           *StudioHandler
 	Sales            *SalesHandler
 }
 

@@ -31,6 +31,10 @@ func RegisterUserRoutes(
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	registerSalesUserRoutes(authenticated, h)
 	registerUserActiveConnectionRoutes(authenticated, activeConnectionService)
+	if h.Studio != nil {
+		authenticated.GET("/studio/tasks", h.Studio.List)
+		authenticated.PUT("/studio/tasks/:id", h.Studio.Save)
+	}
 	if h.VideoAsset != nil {
 		authenticated.GET("/video-assets/config", h.VideoAsset.Config)
 		authenticated.POST("/video-assets", h.VideoAsset.Upload)

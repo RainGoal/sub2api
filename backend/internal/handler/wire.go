@@ -199,6 +199,7 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	videoAssetHandler *VideoAssetHandler,
+	studioHandler *StudioHandler,
 	salesHandler *SalesHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
@@ -227,6 +228,7 @@ func ProvideHandlers(
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
 		VideoAsset:       videoAssetHandler,
+		Studio:           studioHandler,
 		Sales:            salesHandler,
 	}
 }
@@ -255,6 +257,7 @@ var ProviderSet = wire.NewSet(
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
 	NewVideoAssetHandler,
+	NewStudioHandler,
 	NewSalesHandler,
 
 	// Admin handlers
