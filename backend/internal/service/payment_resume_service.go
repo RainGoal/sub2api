@@ -244,7 +244,10 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must use http or https")
 	}
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	parsed.Fragment = ""
+	parsed.RawFragment = ""
 	if parsed.Path == "" {
 		parsed.Path = "/"
 	}
@@ -286,9 +289,12 @@ func buildPaymentReturnURL(base string, orderID int64, outTradeNo string, resume
 	if !parsed.IsAbs() || parsed.Host == "" {
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must be a valid absolute URL")
 	}
+	parsed.ForceQuery = false
 	parsed.Fragment = ""
+	parsed.RawFragment = ""
 
-	query := parsed.Query()
+	// Only server-owned payment context may be forwarded to the result page.
+	query := url.Values{}
 	if orderID > 0 {
 		query.Set("order_id", strconv.FormatInt(orderID, 10))
 	}

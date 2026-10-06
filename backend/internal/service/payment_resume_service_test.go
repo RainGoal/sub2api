@@ -81,12 +81,23 @@ func TestNormalizePaymentSource(t *testing.T) {
 func TestCanonicalizeReturnURL(t *testing.T) {
 	t.Parallel()
 
-	got, err := CanonicalizeReturnURL("https://example.com/payment/result?b=2#a", "example.com", "")
-	if err != nil {
-		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
-	}
-	if got != "https://example.com/payment/result?b=2" {
-		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://example.com/payment/result?b=2")
+	for _, raw := range []string{
+		"https://example.com/payment/result",
+		"https://example.com/payment/result?b=2#a",
+		"https://example.com/payment/result?sign=attacker&money=0.01&trade_status=TRADE_SUCCESS",
+		"https://example.com/payment/result?order_id=999&out_trade_no=attacker&resume_token=attacker&status=failed",
+		"https://example.com/payment/result?#fragment%2Fencoded",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			got, err := CanonicalizeReturnURL(raw, "example.com", "")
+			if err != nil {
+				t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
+			}
+			if got != "https://example.com/payment/result" {
+				t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://example.com/payment/result")
+			}
+		})
 	}
 }
 
@@ -117,8 +128,8 @@ func TestCanonicalizeReturnURLAllowsConfiguredFrontendHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
 	}
-	if got != "https://app.example.com/payment/result?from=checkout" {
-		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://app.example.com/payment/result?from=checkout")
+	if got != "https://app.example.com/payment/result" {
+		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://app.example.com/payment/result")
 	}
 }
 
@@ -133,7 +144,7 @@ func TestCanonicalizeReturnURLRejectsNonCanonicalPath(t *testing.T) {
 func TestBuildPaymentReturnURL(t *testing.T) {
 	t.Parallel()
 
-	got, err := buildPaymentReturnURL("https://example.com/payment/result?from=checkout#fragment", 42, "sub2_42", "resume-token")
+	got, err := buildPaymentReturnURL("https://example.com/payment/result?from=checkout&sign=attacker&order_id=999&out_trade_no=attacker&resume_token=attacker&resume_token=duplicate&status=failed#fragment", 42, "sub2_42", "resume-token")
 	if err != nil {
 		t.Fatalf("buildPaymentReturnURL returned error: %v", err)
 	}
@@ -146,8 +157,8 @@ func TestBuildPaymentReturnURL(t *testing.T) {
 		t.Fatalf("buildPaymentReturnURL should strip fragments, got %q", parsed.Fragment)
 	}
 	query := parsed.Query()
-	if query.Get("from") != "checkout" {
-		t.Fatalf("expected original query to be preserved, got %q", query.Get("from"))
+	if len(query) != 4 {
+		t.Fatalf("expected only server-generated payment fields, got %v", query)
 	}
 	if query.Get("order_id") != strconv.FormatInt(42, 10) {
 		t.Fatalf("order_id = %q", query.Get("order_id"))
@@ -166,7 +177,7 @@ func TestBuildPaymentReturnURL(t *testing.T) {
 func TestBuildPaymentReturnURLWithoutResumeTokenStillIncludesOutTradeNo(t *testing.T) {
 	t.Parallel()
 
-	got, err := buildPaymentReturnURL("https://example.com/payment/result", 42, "sub2_42", "")
+	got, err := buildPaymentReturnURL("https://example.com/payment/result?resume_token=attacker", 42, "sub2_42", "")
 	if err != nil {
 		t.Fatalf("buildPaymentReturnURL returned error: %v", err)
 	}
