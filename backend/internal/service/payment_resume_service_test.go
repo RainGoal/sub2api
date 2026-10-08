@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,21 @@ func TestCanonicalizeReturnURL(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeReturnURLStripsSmuggledTradeStatus(t *testing.T) {
+	t.Parallel()
+
+	got, err := CanonicalizeReturnURL(
+		"https://example.com/payment/result?trade_status=TRADE_SUCCESS",
+		"example.com", "",
+	)
+	if err != nil {
+		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
+	}
+	if strings.Contains(got, "trade_status") {
+		t.Fatalf("CanonicalizeReturnURL kept smuggled trade_status: %q", got)
+	}
+}
+
 func TestCanonicalizeReturnURLRejectsRelativeURL(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +144,8 @@ func TestCanonicalizeReturnURLAllowsConfiguredFrontendHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
 	}
+	// The host allowlist still applies, but client query parameters are
+	// always dropped (issue #7881: signed-value parameter smuggling).
 	if got != "https://app.example.com/payment/result" {
 		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://app.example.com/payment/result")
 	}
