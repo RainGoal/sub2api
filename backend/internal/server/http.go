@@ -136,12 +136,12 @@ func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 	// 根据配置决定是否启用 H2C
 	if cfg.Server.H2C.Enabled {
 		h2cConfig := cfg.Server.H2C
-		if err := http2.ConfigureServer(server, &http2.Server{
-			MaxConcurrentStreams:         h2cConfig.MaxConcurrentStreams,
-			IdleTimeout:                  time.Duration(h2cConfig.IdleTimeout) * time.Second,
-			MaxReadFrameSize:             uint32(h2cConfig.MaxReadFrameSize),
-			MaxUploadBufferPerConnection: int32(h2cConfig.MaxUploadBufferPerConnection),
-			MaxUploadBufferPerStream:     int32(h2cConfig.MaxUploadBufferPerStream),
+		if err := http2.ConfigureServer(server, &http2.Server{ //nolint:staticcheck // SA1019: retain the supported H2C compatibility wrapper during the security update.
+			MaxConcurrentStreams:         h2cConfig.MaxConcurrentStreams,                     //nolint:staticcheck // SA1019: preserve the existing H2C concurrency limit.
+			IdleTimeout:                  time.Duration(h2cConfig.IdleTimeout) * time.Second, //nolint:staticcheck // SA1019: keep the H2C idle timeout independent of HTTP/1.
+			MaxReadFrameSize:             uint32(h2cConfig.MaxReadFrameSize),                 //nolint:staticcheck // SA1019: preserve the configured H2C frame limit.
+			MaxUploadBufferPerConnection: int32(h2cConfig.MaxUploadBufferPerConnection),      //nolint:staticcheck // SA1019: preserve the H2C connection receive-buffer limit.
+			MaxUploadBufferPerStream:     int32(h2cConfig.MaxUploadBufferPerStream),          //nolint:staticcheck // SA1019: preserve the H2C stream receive-buffer limit.
 		}); err != nil {
 			log.Printf("Failed to configure HTTP/2 Cleartext (h2c): %v", err)
 		} else {
