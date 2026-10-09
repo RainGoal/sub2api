@@ -19,7 +19,7 @@ vi.mock('vue-i18n', async original => ({
 
 const wallet = (id = 'a', overrides: Partial<UpstreamWallet> = {}): UpstreamWallet => ({ id, name: `Wallet ${id}`, site_url: 'https://upstream.example', single_account: true, account_ids: [], query_account_id: null, threshold: 20, recharge_url: '', enabled: true, ...overrides })
 const snapshot = (id = 'a', overrides: Partial<UpstreamBalanceSnapshot> = {}): UpstreamBalanceSnapshot => ({ wallet_id: id, status: 'ok', kind: 'wallet', balance: 120, currency: 'USD', low_balance: false, account_count: 2, last_success_at: '2026-10-08T00:00:00Z', fresh_until: '2099-01-01T00:00:00Z', ...overrides })
-const defaultConfig = (): UpstreamBalanceConfig => ({ version: 3, enabled: false, interval_minutes: 30, wallets: [wallet()] })
+const defaultConfig = (): UpstreamBalanceConfig => ({ version: 3, enabled: false, interval_seconds: 1800, interval_minutes: 30, wallets: [wallet()] })
 const sites = [{ site_url: 'https://upstream.example', accounts: [{ id: 1, name: 'Key one' }, { id: 2, name: 'Key two' }] }]
 const stubs = {
   AppLayout: { template: '<div><slot /></div>' },
@@ -40,6 +40,10 @@ describe('isolated upstream balance monitoring', () => {
     discover.mockResolvedValue({ sites })
     saveConfig.mockImplementation(async (config: UpstreamBalanceConfig) => ({ ...config, version: config.version + 1, wallets: config.wallets.map(item => ({ ...item, id: item.id || 'new' })) }))
     refresh.mockResolvedValue(snapshot())
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('loads cached balances without querying upstreams or changing existing account settings', async () => {
@@ -102,7 +106,171 @@ describe('isolated upstream balance monitoring', () => {
     expect(saveConfig).not.toHaveBeenCalled()
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(saveConfig).toHaveBeenCalledWith({ ...defaultConfig(), enabled: true, interval_minutes: 60 })
+    expect(saveConfig).toHaveBeenCalledWith({ ...defaultConfig(), enabled: true, interval_seconds: 60 })
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('loads legacy minute settings as seconds without automatically saving', async () => {
+    const legacy = defaultConfig()
+    delete legacy.interval_seconds
+    list.mockResolvedValue({ config: legacy, items: [snapshot()] })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('#balance-interval').element.value).toBe('1800')
+    expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
+    expect(saveConfig).not.toHaveBeenCalled()
+  })
+
+  it('prefers the seconds field over the legacy minute field', async () => {
+    list.mockResolvedValue({ config: { ...defaultConfig(), interval_seconds: 15 }, items: [snapshot()] })
+    const wrapper = mountView()
+    await flushPromises()
+    const input = wrapper.get<HTMLInputElement>('#balance-interval')
+    expect(input.element.value).toBe('15')
+    expect(input.attributes()).toMatchObject({ min: '10', max: '86400', step: '1' })
+    expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
+  })
+
+  it.each([10, 15, 30, 86400])('saves %i seconds without changing wallet settings', async seconds => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('#balance-interval').setValue(seconds)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledWith({ ...defaultConfig(), interval_seconds: seconds })
+    expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it.each([0, 9, 86401, 10.5, ''])('rejects invalid second intervals (%s)', async seconds => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('#balance-interval').setValue(seconds)
+    await wrapper.get('form').trigger('submit')
+    expect(saveConfig).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.upstreamBalances.validationInterval')
+  })
+
+  it.each([
+    { enabled: true, interval_seconds: 15, wait: 15000 },
+    { enabled: true, interval_seconds: 1800, wait: 60000 },
+    { enabled: false, interval_seconds: 10, wait: 60000 },
+  ])('polls only cached balances at a bounded interval ($wait ms)', async ({ enabled, interval_seconds, wait }) => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValue({ config: { ...defaultConfig(), enabled, interval_seconds }, items: [snapshot()] })
+    const wrapper = mountView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(wait - 1)
+    expect(list).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(refresh).not.toHaveBeenCalled()
+    expect(saveConfig).not.toHaveBeenCalled()
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(wait * 2)
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps unsaved settings while updating cached attempt status and balances', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const saved = { ...defaultConfig(), enabled: true, interval_seconds: 15 }
+    list.mockResolvedValueOnce({ config: saved, items: [snapshot()] })
+    list.mockResolvedValue({ config: saved, items: [snapshot('a', { balance: 75, status: 'failed', last_attempt_at: '2026-10-09T00:00:00Z' })] })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('#balance-interval').setValue(30)
+    await wrapper.get('[data-test="auto-enabled"]').setValue(false)
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(wrapper.text()).toContain('USD 75.00')
+    expect(wrapper.text()).toContain('admin.upstreamBalances.lastAttempt')
+    expect(wrapper.get<HTMLInputElement>('#balance-interval').element.value).toBe('30')
+    expect(wrapper.get<HTMLInputElement>('[data-test="auto-enabled"]').element.checked).toBe(false)
+    expect(button(wrapper, 'common.save').attributes('disabled')).toBeUndefined()
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('does not overlap cache reads and stops scheduling after unmount during a request', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const saved = { ...defaultConfig(), enabled: true, interval_seconds: 10 }
+    let resolveList!: (result: { config: UpstreamBalanceConfig; items: UpstreamBalanceSnapshot[] }) => void
+    list.mockResolvedValueOnce({ config: saved, items: [snapshot()] })
+    list.mockReturnValue(new Promise(resolve => { resolveList = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(10000)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    resolveList({ config: saved, items: [snapshot()] })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('pauses cache polling while hidden and resumes on visibility', async () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValue({ config: { ...defaultConfig(), enabled: true, interval_seconds: 10 }, items: [snapshot()] })
+    const wrapper = mountView()
+    await flushPromises()
+    hidden.mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(list).toHaveBeenCalledTimes(1)
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(refresh).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('marks second-based balances stale promptly even if a cache read fails', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValueOnce({ config: { ...defaultConfig(), enabled: true, interval_seconds: 15 }, items: [snapshot('a', { fresh_until: new Date(Date.now() + 14999).toISOString() })] })
+    list.mockRejectedValue(new Error('offline'))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('admin.upstreamBalances.stale')
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(wrapper.text()).toContain('admin.upstreamBalances.stale')
+    expect(wrapper.text()).toContain('USD 120.00')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('does not overwrite dirty settings when another administrator saves a new version', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValueOnce({ config: { ...defaultConfig(), enabled: true, interval_seconds: 15 }, items: [snapshot()] })
+    list.mockResolvedValue({ config: { ...defaultConfig(), version: 4, interval_seconds: 10 }, items: [snapshot()] })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('#balance-interval').setValue(30)
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(wrapper.get<HTMLInputElement>('#balance-interval').element.value).toBe('30')
+    expect(wrapper.get<HTMLInputElement>('[data-test="auto-enabled"]').element.checked).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ version: 3, enabled: true, interval_seconds: 30 }))
+  })
+
+  it('observes remotely saved settings through the low-frequency cache read when no edits are pending', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValueOnce({ config: defaultConfig(), items: [snapshot()] })
+    list.mockResolvedValue({ config: { ...defaultConfig(), version: 4, enabled: true, interval_seconds: 10 }, items: [snapshot()] })
+    const wrapper = mountView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(wrapper.get<HTMLInputElement>('#balance-interval').element.value).toBe('10')
+    expect(wrapper.get<HTMLInputElement>('[data-test="auto-enabled"]').element.checked).toBe(true)
+    expect(button(wrapper, 'common.save').attributes('disabled')).toBeDefined()
+    expect(saveConfig).not.toHaveBeenCalled()
     expect(refresh).not.toHaveBeenCalled()
   })
 

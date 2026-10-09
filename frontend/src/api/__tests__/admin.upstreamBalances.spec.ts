@@ -18,7 +18,7 @@ describe('upstream balance API boundaries', () => {
   })
 
   it('saves only isolated configuration and explicitly refreshes a wallet', async () => {
-    const config = { version: 8, enabled: false, interval_minutes: 30, wallets: [] }
+    const config = { version: 8, enabled: false, interval_seconds: 15, interval_minutes: 30, wallets: [] }
     put.mockResolvedValue({ data: { ...config, version: 9 } })
     post.mockResolvedValue({ data: { wallet_id: 'a/b', balance: null } })
     await expect(upstreamBalancesAPI.saveConfig(config)).resolves.toMatchObject({ version: 9 })

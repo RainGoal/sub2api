@@ -18,6 +18,17 @@ func (s *UpstreamBalanceService) Refresh(ctx context.Context, id string) (*Upstr
 }
 
 func (s *UpstreamBalanceService) refresh(ctx context.Context, id string, scheduled bool) (*UpstreamBalanceItem, error) {
+	return s.refreshWithState(ctx, id, scheduled, nil)
+}
+
+type upstreamBalanceRefreshState struct {
+	config *UpstreamBalanceConfig
+	index  map[int64]*Account
+}
+
+// A periodic batch shares one read-only account index. Each request still loads
+// its own current account and checks the config revision before using a key.
+func (s *UpstreamBalanceService) refreshWithState(ctx context.Context, id string, scheduled bool, state *upstreamBalanceRefreshState) (*UpstreamBalanceItem, error) {
 	if s == nil || s.repo == nil || s.tester == nil || s.upstream == nil {
 		return nil, ErrUpstreamBalanceUnavailable
 	}
@@ -41,9 +52,15 @@ func (s *UpstreamBalanceService) refresh(ctx context.Context, id string, schedul
 	defer cancel()
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer stop()
-	config, err := s.GetConfig(ctx)
-	if err != nil {
-		return nil, err
+	var err error
+	var config *UpstreamBalanceConfig
+	if state != nil {
+		config = state.config
+	} else {
+		config, err = s.GetConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var wallet *UpstreamBalanceWallet
 	for i := range config.Wallets {
@@ -63,16 +80,23 @@ func (s *UpstreamBalanceService) refresh(ctx context.Context, id string, schedul
 		return nil, ErrUpstreamBalanceBusy
 	}
 	defer release()
-	index, err := s.accountIndex(ctx)
-	if err != nil {
-		return nil, err
+	var index map[int64]*Account
+	if state != nil {
+		index = state.index
+	} else {
+		index, err = s.accountIndex(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
+	// Read after acquiring the wallet lock: a manual refresh or another instance
+	// may have just saved a result while this periodic batch was waiting.
 	snapshots, err := s.repo.GetSnapshots(ctx)
 	if err != nil {
 		return nil, err
 	}
 	now := s.now()
-	previous := upstreamBalanceItem(*wallet, index, snapshots[id], now)
+	previous := upstreamBalanceItem(*wallet, index, snapshots[id], now, upstreamBalanceInterval(config))
 	// Both manual and periodic calls share the persisted minimum cadence.
 	if previous.LastAttemptAt != nil && now.Sub(*previous.LastAttemptAt) < 10*time.Second {
 		return &previous, nil
@@ -146,19 +170,13 @@ func (s *UpstreamBalanceService) refresh(ctx context.Context, id string, schedul
 	}
 	completed := s.now()
 	item.LastAttemptAt = &completed
-	next := completed.Add(time.Duration(config.IntervalMinutes) * time.Minute)
-	if item.Status == "unsupported" {
-		next = completed.Add(min(24*time.Hour, 4*time.Duration(config.IntervalMinutes)*time.Minute))
-	}
-	item.NextRefreshAt = &next
 	if item.Status == "ok" {
 		item.LastSuccessAt = &completed
-		fresh := completed.Add(2 * time.Duration(config.IntervalMinutes) * time.Minute)
-		item.FreshUntil = &fresh
 	} else if item.Status == "failed" && previous.Status != "unconfigured" && previous.QueriedAccountID != nil && *previous.QueriedAccountID == queried.ID && snapshots[id] != nil && snapshots[id].AccountIdentity == upstreamBalanceAccountIdentity(queried) {
 		item.Balance, item.Kind, item.Currency = previous.Balance, previous.Kind, previous.Currency
 		item.LastSuccessAt, item.FreshUntil = previous.LastSuccessAt, previous.FreshUntil
 	}
+	applyUpstreamBalanceTiming(&item, upstreamBalanceInterval(config))
 	item.AccountCount = len(upstreamBalanceWalletAccounts(*wallet, index))
 	item.LowBalance = item.Status == "ok" && item.Kind == "wallet" && item.Balance != nil && *item.Balance < wallet.Threshold
 	snapshot := &UpstreamBalanceSnapshot{Item: item, WalletIdentity: upstreamBalanceWalletIdentity(*wallet), AccountIdentity: upstreamBalanceAccountIdentity(queried), NextCandidateID: lastCandidateID}

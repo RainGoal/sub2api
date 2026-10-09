@@ -52,7 +52,7 @@ func balanceHandlerRequest(h *UpstreamBalanceHandler, method, path, body string)
 func TestUpstreamBalanceHandlerRejectsInvalidInputBeforeService(t *testing.T) {
 	stub := &balanceAdminStub{}
 	h := &UpstreamBalanceHandler{service: stub}
-	for _, body := range []string{`{`, `{"interval_minutes":"30"}`, strings.Repeat(" ", 256<<10) + `{}`} {
+	for _, body := range []string{`{`, `{"interval_minutes":"30"}`, `{"interval_seconds":15.5}`, `{"interval_seconds":"15"}`, `{"interval_seconds":null}`, strings.Repeat(" ", 256<<10) + `{}`} {
 		w := balanceHandlerRequest(h, http.MethodPut, "/config", body)
 		require.Equal(t, http.StatusBadRequest, w.Code)
 		require.Nil(t, stub.saved)
@@ -97,4 +97,21 @@ func TestUpstreamBalanceHandlerReadAndRefreshResponsesAreNotCacheable(t *testing
 		require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 	}
 	require.Equal(t, walletID, stub.refreshID)
+}
+
+func TestUpstreamBalanceHandlerAcceptsSecondAndLegacyMinuteContracts(t *testing.T) {
+	for _, tc := range []struct {
+		body             string
+		seconds, minutes int
+	}{
+		{`{"version":7,"interval_seconds":15,"wallets":[]}`, 15, 0},
+		{`{"version":7,"interval_seconds":15,"interval_minutes":30,"wallets":[]}`, 15, 30},
+		{`{"version":7,"interval_minutes":7,"wallets":[]}`, 0, 7},
+	} {
+		stub := &balanceAdminStub{}
+		w := balanceHandlerRequest(&UpstreamBalanceHandler{service: stub}, http.MethodPut, "/config", tc.body)
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, tc.seconds, stub.saved.IntervalSeconds)
+		require.Equal(t, tc.minutes, stub.saved.IntervalMinutes)
+	}
 }

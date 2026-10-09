@@ -114,5 +114,27 @@ func TestUpstreamBalanceAbsentConfigIsDisabledWithoutWrites(t *testing.T) {
 	require.False(t, c.Enabled)
 	require.Empty(t, c.Wallets)
 	require.Equal(t, 30, c.IntervalMinutes)
+	require.Equal(t, 1800, c.IntervalSeconds)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpstreamBalanceStoredMinuteConfigIsConvertedWithoutWrites(t *testing.T) {
+	for _, tc := range []struct {
+		raw              string
+		seconds, minutes int
+	}{
+		{`{"version":4,"enabled":false,"interval_minutes":7,"wallets":[]}`, 420, 7},
+		{`{"version":4,"enabled":false,"interval_seconds":15,"interval_minutes":30,"wallets":[]}`, 15, 5},
+	} {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT value FROM settings WHERE key = $1")).WithArgs(upstreamBalanceConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(tc.raw))
+		c, err := NewUpstreamBalanceRepository(db).GetConfig(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, tc.seconds, c.IntervalSeconds)
+		require.Equal(t, tc.minutes, c.IntervalMinutes)
+		require.EqualValues(t, 4, c.Version)
+		require.NoError(t, mock.ExpectationsWereMet())
+	}
 }

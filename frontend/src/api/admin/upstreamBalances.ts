@@ -15,7 +15,8 @@ export interface UpstreamWallet {
 export interface UpstreamBalanceConfig {
   version: number
   enabled: boolean
-  interval_minutes: number
+  interval_seconds?: number
+  interval_minutes?: number
   wallets: UpstreamWallet[]
 }
 

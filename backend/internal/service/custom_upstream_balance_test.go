@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,9 +21,11 @@ import (
 type balanceAccounts struct {
 	AccountRepository // Every unimplemented write panics: probes must only read.
 	values            map[int64]*Account
+	listCalls         atomic.Int64
 }
 
 func (r *balanceAccounts) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
+	r.listCalls.Add(1)
 	result := []Account{}
 	for _, a := range r.values {
 		result = append(result, *a)
@@ -41,13 +44,16 @@ func (r *balanceAccounts) GetByID(_ context.Context, id int64) (*Account, error)
 }
 
 type balanceMemoryRepo struct {
-	mu        sync.Mutex
-	config    *UpstreamBalanceConfig
-	snapshots map[string]*UpstreamBalanceSnapshot
-	accounts  *balanceAccounts
+	mu            sync.Mutex
+	config        *UpstreamBalanceConfig
+	snapshots     map[string]*UpstreamBalanceSnapshot
+	accounts      *balanceAccounts
+	configReads   atomic.Int64
+	snapshotReads atomic.Int64
 }
 
 func (r *balanceMemoryRepo) GetConfig(context.Context) (*UpstreamBalanceConfig, error) {
+	r.configReads.Add(1)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	raw, _ := json.Marshal(r.config)
@@ -67,6 +73,7 @@ func (r *balanceMemoryRepo) SaveConfig(_ context.Context, c *UpstreamBalanceConf
 	return &copy, nil
 }
 func (r *balanceMemoryRepo) GetSnapshots(context.Context) (map[string]*UpstreamBalanceSnapshot, error) {
+	r.snapshotReads.Add(1)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	result := map[string]*UpstreamBalanceSnapshot{}

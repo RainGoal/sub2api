@@ -42,10 +42,12 @@ type UpstreamBalanceWallet struct {
 }
 
 type UpstreamBalanceConfig struct {
-	Version         int64                   `json:"version"`
-	Enabled         bool                    `json:"enabled"`
-	IntervalMinutes int                     `json:"interval_minutes"`
-	Wallets         []UpstreamBalanceWallet `json:"wallets"`
+	Version            int64                   `json:"version"`
+	Enabled            bool                    `json:"enabled"`
+	IntervalSeconds    int                     `json:"interval_seconds,omitempty"`
+	IntervalMinutes    int                     `json:"interval_minutes"`
+	Wallets            []UpstreamBalanceWallet `json:"wallets"`
+	intervalSecondsSet bool
 }
 
 type UpstreamBalanceItem struct {
@@ -99,27 +101,30 @@ type UpstreamBalanceRepository interface {
 type UpstreamBalanceHTTPUpstream struct{ HTTPUpstream }
 
 type UpstreamBalanceService struct {
-	repo      UpstreamBalanceRepository
-	accounts  AccountRepository
-	tester    *AccountTestService
-	upstream  HTTPUpstream
-	lockCache LeaderLockCache
-	owner     string
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	started   bool
-	stopped   bool
-	active    map[string]bool
-	slots     chan struct{}
-	wg        sync.WaitGroup
-	cycleMu   sync.Mutex
-	now       func() time.Time
+	repo          UpstreamBalanceRepository
+	accounts      AccountRepository
+	tester        *AccountTestService
+	upstream      HTTPUpstream
+	lockCache     LeaderLockCache
+	owner         string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.Mutex
+	started       bool
+	stopped       bool
+	active        map[string]bool
+	slots         chan struct{}
+	wg            sync.WaitGroup
+	cycleMu       sync.Mutex
+	wake          chan struct{}
+	runnerDefer   map[string]time.Time
+	runnerVersion int64
+	now           func() time.Time
 }
 
 func NewUpstreamBalanceService(repo UpstreamBalanceRepository, accounts AccountRepository, tester *AccountTestService) *UpstreamBalanceService {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &UpstreamBalanceService{repo: repo, accounts: accounts, tester: tester, owner: uuid.NewString(), ctx: ctx, cancel: cancel, active: map[string]bool{}, slots: make(chan struct{}, 2), now: time.Now}
+	s := &UpstreamBalanceService{repo: repo, accounts: accounts, tester: tester, owner: uuid.NewString(), ctx: ctx, cancel: cancel, active: map[string]bool{}, slots: make(chan struct{}, 2), wake: make(chan struct{}, 1), runnerDefer: map[string]time.Time{}, now: time.Now}
 	if tester != nil {
 		s.upstream = tester.httpUpstream
 	}
@@ -134,14 +139,21 @@ func ProvideUpstreamBalanceService(repo UpstreamBalanceRepository, accounts Acco
 }
 
 func DefaultUpstreamBalanceConfig() *UpstreamBalanceConfig {
-	return &UpstreamBalanceConfig{IntervalMinutes: 30, Wallets: []UpstreamBalanceWallet{}}
+	return &UpstreamBalanceConfig{IntervalSeconds: 1800, IntervalMinutes: 30, Wallets: []UpstreamBalanceWallet{}}
 }
 
 func (s *UpstreamBalanceService) GetConfig(ctx context.Context) (*UpstreamBalanceConfig, error) {
 	if s == nil || s.repo == nil {
 		return nil, ErrUpstreamBalanceUnavailable
 	}
-	return s.repo.GetConfig(ctx)
+	config, err := s.repo.GetConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := NormalizeUpstreamBalanceInterval(config); err != nil {
+		return nil, err
+	}
+	return config, nil
 }
 
 // NormalizeUpstreamBalanceSite preserves deployments and subdomains while removing
@@ -222,8 +234,12 @@ func (s *UpstreamBalanceService) Discover(ctx context.Context) (*UpstreamBalance
 }
 
 func (s *UpstreamBalanceService) SaveConfig(ctx context.Context, input *UpstreamBalanceConfig) (*UpstreamBalanceConfig, error) {
-	if input == nil || input.Version < 0 || input.IntervalMinutes < 5 || input.IntervalMinutes > 1440 || len(input.Wallets) > upstreamBalanceMaxWallets {
+	if input == nil || input.Version < 0 || len(input.Wallets) > upstreamBalanceMaxWallets {
 		return nil, ErrUpstreamBalanceInvalid
+	}
+	config := *input
+	if err := NormalizeUpstreamBalanceInterval(&config); err != nil {
+		return nil, err
 	}
 	previous, err := s.GetConfig(ctx)
 	if err != nil {
@@ -240,7 +256,6 @@ func (s *UpstreamBalanceService) SaveConfig(ctx context.Context, input *Upstream
 	if err != nil {
 		return nil, err
 	}
-	config := *input
 	config.Wallets = append([]UpstreamBalanceWallet{}, input.Wallets...)
 	seenIDs, assigned, singles, sites := map[string]bool{}, map[int64]bool{}, map[string]bool{}, map[string]bool{}
 	for i := range config.Wallets {
@@ -300,7 +315,11 @@ func (s *UpstreamBalanceService) SaveConfig(ctx context.Context, input *Upstream
 			}
 		}
 	}
-	return s.repo.SaveConfig(ctx, &config)
+	saved, err := s.repo.SaveConfig(ctx, &config)
+	if err == nil {
+		s.notifyRunner()
+	}
+	return saved, err
 }
 
 func upstreamBalanceWalletAccounts(w UpstreamBalanceWallet, index map[int64]*Account) []*Account {
@@ -346,7 +365,7 @@ func upstreamBalanceAccountIdentity(a *Account) string {
 	return upstreamBalanceHash([]any{a.ID, a.Platform, a.Type, a.Credentials, a.ProxyID, proxy})
 }
 
-func upstreamBalanceItem(w UpstreamBalanceWallet, index map[int64]*Account, snapshot *UpstreamBalanceSnapshot, now time.Time) UpstreamBalanceItem {
+func upstreamBalanceItem(w UpstreamBalanceWallet, index map[int64]*Account, snapshot *UpstreamBalanceSnapshot, now time.Time, interval time.Duration) UpstreamBalanceItem {
 	accounts := upstreamBalanceWalletAccounts(w, index)
 	item := UpstreamBalanceItem{WalletID: w.ID, Status: "unconfigured", Kind: "unknown", AccountCount: len(accounts)}
 	if w.QueryAccountID != nil {
@@ -371,6 +390,7 @@ func upstreamBalanceItem(w UpstreamBalanceWallet, index map[int64]*Account, snap
 		}
 	}
 	item.AccountCount = len(accounts)
+	applyUpstreamBalanceTiming(&item, interval)
 	item.LowBalance = item.Status == "ok" && item.Kind == "wallet" && item.Balance != nil && item.FreshUntil != nil && now.Before(*item.FreshUntil) && *item.Balance < w.Threshold
 	return item
 }
@@ -393,7 +413,7 @@ func (s *UpstreamBalanceService) List(ctx context.Context) (*UpstreamBalanceList
 		return nil, err
 	}
 	for _, w := range config.Wallets {
-		result.Items = append(result.Items, upstreamBalanceItem(w, index, snapshots[w.ID], s.now()))
+		result.Items = append(result.Items, upstreamBalanceItem(w, index, snapshots[w.ID], s.now(), upstreamBalanceInterval(config)))
 	}
 	return result, nil
 }

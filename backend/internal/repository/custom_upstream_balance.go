@@ -37,6 +37,9 @@ func (r *upstreamBalanceRepository) GetConfig(ctx context.Context) (*service.Ups
 	if err := json.Unmarshal([]byte(raw), result); err != nil {
 		return nil, err
 	}
+	if err := service.NormalizeUpstreamBalanceInterval(result); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -53,6 +56,9 @@ func lockUpstreamBalanceConfig(ctx context.Context, tx *sql.Tx) (*service.Upstre
 	}
 	result := service.DefaultUpstreamBalanceConfig()
 	if err := json.Unmarshal([]byte(raw), result); err != nil {
+		return nil, err
+	}
+	if err := service.NormalizeUpstreamBalanceInterval(result); err != nil {
 		return nil, err
 	}
 	return result, nil

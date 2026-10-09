@@ -25,7 +25,7 @@
           </div>
           <div>
             <label for="balance-interval" class="input-label">{{ t('admin.upstreamBalances.interval') }}</label>
-            <input id="balance-interval" v-model.number="interval" class="input w-28" type="number" min="5" max="1440" step="1" required :disabled="busy" />
+            <input id="balance-interval" v-model.number="interval" class="input w-28" type="number" min="10" max="86400" step="1" required :disabled="busy" />
           </div>
           <button type="submit" class="btn btn-secondary" :disabled="busy || !settingsDirty">{{ t(saving ? 'common.saving' : 'common.save') }}</button>
         </form>
@@ -49,7 +49,7 @@
             <p v-if="!row.enabled" class="mt-1 text-xs text-gray-500">{{ t('admin.upstreamBalances.manualOnly') }}</p>
           </template>
           <template #cell-balance="{ row }">
-            <p class="whitespace-nowrap font-mono text-lg font-semibold tabular-nums" :class="isLow(row.snapshot) ? 'text-amber-600 dark:text-amber-400' : ''">{{ balanceText(row.snapshot) }}</p>
+            <p class="whitespace-nowrap font-mono text-lg font-semibold tabular-nums" :class="balanceClass(row.snapshot)">{{ balanceText(row.snapshot) }}</p>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamBalances.thresholdValue', { amount: row.threshold }) }}</p>
             <p v-if="isStale(row.snapshot)" class="mt-1 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.upstreamBalances.historical') }}</p>
           </template>
@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -108,14 +108,14 @@ const forbidden = ref(false)
 const discoveryLoading = ref(false)
 const discoveryFailed = ref(false)
 const autoEnabled = ref(false)
-const interval = ref(30)
+const interval = ref(1800)
 const dialogOpen = ref(false)
 const editing = ref<UpstreamWallet | null>(null)
 const removing = ref<UpstreamWallet | null>(null)
 const refreshing = ref(new Set<string>())
 const refreshingAll = ref(false)
 const busy = computed(() => loading.value || saving.value || refreshingAll.value || refreshing.value.size > 0)
-const settingsDirty = computed(() => config.value && (autoEnabled.value !== config.value.enabled || interval.value !== config.value.interval_minutes))
+const settingsDirty = computed(() => config.value && (autoEnabled.value !== config.value.enabled || interval.value !== intervalSeconds(config.value)))
 const now = ref(Date.now())
 const rows = computed(() => (config.value?.wallets ?? []).map(wallet => ({ ...wallet, snapshot: snapshots.value.find(item => item.wallet_id === wallet.id) })).sort((a, b) => Number(isLow(b.snapshot)) - Number(isLow(a.snapshot)) || a.name.localeCompare(b.name)))
 const lowCount = computed(() => rows.value.filter(row => isLow(row.snapshot)).length)
@@ -127,6 +127,10 @@ const columns = computed(() => [
   { key: 'updated', label: t('admin.upstreamBalances.lastSuccess') },
   { key: 'actions', label: t('common.actions') },
 ])
+
+function intervalSeconds(value: UpstreamBalanceConfig | null): number {
+  return value?.interval_seconds ?? (value?.interval_minutes == null ? 1800 : value.interval_minutes * 60)
+}
 
 async function discover() {
   discoveryLoading.value = true
@@ -149,7 +153,7 @@ async function load() {
     config.value = result.config
     snapshots.value = result.items ?? []
     autoEnabled.value = result.config.enabled
-    interval.value = result.config.interval_minutes
+    interval.value = intervalSeconds(result.config)
     await discover()
   } catch (error) {
     loadError.value = true
@@ -168,7 +172,7 @@ async function persist(next: UpstreamBalanceConfig): Promise<boolean> {
   if (saving.value) return false
   saving.value = true
   try {
-    config.value = await upstreamBalancesAPI.saveConfig(next)
+    config.value = await upstreamBalancesAPI.saveConfig({ ...next, interval_seconds: intervalSeconds(next) })
     appStore.showSuccess(t('admin.upstreamBalances.saved'))
     return true
   } catch (error) {
@@ -182,11 +186,11 @@ async function persist(next: UpstreamBalanceConfig): Promise<boolean> {
 
 async function saveSettings() {
   if (!config.value || busy.value) return
-  if (!Number.isInteger(interval.value) || interval.value < 5 || interval.value > 1440) {
+  if (!Number.isInteger(interval.value) || interval.value < 10 || interval.value > 86400) {
     appStore.showError(t('admin.upstreamBalances.validationInterval'))
     return
   }
-  await persist({ ...config.value, enabled: autoEnabled.value, interval_minutes: interval.value })
+  await persist({ ...config.value, enabled: autoEnabled.value, interval_seconds: interval.value })
 }
 
 function openWallet(wallet?: UpstreamWallet) {
@@ -255,28 +259,54 @@ async function refreshAll() {
   }
 }
 
+let cacheReading = false
 async function updateCachedSnapshots() {
+  if (disposed || cacheReading) return
+  cacheReading = true
   const revision = snapshotRevision
   const version = config.value?.version
   try {
     const result = await upstreamBalancesAPI.list()
-    if (revision === snapshotRevision && version === config.value?.version && result.config.version === version) snapshots.value = result.items ?? []
+    if (disposed || busy.value || dialogOpen.value || revision !== snapshotRevision || version !== config.value?.version) return
+    if (result.config.version === version) snapshots.value = result.items ?? []
+    else if (version != null && result.config.version > version && !settingsDirty.value) {
+      config.value = result.config
+      snapshots.value = result.items ?? []
+      autoEnabled.value = result.config.enabled
+      interval.value = intervalSeconds(result.config)
+    }
   } catch {
     // A cache read failure preserves the last known balance; this never queries an upstream.
+  } finally {
+    cacheReading = false
   }
 }
 
-let timer: ReturnType<typeof setInterval> | undefined
+let timer: ReturnType<typeof setTimeout> | undefined
+function scheduleCachedRead() {
+  clearTimeout(timer)
+  if (disposed || document.hidden) return
+  const seconds = config.value?.enabled ? Math.max(10, Math.min(intervalSeconds(config.value), 60)) : 60
+  timer = setTimeout(async () => {
+    now.value = Date.now()
+    if (!document.hidden && !busy.value && !dialogOpen.value && !loadError.value) await updateCachedSnapshots()
+    scheduleCachedRead()
+  }, seconds * 1000)
+}
+function onVisibilityChange() {
+  now.value = Date.now()
+  scheduleCachedRead()
+}
+watch(() => [config.value?.enabled, intervalSeconds(config.value)], scheduleCachedRead)
 onMounted(() => {
   void load()
-  timer = setInterval(() => {
-    now.value = Date.now()
-    if (!document.hidden && !busy.value && !dialogOpen.value && !loadError.value) void updateCachedSnapshots()
-  }, 60000)
+  scheduleCachedRead()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 onUnmounted(() => {
   disposed = true
-  clearInterval(timer)
+  clearTimeout(timer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 function accountCount(wallet: UpstreamWallet): number {
@@ -294,6 +324,12 @@ function isStale(snapshot?: UpstreamBalanceSnapshot): boolean {
 
 function isLow(snapshot?: UpstreamBalanceSnapshot): boolean {
   return snapshot?.kind === 'wallet' && snapshot.status === 'ok' && !!snapshot.low_balance && !isStale(snapshot)
+}
+
+function balanceClass(snapshot?: UpstreamBalanceSnapshot): string {
+  if (isLow(snapshot)) return 'text-amber-600 dark:text-amber-400'
+  if (snapshot?.kind === 'wallet' && snapshot.status === 'ok' && snapshot.balance != null && Number.isFinite(snapshot.balance) && !isStale(snapshot)) return 'text-emerald-600 dark:text-emerald-400'
+  return 'text-gray-500 dark:text-gray-400'
 }
 
 function statusText(snapshot?: UpstreamBalanceSnapshot): string {
