@@ -18,7 +18,7 @@ vi.mock('vue-i18n', async original => ({
 }))
 
 const wallet = (id = 'a', overrides: Partial<UpstreamWallet> = {}): UpstreamWallet => ({ id, name: `Wallet ${id}`, site_url: 'https://upstream.example', single_account: true, account_ids: [], query_account_id: null, threshold: 20, recharge_url: '', enabled: true, ...overrides })
-const snapshot = (id = 'a', overrides: Partial<UpstreamBalanceSnapshot> = {}): UpstreamBalanceSnapshot => ({ wallet_id: id, status: 'ok', kind: 'wallet', balance: 120, currency: 'USD', low_balance: false, account_count: 2, last_success_at: '2026-10-08T00:00:00Z', fresh_until: '2099-01-01T00:00:00Z', ...overrides })
+const snapshot = (id = 'a', overrides: Partial<UpstreamBalanceSnapshot> = {}): UpstreamBalanceSnapshot => ({ wallet_id: id, status: 'ok', kind: 'wallet', balance: 120, currency: 'USD', today_cost: 1.2345, today_cost_valid_until: '2099-01-01T00:00:00Z', low_balance: false, account_count: 2, last_success_at: '2026-10-08T00:00:00Z', fresh_until: '2099-01-01T00:00:00Z', ...overrides })
 const defaultConfig = (): UpstreamBalanceConfig => ({ version: 3, enabled: false, interval_seconds: 1800, interval_minutes: 30, wallets: [wallet()] })
 const sites = [{ site_url: 'https://upstream.example', accounts: [{ id: 1, name: 'Key one' }, { id: 2, name: 'Key two' }] }]
 const stubs = {
@@ -50,12 +50,122 @@ describe('isolated upstream balance monitoring', () => {
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('USD 120.00')
+    expect(wrapper.text()).toContain('$1.2345')
+    expect(wrapper.get('[data-test="today-cost"]').attributes('title')).toBe('admin.upstreamBalances.todayCostHint')
     expect(wrapper.get<HTMLInputElement>('[data-test="auto-enabled"]').element.checked).toBe(false)
     expect(refresh).not.toHaveBeenCalled()
     expect(saveConfig).not.toHaveBeenCalled()
     await button(wrapper, 'common.refresh').trigger('click')
     await flushPromises()
     expect(refresh).toHaveBeenCalledWith('a')
+  })
+
+  it('shows a dash when today cost is absent and preserves a zero value', async () => {
+    list.mockResolvedValue({ config: defaultConfig(), items: [snapshot('a', { today_cost: null })] })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
+    list.mockResolvedValue({ config: defaultConfig(), items: [snapshot('a', { today_cost: 0 })] })
+    await button(wrapper, 'admin.upstreamBalances.reload').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$0.0000')
+  })
+
+  it('retains today cost after a manual balance refresh without cost data', async () => {
+    refresh.mockResolvedValue(snapshot('a', { today_cost: undefined, today_cost_valid_until: undefined }))
+    const wrapper = mountView()
+    await flushPromises()
+    await button(wrapper, 'common.refresh').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+  })
+
+  it.each([
+    { name: 'site URL', before: wallet(), after: wallet('a', { site_url: 'https://other.example' }) },
+    { name: 'single-account mode', before: wallet(), after: wallet('a', { single_account: false, account_ids: [1] }) },
+    { name: 'linked account IDs', before: wallet('a', { single_account: false, account_ids: [1] }), after: wallet('a', { single_account: false, account_ids: [2] }) },
+  ])('clears old cost after a $name change even if the list read fails', async ({ before, after }) => {
+    list.mockResolvedValueOnce({ config: { ...defaultConfig(), wallets: [before] }, items: [snapshot()] })
+    list.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+    await button(wrapper, 'common.edit').trigger('click')
+    wrapper.getComponent(UpstreamWalletDialog).vm.$emit('save', after)
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
+    expect(wrapper.text()).toContain('USD 120.00')
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps today cost after a wallet name change if the list read fails', async () => {
+    list.mockResolvedValueOnce({ config: defaultConfig(), items: [snapshot()] })
+    list.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountView()
+    await flushPromises()
+    await button(wrapper, 'common.edit').trigger('click')
+    wrapper.getComponent(UpstreamWalletDialog).vm.$emit('save', wallet('a', { name: 'Renamed wallet' }))
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+  })
+
+  it('hides expired cost at the next clock tick and does not revive it on balance refresh', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-12T15:59:50Z'))
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValue({
+      config: { ...defaultConfig(), enabled: true, interval_seconds: 10 },
+      items: [snapshot('a', { today_cost_valid_until: '2026-10-12T16:00:00Z' })],
+    })
+    refresh.mockResolvedValue(snapshot('a', { today_cost: undefined, today_cost_valid_until: undefined }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
+    await button(wrapper, 'common.refresh').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
+  })
+
+  it('checks cost at midnight even when automatic balance refresh is disabled', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-12T15:59:50Z'))
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    list.mockResolvedValueOnce({
+      config: defaultConfig(),
+      items: [snapshot('a', { today_cost_valid_until: '2026-10-12T16:00:00Z' })],
+    })
+    list.mockRejectedValue(new Error('offline'))
+    const wrapper = mountView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(9999)
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+    expect(list).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
+    expect(list).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(59999)
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not display yesterday cost from a list response that arrives after midnight', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-12T15:59:50Z'))
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const yesterday = snapshot('a', { today_cost_valid_until: '2026-10-12T16:00:00Z' })
+    list.mockResolvedValueOnce({ config: defaultConfig(), items: [yesterday] })
+    let resolveList!: (result: { config: UpstreamBalanceConfig; items: UpstreamBalanceSnapshot[] }) => void
+    list.mockImplementationOnce(() => new Promise(resolve => { resolveList = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(list).toHaveBeenCalledTimes(2)
+    vi.setSystemTime(new Date('2026-10-12T16:00:01Z'))
+    resolveList({ config: defaultConfig(), items: [yesterday] })
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
   })
 
   it('requires explicit shared-wallet confirmation before automatic grouping', async () => {
@@ -223,10 +333,37 @@ describe('isolated upstream balance monitoring', () => {
     expect(list).toHaveBeenCalledTimes(1)
     hidden.mockReturnValue(false)
     document.dispatchEvent(new Event('visibilitychange'))
-    await vi.advanceTimersByTimeAsync(10000)
+    await flushPromises()
     expect(list).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(list).toHaveBeenCalledTimes(3)
     expect(refresh).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('hides yesterday cost while hidden and fetches the new day when visible', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-12T15:59:50Z'))
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const config = { ...defaultConfig(), enabled: true, interval_seconds: 10 }
+    list.mockResolvedValueOnce({ config, items: [snapshot('a', { today_cost: 1.2345, today_cost_valid_until: '2026-10-12T16:00:00Z' })] })
+    let resolveList!: (result: { config: UpstreamBalanceConfig; items: UpstreamBalanceSnapshot[] }) => void
+    list.mockImplementationOnce(() => new Promise(resolve => { resolveList = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$1.2345')
+    hidden.mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    vi.setSystemTime(new Date('2026-10-12T16:00:01Z'))
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('—')
+    resolveList({ config, items: [snapshot('a', { today_cost: 0.5, today_cost_valid_until: '2026-10-13T16:00:00Z' })] })
+    await flushPromises()
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="today-cost"]').text()).toBe('$0.5000')
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   it('marks second-based balances stale promptly even if a cache read fails', async () => {

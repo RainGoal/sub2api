@@ -33,6 +33,8 @@ export default {
     rechargeURL: '充值页面链接（可选）',
     walletEnabled: '将此钱包加入自动刷新',
     balance: '钱包余额',
+    todayCost: '今日成本',
+    todayCostHint: '按系统时区统计当前钱包关联账号在本系统内的今日成本（USD）。',
     queryStatus: '查询状态',
     lastSuccess: '最近成功时间',
     lastAttempt: '最近尝试：{time}',

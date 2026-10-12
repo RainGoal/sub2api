@@ -53,6 +53,9 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.upstreamBalances.thresholdValue', { amount: row.threshold }) }}</p>
             <p v-if="isStale(row.snapshot)" class="mt-1 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.upstreamBalances.historical') }}</p>
           </template>
+          <template #cell-today-cost="{ row }">
+            <p data-test="today-cost" class="whitespace-nowrap font-mono tabular-nums" :class="isTodayCostAvailable(row.snapshot) ? '' : 'text-gray-400 dark:text-gray-500'" :title="t('admin.upstreamBalances.todayCostHint')">{{ todayCostText(row.snapshot) }}</p>
+          </template>
           <template #cell-status="{ row }">
             <span class="inline-block rounded px-2 py-1 text-xs font-medium" :class="statusClass(row.snapshot)">{{ statusText(row.snapshot) }}</span>
             <p v-if="row.snapshot?.error_code" class="mt-2 max-w-64 text-xs text-gray-500 dark:text-gray-400">{{ errorText(row.snapshot.error_code) }}</p>
@@ -123,6 +126,7 @@ const errorCount = computed(() => rows.value.filter(row => row.snapshot?.error_c
 const columns = computed(() => [
   { key: 'name', label: t('admin.upstreamBalances.walletName') },
   { key: 'balance', label: t('admin.upstreamBalances.balance') },
+  { key: 'today-cost', label: t('admin.upstreamBalances.todayCost') },
   { key: 'status', label: t('admin.upstreamBalances.queryStatus') },
   { key: 'updated', label: t('admin.upstreamBalances.lastSuccess') },
   { key: 'actions', label: t('common.actions') },
@@ -152,6 +156,7 @@ async function load() {
     const result = await upstreamBalancesAPI.list()
     config.value = result.config
     snapshots.value = result.items ?? []
+    now.value = Date.now()
     autoEnabled.value = result.config.enabled
     interval.value = intervalSeconds(result.config)
     await discover()
@@ -200,8 +205,20 @@ function openWallet(wallet?: UpstreamWallet) {
 
 async function saveWallet(wallet: UpstreamWallet) {
   if (!config.value || busy.value) return
+  const previous = config.value.wallets.find(item => item.id === wallet.id)
+  const previousAccountIds = new Set(previous?.account_ids ?? [])
+  const accountIds = new Set(wallet.account_ids)
+  const membershipChanged = !!previous && (
+    previous.site_url !== wallet.site_url || previous.single_account !== wallet.single_account ||
+    previousAccountIds.size !== accountIds.size || [...previousAccountIds].some(id => !accountIds.has(id))
+  )
   const wallets = wallet.id ? config.value.wallets.map(item => item.id === wallet.id ? wallet : item) : [...config.value.wallets, wallet]
   if (await persist({ ...config.value, wallets })) {
+    if (membershipChanged) {
+      snapshots.value = snapshots.value.map(item => item.wallet_id === wallet.id
+        ? { ...item, today_cost: null, today_cost_valid_until: null }
+        : item)
+    }
     dialogOpen.value = false
     await updateCachedSnapshots()
   }
@@ -224,7 +241,12 @@ async function refreshWallet(id: string, notify = true): Promise<boolean> {
   refreshing.value.add(id)
   try {
     const snapshot = await upstreamBalancesAPI.refresh(id)
-    snapshots.value = [...snapshots.value.filter(item => item.wallet_id !== id), snapshot]
+    const previous = snapshots.value.find(item => item.wallet_id === id)
+    snapshots.value = [...snapshots.value.filter(item => item.wallet_id !== id), {
+      ...snapshot,
+      today_cost: snapshot.today_cost === undefined ? previous?.today_cost : snapshot.today_cost,
+      today_cost_valid_until: snapshot.today_cost_valid_until === undefined ? previous?.today_cost_valid_until : snapshot.today_cost_valid_until,
+    }]
     now.value = Date.now()
     if (notify && !disposed) {
       if (snapshot.status === 'ok') appStore.showSuccess(t('admin.upstreamBalances.refreshed'))
@@ -268,8 +290,11 @@ async function updateCachedSnapshots() {
   try {
     const result = await upstreamBalancesAPI.list()
     if (disposed || busy.value || dialogOpen.value || revision !== snapshotRevision || version !== config.value?.version) return
-    if (result.config.version === version) snapshots.value = result.items ?? []
-    else if (version != null && result.config.version > version && !settingsDirty.value) {
+    if (result.config.version === version) {
+      now.value = Date.now()
+      snapshots.value = result.items ?? []
+    } else if (version != null && result.config.version > version && !settingsDirty.value) {
+      now.value = Date.now()
       config.value = result.config
       snapshots.value = result.items ?? []
       autoEnabled.value = result.config.enabled
@@ -287,17 +312,26 @@ function scheduleCachedRead() {
   clearTimeout(timer)
   if (disposed || document.hidden) return
   const seconds = config.value?.enabled ? Math.max(10, Math.min(intervalSeconds(config.value), 60)) : 60
+  const currentTime = Date.now()
+  const nextCostExpiry = snapshots.value.reduce((earliest, snapshot) => {
+    if (snapshot.today_cost == null || !Number.isFinite(snapshot.today_cost)) return earliest
+    const expiry = Date.parse(snapshot.today_cost_valid_until ?? '')
+    return Number.isFinite(expiry) && expiry > currentTime ? Math.min(earliest, expiry) : earliest
+  }, Infinity)
+  const delay = Math.min(seconds * 1000, Math.max(1, nextCostExpiry - currentTime))
   timer = setTimeout(async () => {
     now.value = Date.now()
     if (!document.hidden && !busy.value && !dialogOpen.value && !loadError.value) await updateCachedSnapshots()
     scheduleCachedRead()
-  }, seconds * 1000)
+  }, delay)
 }
 function onVisibilityChange() {
   now.value = Date.now()
   scheduleCachedRead()
+  if (!document.hidden && !busy.value && !dialogOpen.value && !loadError.value) void updateCachedSnapshots()
 }
 watch(() => [config.value?.enabled, intervalSeconds(config.value)], scheduleCachedRead)
+watch(snapshots, scheduleCachedRead)
 onMounted(() => {
   void load()
   scheduleCachedRead()
@@ -316,6 +350,17 @@ function accountCount(wallet: UpstreamWallet): number {
 function balanceText(snapshot?: UpstreamBalanceSnapshot): string {
   if (snapshot?.kind !== 'wallet' || snapshot.balance == null || !Number.isFinite(snapshot.balance)) return '—'
   return `${snapshot.currency || 'USD'} ${new Intl.NumberFormat(locale.value, { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(snapshot.balance)}`
+}
+
+function isTodayCostAvailable(snapshot?: UpstreamBalanceSnapshot): boolean {
+  const validUntil = Date.parse(snapshot?.today_cost_valid_until ?? '')
+  return snapshot?.today_cost != null && Number.isFinite(snapshot.today_cost) && Number.isFinite(validUntil) && now.value < validUntil
+}
+
+function todayCostText(snapshot?: UpstreamBalanceSnapshot): string {
+  const cost = snapshot?.today_cost
+  if (!isTodayCostAvailable(snapshot) || cost == null) return '—'
+  return `$${new Intl.NumberFormat(locale.value, { minimumFractionDigits: 4, maximumFractionDigits: 6 }).format(cost)}`
 }
 
 function isStale(snapshot?: UpstreamBalanceSnapshot): boolean {

@@ -34,6 +34,9 @@ export interface UpstreamBalanceSnapshot {
   error_code?: string
   low_balance: boolean
   account_count: number
+  /** Today's platform cost for all accounts in this wallet, when available. */
+  today_cost?: number | null
+  today_cost_valid_until?: string | null
 }
 
 export interface UpstreamBalanceSite {

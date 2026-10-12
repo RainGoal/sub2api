@@ -291,7 +291,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	auditLogHandler := admin.NewAuditLogHandler(auditLogService, totpService)
 	upstreamBalanceRepository := repository.NewUpstreamBalanceRepository(db)
 	upstreamBalanceHTTPUpstream := repository.NewUpstreamBalanceHTTPUpstream(configConfig)
-	upstreamBalanceService := service.ProvideUpstreamBalanceService(upstreamBalanceRepository, accountRepository, accountTestService, leaderLockCache, upstreamBalanceHTTPUpstream)
+	upstreamBalanceService := service.ProvideUpstreamBalanceService(upstreamBalanceRepository, accountRepository, usageLogRepository, accountTestService, leaderLockCache, upstreamBalanceHTTPUpstream)
 	upstreamBalanceHandler := admin.NewUpstreamBalanceHandler(upstreamBalanceService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	openCodeGoUsageService := service.ProvideOpenCodeGoUsageService(accountRepository, httpUpstream, settingService, leaderLockCache, db)

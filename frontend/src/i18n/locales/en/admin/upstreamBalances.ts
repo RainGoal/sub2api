@@ -33,6 +33,8 @@ export default {
     rechargeURL: 'Top-up page URL (optional)',
     walletEnabled: 'Include this wallet in automatic refresh',
     balance: 'Wallet balance',
+    todayCost: "Today's cost",
+    todayCostHint: 'Cost incurred in this system today by accounts linked to this wallet, using the system time zone (USD).',
     queryStatus: 'Query status',
     lastSuccess: 'Last successful query',
     lastAttempt: 'Last attempt: {time}',

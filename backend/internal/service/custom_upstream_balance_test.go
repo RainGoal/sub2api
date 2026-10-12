@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	nethttp "net/http"
 	"reflect"
@@ -13,7 +14,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -122,6 +125,21 @@ func (*balanceLeaderLock) TryAcquireLeaderLock(context.Context, string, string, 
 }
 func (*balanceLeaderLock) ReleaseLeaderLock(context.Context, string, string) error { return nil }
 
+type balanceCostReader struct {
+	stats map[int64]*usagestats.AccountStats
+	err   error
+	ids   []int64
+	start time.Time
+	calls int
+}
+
+func (r *balanceCostReader) GetAccountWindowStatsBatch(_ context.Context, ids []int64, start time.Time) (map[int64]*usagestats.AccountStats, error) {
+	r.calls++
+	r.ids = append([]int64(nil), ids...)
+	r.start = start
+	return r.stats, r.err
+}
+
 func balanceFixture(t *testing.T, count int) (*UpstreamBalanceService, *balanceMemoryRepo, *balanceAccounts, *balanceHTTP, string) {
 	t.Helper()
 	accounts := &balanceAccounts{values: map[int64]*Account{}}
@@ -213,6 +231,93 @@ func TestUpstreamBalanceRefreshIsReadOnlyAndDefaultOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, list.Items[0].Balance)
 	require.Equal(t, "unconfigured", list.Items[0].Status)
+}
+
+func TestUpstreamBalanceListAggregatesTodayCostOnceWithoutPersistingIt(t *testing.T) {
+	s, repo, _, _, id := balanceFixture(t, 4)
+	now := time.Date(2026, 10, 8, 23, 59, 59, 0, timezone.Location()).UTC()
+	s.now = func() time.Time { return now }
+	wallet := repo.config.Wallets[0]
+	wallet.SingleAccount = false
+	wallet.AccountIDs = []int64{1, 2}
+	second := wallet
+	second.ID = uuid.NewString()
+	second.AccountIDs = []int64{3}
+	empty := wallet
+	empty.ID = uuid.NewString()
+	empty.AccountIDs = nil
+	repo.config.Wallets = []UpstreamBalanceWallet{wallet, second, empty}
+	costs := &balanceCostReader{stats: map[int64]*usagestats.AccountStats{
+		1: {Cost: 1.25},
+		2: {Cost: 0.75},
+		3: {Cost: 0.5},
+		4: {Cost: 999}, // Unassigned accounts must not contribute.
+	}}
+	s.costs = costs
+
+	refreshed, err := s.Refresh(context.Background(), id)
+	require.NoError(t, err)
+	require.Nil(t, refreshed.TodayCost)
+	require.Nil(t, refreshed.TodayCostValidUntil)
+	require.Zero(t, costs.calls)
+
+	list, err := s.List(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, costs.calls)
+	require.Equal(t, []int64{1, 2, 3}, costs.ids)
+	require.Equal(t, timezone.StartOfDay(s.now()), costs.start)
+	require.Len(t, list.Items, 3)
+	require.Equal(t, 2.0, *list.Items[0].TodayCost)
+	require.Equal(t, 0.5, *list.Items[1].TodayCost)
+	require.Equal(t, 0.0, *list.Items[2].TodayCost)
+	wantValidUntil := time.Date(2026, 10, 9, 0, 0, 0, 0, timezone.Location())
+	for _, item := range list.Items {
+		require.NotNil(t, item.TodayCostValidUntil)
+		require.Equal(t, wantValidUntil, *item.TodayCostValidUntil)
+	}
+	require.Nil(t, repo.snapshots[id].Item.TodayCost)
+	require.Nil(t, repo.snapshots[id].Item.TodayCostValidUntil)
+	snapshotJSON, err := json.Marshal(repo.snapshots[id])
+	require.NoError(t, err)
+	require.NotContains(t, string(snapshotJSON), "today_cost")
+}
+
+func TestUpstreamBalanceListKeepsBalanceWhenCostQueryFails(t *testing.T) {
+	s, repo, _, _, id := balanceFixture(t, 1)
+	refreshed, err := s.Refresh(context.Background(), id)
+	require.NoError(t, err)
+	costs := &balanceCostReader{err: errors.New("database unavailable")}
+	s.costs = costs
+
+	list, err := s.List(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, costs.calls)
+	require.Equal(t, refreshed.Balance, list.Items[0].Balance)
+	require.Nil(t, list.Items[0].TodayCost)
+	require.Nil(t, list.Items[0].TodayCostValidUntil)
+	require.Nil(t, repo.snapshots[id].Item.TodayCost)
+
+	costs.err = nil
+	costs.stats = map[int64]*usagestats.AccountStats{}
+	list, err = s.List(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, list.Items[0].TodayCost)
+
+	s.costs = nil
+	list, err = s.List(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, list.Items[0].TodayCost)
+}
+
+func TestUpstreamBalanceListDoesNotQueryCostsForEmptyWallet(t *testing.T) {
+	s, _, _, _, _ := balanceFixture(t, 0)
+	costs := &balanceCostReader{}
+	s.costs = costs
+
+	list, err := s.List(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, costs.calls)
+	require.Equal(t, 0.0, *list.Items[0].TodayCost)
 }
 
 func TestUpstreamBalanceSaveRejectsConflicts(t *testing.T) {

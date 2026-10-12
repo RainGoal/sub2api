@@ -16,6 +16,8 @@ import (
 	"unicode/utf8"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/google/uuid"
 )
 
@@ -51,19 +53,21 @@ type UpstreamBalanceConfig struct {
 }
 
 type UpstreamBalanceItem struct {
-	WalletID         string     `json:"wallet_id"`
-	Status           string     `json:"status"`
-	Kind             string     `json:"kind"`
-	Balance          *float64   `json:"balance"`
-	Currency         string     `json:"currency"`
-	QueriedAccountID *int64     `json:"queried_account_id"`
-	LastSuccessAt    *time.Time `json:"last_success_at"`
-	LastAttemptAt    *time.Time `json:"last_attempt_at"`
-	NextRefreshAt    *time.Time `json:"next_refresh_at"`
-	FreshUntil       *time.Time `json:"fresh_until"`
-	ErrorCode        string     `json:"error_code"`
-	LowBalance       bool       `json:"low_balance"`
-	AccountCount     int        `json:"account_count"`
+	WalletID            string     `json:"wallet_id"`
+	Status              string     `json:"status"`
+	Kind                string     `json:"kind"`
+	Balance             *float64   `json:"balance"`
+	Currency            string     `json:"currency"`
+	QueriedAccountID    *int64     `json:"queried_account_id"`
+	LastSuccessAt       *time.Time `json:"last_success_at"`
+	LastAttemptAt       *time.Time `json:"last_attempt_at"`
+	NextRefreshAt       *time.Time `json:"next_refresh_at"`
+	FreshUntil          *time.Time `json:"fresh_until"`
+	ErrorCode           string     `json:"error_code"`
+	LowBalance          bool       `json:"low_balance"`
+	AccountCount        int        `json:"account_count"`
+	TodayCost           *float64   `json:"today_cost,omitempty"`
+	TodayCostValidUntil *time.Time `json:"today_cost_valid_until,omitempty"`
 }
 
 // Snapshot fingerprints are persisted privately, never included in admin DTOs.
@@ -97,12 +101,17 @@ type UpstreamBalanceRepository interface {
 	SaveSnapshot(context.Context, int64, *Account, *UpstreamBalanceSnapshot) error
 }
 
+type upstreamBalanceCostReader interface {
+	GetAccountWindowStatsBatch(context.Context, []int64, time.Time) (map[int64]*usagestats.AccountStats, error)
+}
+
 // UpstreamBalanceHTTPUpstream gives Wire a distinct, private connection pool.
 type UpstreamBalanceHTTPUpstream struct{ HTTPUpstream }
 
 type UpstreamBalanceService struct {
 	repo          UpstreamBalanceRepository
 	accounts      AccountRepository
+	costs         upstreamBalanceCostReader
 	tester        *AccountTestService
 	upstream      HTTPUpstream
 	lockCache     LeaderLockCache
@@ -131,9 +140,10 @@ func NewUpstreamBalanceService(repo UpstreamBalanceRepository, accounts AccountR
 	return s
 }
 
-func ProvideUpstreamBalanceService(repo UpstreamBalanceRepository, accounts AccountRepository, tester *AccountTestService, lockCache LeaderLockCache, upstream UpstreamBalanceHTTPUpstream) *UpstreamBalanceService {
+func ProvideUpstreamBalanceService(repo UpstreamBalanceRepository, accounts AccountRepository, usageLogs UsageLogRepository, tester *AccountTestService, lockCache LeaderLockCache, upstream UpstreamBalanceHTTPUpstream) *UpstreamBalanceService {
 	s := NewUpstreamBalanceService(repo, accounts, tester)
 	s.lockCache, s.upstream = lockCache, upstream.HTTPUpstream
+	s.costs, _ = usageLogs.(upstreamBalanceCostReader)
 	s.Start()
 	return s
 }
@@ -412,8 +422,50 @@ func (s *UpstreamBalanceService) List(ctx context.Context) (*UpstreamBalanceList
 	if err != nil {
 		return nil, err
 	}
-	for _, w := range config.Wallets {
-		result.Items = append(result.Items, upstreamBalanceItem(w, index, snapshots[w.ID], s.now(), upstreamBalanceInterval(config)))
+	now := s.now()
+	dayStart := timezone.StartOfDay(now)
+	costValidUntil := dayStart.AddDate(0, 0, 1)
+	walletAccounts := make([][]*Account, len(config.Wallets))
+	accountIDs := make([]int64, 0)
+	seen := make(map[int64]bool)
+	for i, w := range config.Wallets {
+		walletAccounts[i] = upstreamBalanceWalletAccounts(w, index)
+		for _, account := range walletAccounts[i] {
+			if !seen[account.ID] {
+				seen[account.ID] = true
+				accountIDs = append(accountIDs, account.ID)
+			}
+		}
+	}
+	var costs map[int64]*usagestats.AccountStats
+	costsAvailable := s.costs != nil && len(accountIDs) == 0
+	if s.costs != nil && len(accountIDs) > 0 {
+		costs, err = s.costs.GetAccountWindowStatsBatch(ctx, accountIDs, dayStart)
+		costsAvailable = err == nil
+		if costsAvailable {
+			for _, accountID := range accountIDs {
+				if costs[accountID] == nil {
+					costsAvailable = false
+					break
+				}
+			}
+		}
+	}
+	for i, w := range config.Wallets {
+		item := upstreamBalanceItem(w, index, snapshots[w.ID], now, upstreamBalanceInterval(config))
+		item.TodayCost = nil
+		item.TodayCostValidUntil = nil
+		if costsAvailable {
+			todayCost := 0.0
+			for _, account := range walletAccounts[i] {
+				if stats := costs[account.ID]; stats != nil {
+					todayCost += stats.Cost
+				}
+			}
+			item.TodayCost = &todayCost
+			item.TodayCostValidUntil = &costValidUntil
+		}
+		result.Items = append(result.Items, item)
 	}
 	return result, nil
 }
