@@ -68,7 +68,8 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 		return nil, nil
 	}
 	if preread, ok := req.Body.(*PrereadBody); ok {
-		return preread.Bytes(), nil
+		body := preread.Bytes()
+		return body, observeRequestBody(req, body)
 	}
 
 	capHint := requestBodyReadInitCap
@@ -90,12 +91,15 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 
 	enc := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Encoding")))
 	if enc == "" || enc == "identity" {
-		return raw, nil
+		return raw, observeRequestBody(req, raw)
 	}
 
 	decoded, err := decompressRequestBody(enc, raw)
 	if err != nil {
 		return nil, fmt.Errorf("decode Content-Encoding %q: %w", enc, err)
+	}
+	if err := observeRequestBody(req, decoded); err != nil {
+		return nil, err
 	}
 
 	req.Header.Del("Content-Encoding")

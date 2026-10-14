@@ -34,10 +34,41 @@ func ReadOpenAIWSClientMessage(
 	)
 }
 
+// ReadOpenAIWSClientFirstMessage defers audit admission until the handler has
+// resolved a composite route from the first frame. The handler must record even
+// rejected frames, and audit/check admitted frames before any upstream work.
+func ReadOpenAIWSClientFirstMessage(
+	controlCtx context.Context,
+	conn *coderws.Conn,
+	timeout time.Duration,
+	timeoutStatus coderws.StatusCode,
+	timeoutReason string,
+) (coderws.MessageType, []byte, error) {
+	return readOpenAIWSClientMessage(controlCtx, conn, timeout, timeoutStatus, timeoutReason, nil, nil)
+}
+
 // readOpenAIWSClientMessageWithTimeoutStart supports readers whose timeout
 // starts after a state transition, such as a completed passthrough turn. When
 // timeoutActive is nil, a positive timeout starts immediately.
 func readOpenAIWSClientMessageWithTimeoutStart(
+	controlCtx context.Context,
+	conn *coderws.Conn,
+	timeout time.Duration,
+	timeoutStatus coderws.StatusCode,
+	timeoutReason string,
+	timeoutStart <-chan struct{},
+	timeoutActive func() bool,
+) (coderws.MessageType, []byte, error) {
+	kind, payload, err := readOpenAIWSClientMessage(controlCtx, conn, timeout, timeoutStatus, timeoutReason, timeoutStart, timeoutActive)
+	if err == nil {
+		if err := auditGatewayResponsesWSMessage(controlCtx, conn, kind, payload); err != nil {
+			return kind, nil, err
+		}
+	}
+	return kind, payload, err
+}
+
+func readOpenAIWSClientMessage(
 	controlCtx context.Context,
 	conn *coderws.Conn,
 	timeout time.Duration,

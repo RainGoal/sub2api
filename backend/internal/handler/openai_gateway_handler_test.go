@@ -1931,6 +1931,9 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
+	middleware             []gin.HandlerFunc
+	requestHeaders         http.Header
+	closeErrorCode         string
 	simpleModeRejectAtRead int64
 	compositeResolver      *service.CompositeRouteResolver
 	accountPlatform        string
@@ -3083,11 +3086,15 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 		c.Next()
 	})
+	router.Use(tc.middleware...)
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
 	defer handlerServer.Close()
 
-	headers := http.Header{}
+	headers := tc.requestHeaders.Clone()
+	if headers == nil {
+		headers = http.Header{}
+	}
 	if tc.userAgent != nil {
 		headers.Set("User-Agent", *tc.userAgent)
 	}
@@ -3116,6 +3123,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	if tc.firstFrameCloseExpected {
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		if tc.closeErrorCode != "" {
+			_, event, readErr := clientConn.Read(readCtx)
+			require.NoError(t, readErr)
+			require.Equal(t, tc.closeErrorCode, gjson.GetBytes(event, "error.code").String())
+		}
 		_, _, readErr := clientConn.Read(readCtx)
 		cancelRead()
 		require.Error(t, readErr, "first frame should have been rejected with a close")
@@ -3160,6 +3172,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		require.NoError(t, err)
 		if tc.secondTurnCloseExpected {
 			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			if tc.closeErrorCode != "" {
+				_, event, readErr := clientConn.Read(readCtx)
+				require.NoError(t, readErr)
+				require.Equal(t, tc.closeErrorCode, gjson.GetBytes(event, "error.code").String())
+			}
 			_, _, readErr := clientConn.Read(readCtx)
 			cancelRead()
 			require.Error(t, readErr, "second turn should have been rejected with a close")

@@ -73,6 +73,7 @@ type Config struct {
 	Billing                 BillingConfig                 `mapstructure:"billing"`
 	Turnstile               TurnstileConfig               `mapstructure:"turnstile"`
 	Database                DatabaseConfig                `mapstructure:"database"`
+	RequestAudit            RequestAuditConfig            `mapstructure:"request_audit"`
 	Redis                   RedisConfig                   `mapstructure:"redis"`
 	Ops                     OpsConfig                     `mapstructure:"ops"`
 	JWT                     JWTConfig                     `mapstructure:"jwt"`
@@ -2221,6 +2222,12 @@ func setDefaults() {
 	viper.SetDefault("database.user_platform_quota_flusher_enabled", false)
 	viper.SetDefault("database.user_platform_quota_flush_interval_ms", 2000)
 	viper.SetDefault("database.user_platform_quota_flush_batch_size", 1000)
+	viper.SetDefault("request_audit.buffer_bytes", int64(64*1024*1024))
+	viper.SetDefault("request_audit.max_events", 8192)
+	viper.SetDefault("request_audit.write_timeout_ms", 1000)
+	viper.SetDefault("request_audit.db_max_connections", 2)
+	viper.SetDefault("request_audit.policy_max_connections", 2)
+	viper.SetDefault("request_audit.ban_lookup_timeout_ms", 20)
 
 	// Redis
 	viper.SetDefault("redis.host", "localhost")
@@ -2703,6 +2710,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.RequestAudit.validate(); err != nil {
+		return err
+	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

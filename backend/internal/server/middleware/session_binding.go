@@ -20,6 +20,12 @@ func SessionBindingContext(cfg *config.Config) gin.HandlerFunc {
 		forwardedIPSettings := cfg.ForwardedClientIPSettings()
 		ip.SetForwardedIPSettings(c, forwardedIPSettings.TrustForwardedIP, forwardedIPSettings.Headers)
 		userAgent := normalizePersistentText(c.Request.UserAgent(), maxPersistentUserAgentBytes)
+		values, present := c.Request.Header["User-Agent"]
+		if len(values) != 1 || values[0] != userAgent {
+			// Header.Set replaces this slice. Keep its original values only until
+			// request audit consumes them, without copying client-controlled bytes.
+			c.Set(requestAuditUserAgentKey, requestAuditUserAgent{values: values, present: present})
+		}
 		c.Request.Header.Set("User-Agent", userAgent)
 		binding := &service.SessionBinding{
 			IP:        ip.GetSecurityClientIP(c, forwardedIPSettings.TrustForwardedIP),

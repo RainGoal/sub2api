@@ -33,6 +33,34 @@ func TestDeriveAuditAction(t *testing.T) {
 	}
 }
 
+func TestRequestAuditDownloadAbortStillRecordsAdminAccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.GET("/api/v1/admin/request-audits/:id/payload", func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		SetAuditExtra(c, map[string]any{"audit_id": "audit-1", "part": "body", "result": "stream_failed", "raw_body": "private-content"})
+		c.Status(http.StatusOK)
+		c.Writer.WriteHeaderNow()
+		panic(http.ErrAbortHandler)
+	})
+	require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/v1/admin/request-audits/audit-1/payload?mode=raw", nil))
+	})
+	auditService.Stop()
+	require.Len(t, repository.logs, 1)
+	entry := repository.logs[0]
+	require.Equal(t, "admin.request_audit.payload.read", entry.Action)
+	require.Equal(t, int64(77), *entry.ActorUserID)
+	require.Equal(t, "stream_failed", entry.Extra["result"])
+	require.NotContains(t, entry.Extra, "raw_body")
+	require.Empty(t, entry.RequestBody)
+}
+
 type auditCaptureRepository struct {
 	mu   sync.Mutex
 	logs []*service.AuditLog

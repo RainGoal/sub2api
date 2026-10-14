@@ -126,6 +126,7 @@ func RegisterAdminRoutes(
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
+		registerRequestAuditRoutes(admin, h)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
@@ -133,6 +134,25 @@ func RegisterAdminRoutes(
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
 	}
+}
+
+func registerRequestAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.Admin == nil || h.Admin.RequestAudit == nil {
+		return
+	}
+	audit := h.Admin.RequestAudit
+	requests := admin.Group("/request-audits")
+	requests.GET("", audit.List)
+	requests.GET("/config", audit.GetConfig)
+	requests.PUT("/config", audit.UpdateConfig)
+	requests.GET("/status", audit.Status)
+	requests.GET("/:id", audit.Get)
+	requests.GET("/:id/payload", audit.Payload)
+	bans := admin.Group("/session-bans")
+	bans.GET("", audit.ListBans)
+	bans.POST("", audit.CreateBan)
+	bans.GET("/:id", audit.GetBan)
+	bans.POST("/:id/revoke", audit.RevokeBan)
 }
 
 func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

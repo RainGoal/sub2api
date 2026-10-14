@@ -235,6 +235,10 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 				errCh <- readErr
 				return
 			}
+			if auditErr := auditGatewayClientWSMessage(ctx, client, kind, msg); auditErr != nil {
+				errCh <- auditErr
+				return
+			}
 			if kind != coderws.MessageText && kind != coderws.MessageBinary {
 				continue
 			}

@@ -4,7 +4,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // maxPersistedSessionIDLength bounds the persisted client session identifier to the
@@ -55,6 +57,60 @@ func ExtractClientSessionID(c *gin.Context) string {
 		}
 	}
 	return ""
+}
+
+// ExtractRequestAuditSessionID preserves usage correlation semantics while
+// exposing the exact selected header and conflicting or invalid input for audit.
+// It never substitutes cache keys or server-generated scheduling hashes.
+func ExtractRequestAuditSessionID(c *gin.Context) (sessionID, source, resolution string) {
+	resolution = "missing"
+	if c == nil || c.Request == nil {
+		return
+	}
+	headers := clientSessionIDHeaders
+	if isGrokRequestContext(c) {
+		headers = append(append([]string(nil), headers...), grokConversationIDHeader)
+	}
+	for _, header := range headers {
+		values := c.Request.Header.Values(header)
+		for n, value := range values {
+			candidate := sanitizeSessionID(value)
+			if candidate == "" {
+				if value != "" && sessionID == "" {
+					resolution = "invalid"
+				}
+				continue
+			}
+			if sessionID == "" && n == 0 {
+				sessionID, source, resolution = candidate, "header."+strings.ToLower(header), "resolved"
+			} else if sessionID != "" && candidate != sessionID {
+				resolution = "conflict"
+			}
+		}
+	}
+	return
+}
+
+// ClaudeMetadataSessionID returns only a validated explicit Claude conversation
+// identifier. It must be called on the first decoded inbound body, before any
+// metadata masking or protocol conversion takes place.
+func ClaudeMetadataSessionID(body []byte, maxNormalizedBytes int64) string {
+	if !gjson.ValidBytes(body) {
+		// Match the business reader's BOM/control-byte handling on a parsing
+		// copy; the captured inbound body must remain byte-for-byte unchanged.
+		// Reuse the business limit so rejected control-byte bodies cannot first
+		// allocate an oversized audit-only parsing copy.
+		normalized, err := httputil.NormalizeLenientJSONRequestBody(body, maxNormalizedBytes)
+		if err != nil || !gjson.ValidBytes(normalized) {
+			return ""
+		}
+		body = normalized
+	}
+	parsed := ParseMetadataUserID(gjson.GetBytes(body, "metadata.user_id").String())
+	if parsed == nil {
+		return ""
+	}
+	return sanitizeSessionID(parsed.SessionID)
 }
 
 // sanitizeSessionID normalizes a raw client-supplied session identifier for safe

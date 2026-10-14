@@ -53,6 +53,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		// BuildInfo provider
 		provideServiceBuildInfo,
 		providePluginHostInfo,
+		provideRequestAuditRuntime,
+		provideRequestAuditManager,
 
 		// Cleanup function provider
 		provideCleanup,
@@ -129,6 +131,7 @@ func provideCleanup(
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	auditLog *service.AuditLogService,
+	requestAudit *requestAuditRuntime,
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
@@ -145,6 +148,7 @@ func provideCleanup(
 
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
+			{"RequestAudit", func() error { return requestAudit.Stop(ctx) }},
 			{"SalesService", func() error {
 				if salesService != nil {
 					salesService.Stop()

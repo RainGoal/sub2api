@@ -58,6 +58,7 @@ var auditExtraAllowedKeys = map[string]struct{}{
 	"http_status": {}, "latency_ms": {}, "token_applied": {}, "retryable": {},
 	"event_id": {}, "requested_count": {}, "deleted_events": {}, "deleted_jobs": {},
 	"matched_count": {}, "snapshot_max_id": {}, "filter_hash": {}, "confirm": {},
+	"audit_id": {}, "ban_id": {}, "part": {}, "offset": {}, "returned_bytes": {}, "reveal_sensitive": {},
 }
 
 // SetAuditExtra adds allowlisted, scalar details to the current audit entry.
@@ -109,15 +110,16 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
-	"GET /api/v1/admin/accounts/data":             "admin.accounts.export",
-	"GET /api/v1/admin/proxies/data":              "admin.proxies.export",
-	"GET /api/v1/admin/redeem-codes/export":       "admin.redeem_codes.export",
-	"GET /api/v1/admin/backups/:id/download-url":  "admin.backups.download",
-	"GET /api/v1/admin/settings/admin-api-key":    "admin.admin_api_key.read",
-	"GET /api/v1/admin/users/:id/api-keys":        "admin.users.api_keys.read",
-	"GET /api/v1/admin/groups/:id/api-keys":       "admin.groups.api_keys.read",
-	"GET /api/v1/admin/backups/s3-config":         "admin.backups.s3_config.read",
-	"GET /api/v1/admin/data-management/s3/config": "admin.data_management.s3_config.read",
+	"GET /api/v1/admin/accounts/data":              "admin.accounts.export",
+	"GET /api/v1/admin/proxies/data":               "admin.proxies.export",
+	"GET /api/v1/admin/redeem-codes/export":        "admin.redeem_codes.export",
+	"GET /api/v1/admin/backups/:id/download-url":   "admin.backups.download",
+	"GET /api/v1/admin/settings/admin-api-key":     "admin.admin_api_key.read",
+	"GET /api/v1/admin/users/:id/api-keys":         "admin.users.api_keys.read",
+	"GET /api/v1/admin/groups/:id/api-keys":        "admin.groups.api_keys.read",
+	"GET /api/v1/admin/backups/s3-config":          "admin.backups.s3_config.read",
+	"GET /api/v1/admin/data-management/s3/config":  "admin.data_management.s3_config.read",
+	"GET /api/v1/admin/request-audits/:id/payload": "admin.request_audit.payload.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
@@ -142,6 +144,9 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/prompt-audit/events/batch-delete":     "admin.prompt_audit.events.batch_delete",
 	"POST /api/v1/admin/prompt-audit/events/delete-preview":   "admin.prompt_audit.events.delete_preview",
 	"POST /api/v1/admin/prompt-audit/events/delete-by-filter": "admin.prompt_audit.events.filter_delete",
+	"PUT /api/v1/admin/request-audits/config":                 "admin.request_audit.config.update",
+	"POST /api/v1/admin/session-bans":                         "admin.session_ban.create",
+	"POST /api/v1/admin/session-bans/:id/revoke":              "admin.session_ban.revoke",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
@@ -205,94 +210,98 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 		}
 
 		start := time.Now()
-		c.Next()
+		// Streaming audit downloads abort the HTTP connection on a late read
+		// failure; retain the access record even when ErrAbortHandler unwinds.
+		defer func() {
 
-		if c.GetBool(auditCtxKeySkip) {
-			return
-		}
-
-		status := c.Writer.Status()
-		// token 刷新成功属于高频常规操作，只记录失败（潜在攻击信号）。
-		if routeKey == "POST /api/v1/auth/refresh" && status < 400 {
-			return
-		}
-
-		entry := &service.AuditLog{
-			CreatedAt:   time.Now().UTC(),
-			Action:      action,
-			Method:      c.Request.Method,
-			Path:        c.FullPath(),
-			ClientIP:    SecurityClientIP(c),
-			UserAgent:   c.Request.UserAgent(),
-			RequestBody: bodyRedacted,
-			StatusCode:  status,
-			LatencyMs:   time.Since(start).Milliseconds(),
-		}
-		if entry.Path == "" {
-			entry.Path = c.Request.URL.Path
-		}
-		if entry.Action == "" {
-			entry.Action = deriveAuditAction(c.Request.Method, entry.Path)
-		}
-		if v, ok := c.Get(auditCtxKeyAction); ok {
-			if s, ok := v.(string); ok && s != "" {
-				entry.Action = s
+			if c.GetBool(auditCtxKeySkip) {
+				return
 			}
-		}
-		if requestID, ok := c.Request.Context().Value(ctxkey.RequestID).(string); ok {
-			entry.RequestID = requestID
-		}
 
-		// 操作者身份：优先取认证中间件写入的上下文，其次取 handler 覆写（登录等场景）。
-		if subject, ok := GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
-			uid := subject.UserID
-			entry.ActorUserID = &uid
-		}
-		if role, ok := GetUserRoleFromContext(c); ok {
-			entry.ActorRole = role
-		}
-		entry.ActorEmail = c.GetString(ContextKeyAuthEmail)
-		entry.AuthMethod = c.GetString("auth_method")
-		if entry.AuthMethod == "" && entry.ActorUserID != nil {
-			entry.AuthMethod = service.AuditAuthMethodJWT
-		}
-		if v, ok := c.Get(auditCtxKeyActorID); ok {
-			if id, ok := v.(int64); ok && id > 0 {
-				entry.ActorUserID = &id
+			status := c.Writer.Status()
+			// token 刷新成功属于高频常规操作，只记录失败（潜在攻击信号）。
+			if routeKey == "POST /api/v1/auth/refresh" && status < 400 {
+				return
 			}
-		}
-		if v, ok := c.Get(auditCtxKeyActorEmail); ok {
-			if s, ok := v.(string); ok && s != "" {
-				entry.ActorEmail = s
+
+			entry := &service.AuditLog{
+				CreatedAt:   time.Now().UTC(),
+				Action:      action,
+				Method:      c.Request.Method,
+				Path:        c.FullPath(),
+				ClientIP:    SecurityClientIP(c),
+				UserAgent:   c.Request.UserAgent(),
+				RequestBody: bodyRedacted,
+				StatusCode:  status,
+				LatencyMs:   time.Since(start).Milliseconds(),
 			}
-		}
-
-		// 请求头凭证掩码（仅保留首尾）。
-		entry.CredentialMasked = MaskedRequestCredential(c)
-
-		extra := map[string]any{}
-		if value, ok := c.Get(auditCtxKeyExtra); ok {
-			if details, ok := value.(map[string]any); ok {
-				for key, item := range details {
-					extra[key] = item
+			if entry.Path == "" {
+				entry.Path = c.Request.URL.Path
+			}
+			if entry.Action == "" {
+				entry.Action = deriveAuditAction(c.Request.Method, entry.Path)
+			}
+			if v, ok := c.Get(auditCtxKeyAction); ok {
+				if s, ok := v.(string); ok && s != "" {
+					entry.Action = s
 				}
 			}
-		}
-		if len(c.Params) > 0 {
-			params := make(map[string]string, len(c.Params))
-			for _, p := range c.Params {
-				params[p.Key] = p.Value
+			if requestID, ok := c.Request.Context().Value(ctxkey.RequestID).(string); ok {
+				entry.RequestID = requestID
 			}
-			extra["params"] = params
-		}
-		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
-			extra["query"] = q
-		}
-		if len(extra) > 0 {
-			entry.Extra = extra
-		}
 
-		auditService.Record(entry)
+			// 操作者身份：优先取认证中间件写入的上下文，其次取 handler 覆写（登录等场景）。
+			if subject, ok := GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
+				uid := subject.UserID
+				entry.ActorUserID = &uid
+			}
+			if role, ok := GetUserRoleFromContext(c); ok {
+				entry.ActorRole = role
+			}
+			entry.ActorEmail = c.GetString(ContextKeyAuthEmail)
+			entry.AuthMethod = c.GetString("auth_method")
+			if entry.AuthMethod == "" && entry.ActorUserID != nil {
+				entry.AuthMethod = service.AuditAuthMethodJWT
+			}
+			if v, ok := c.Get(auditCtxKeyActorID); ok {
+				if id, ok := v.(int64); ok && id > 0 {
+					entry.ActorUserID = &id
+				}
+			}
+			if v, ok := c.Get(auditCtxKeyActorEmail); ok {
+				if s, ok := v.(string); ok && s != "" {
+					entry.ActorEmail = s
+				}
+			}
+
+			// 请求头凭证掩码（仅保留首尾）。
+			entry.CredentialMasked = MaskedRequestCredential(c)
+
+			extra := map[string]any{}
+			if value, ok := c.Get(auditCtxKeyExtra); ok {
+				if details, ok := value.(map[string]any); ok {
+					for key, item := range details {
+						extra[key] = item
+					}
+				}
+			}
+			if len(c.Params) > 0 {
+				params := make(map[string]string, len(c.Params))
+				for _, p := range c.Params {
+					params[p.Key] = p.Value
+				}
+				extra["params"] = params
+			}
+			if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
+				extra["query"] = q
+			}
+			if len(extra) > 0 {
+				entry.Extra = extra
+			}
+
+			auditService.Record(entry)
+		}()
+		c.Next()
 	})
 }
 
