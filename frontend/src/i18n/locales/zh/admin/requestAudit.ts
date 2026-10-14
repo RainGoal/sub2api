@@ -1,5 +1,41 @@
 export default {
   "requestAudit": {
+    "bodyContent": {
+      "view": "请求体视图",
+      "content": "消息内容",
+      "raw": "原文",
+      "loading": "正在读取完整请求体 · {received} / {total} 字节",
+      "limitHint": "消息视图支持最多 4 MiB 的完整请求体；仍可分页查看或下载原文。",
+      "extracted": "此处展示消息文本和内嵌图片；原文保留请求的全部字段。",
+      "unsupported": "未识别到支持的消息结构，以下展示原文片段。",
+      "unsupportedBlock": "“{type}”区块可在原文中查看。",
+      "limited": "部分内容超过消息、区块或图片预览上限，请查看原文或下载完整内容。",
+      "imageAlt": "请求内嵌图片 {index}",
+      "hints": {
+        "tooLarge": "请求体超过 4 MiB 消息预览上限，以下展示首段原文；可切换原文分页查看或下载。",
+        "partial": "当前仅为已明确允许读取的前缀，不能视为完整消息，以下展示其原文。",
+        "binary": "此请求体不是有效的 UTF-8 文本，以下展示原文片段；下载可保留原始字节。",
+        "inconsistent": "返回的请求体片段不一致，请刷新后查看消息，或检查原文。"
+      },
+      "imageReasons": {
+        "external": "未加载外部图片链接，可在原文中查看地址。",
+        "invalid": "此内嵌图片未通过校验或无法解码，原始数据保留在原文中。",
+        "unsupported": "此图片格式暂不预览，支持 PNG、JPEG、GIF 和 WebP。",
+        "tooLarge": "此内嵌图片超过文件大小、尺寸或累计像素预览上限，原始数据保留在原文中。"
+      },
+      "roles": { "system": "系统", "developer": "开发者", "user": "用户", "assistant": "助手", "tool": "工具", "model": "模型", "unknown": "消息" }
+    },
+    "payloads": {
+      "pretty": "格式化 JSON",
+      "empty": "此部分为空（0 字节）。",
+      "formatHint": "格式化只影响显示，可能合并重复键；下载保留原始字节。",
+      "range": "{from}–{to} / {total} 字节",
+      "pageSize": "每段最多 64 KiB",
+      "manifest": "采集清单：",
+      "manifestBytes": "预期 {count} 字节",
+      "previous": "上一段",
+      "next": "下一段"
+    },
     "banRetryReady": "未查到本次操作的生效规则。草稿已保留，可以重新提交；系统会防止重复封禁。",
     "createdBy": "创建人",
     "revokedBy": "解除人",
@@ -24,6 +60,15 @@ export default {
     "to": "结束时间",
     "apiKey": "API Key",
     "user": "用户",
+    "userSearchPlaceholder": "输入用户名或邮箱搜索",
+    "userSearchEmpty": "输入关键词后选择匹配用户",
+    "userSearchNoResults": "没有匹配的用户",
+    "userSearchFailed": "用户搜索失败，请重新输入关键词重试。",
+    "deletedUser": "已删除",
+    "group": "所属分组",
+    "groupId": "分组 ID",
+    "groupFallback": "分组 #{id}",
+    "unidentifiedGroup": "未识别分组",
     "session": "会话",
     "kind": "类型",
     "integrity": "完整性",
@@ -32,9 +77,20 @@ export default {
     "empty": "当前窗口没有请求记录。",
     "time": "接收时间",
     "identity": "身份",
+    "groupPlatform": "分组平台",
+    "groupPlatformHint": "显示该记录所属分组的当前平台；多平台分组不代表本次请求的最终路由。",
+    "multiPlatform": "多平台",
+    "userFallback": "用户 #{id}",
+    "keyFallback": "Key #{id}",
+    "unidentifiedUser": "未识别用户",
+    "unidentifiedKey": "未识别 Key",
+    "userId": "用户 ID",
+    "apiKeyId": "API Key ID",
+    "technicalDetails": "更多请求信息",
     "request": "请求",
     "result": "结果",
     "bytes": "字节（已存/已观察）",
+    "dataSize": "数据量",
     "actions": "操作",
     "details": "详情",
     "previous": "上一页",
@@ -96,11 +152,10 @@ export default {
       "unknown": "未知"
     },
     "kinds": {
-      "http": "HTTP 请求",
-      "ws_handshake": "WebSocket 握手",
-      "ws_message": "WebSocket 消息"
+      "http_request": "HTTP 请求",
+      "websocket_handshake": "WebSocket 握手",
+      "websocket_message": "WebSocket 消息"
     },
-    "sessionNeedsKey": "按会话筛选前请先填写 API Key ID。",
     "failed": "请求审计操作失败。",
     "invalidTimeWindow": "开始时间不能晚于结束时间。",
     "retentionConfirmTitle": "缩短保留期？",

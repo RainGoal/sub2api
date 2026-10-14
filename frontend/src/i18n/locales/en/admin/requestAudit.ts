@@ -1,5 +1,41 @@
 export default {
   "requestAudit": {
+    "bodyContent": {
+      "view": "Body view",
+      "content": "Messages",
+      "raw": "Raw",
+      "loading": "Reading complete body · {received} / {total} bytes",
+      "limitHint": "Message view reads complete bodies up to 4 MiB. Raw paging and download remain available.",
+      "extracted": "Message text and embedded images are shown here. Raw view preserves every request field.",
+      "unsupported": "No supported message structure was found. The raw segment is shown below.",
+      "unsupportedBlock": "Block “{type}” is available in Raw view.",
+      "limited": "Some content exceeds the message, block, or image preview limits. Use Raw or download for all content.",
+      "imageAlt": "Embedded request image {index}",
+      "hints": {
+        "tooLarge": "This body exceeds the 4 MiB message preview limit. The first raw segment is shown below; use Raw paging or download for more.",
+        "partial": "This is only the explicitly allowed prefix, not a complete message. Its raw content is shown below.",
+        "binary": "This body is not valid UTF-8 text. The raw segment is shown below; download preserves its original bytes.",
+        "inconsistent": "The returned body segments did not match. Refresh before viewing messages, or inspect Raw."
+      },
+      "imageReasons": {
+        "external": "External image URLs are not loaded. The address is available in Raw view.",
+        "invalid": "This embedded image could not be validated or decoded. Its original data remains in Raw view.",
+        "unsupported": "This image format is not previewed. PNG, JPEG, GIF and WebP are supported.",
+        "tooLarge": "This embedded image exceeds the file size, dimensions, or cumulative pixel preview limit. Its original data remains in Raw view."
+      },
+      "roles": { "system": "System", "developer": "Developer", "user": "User", "assistant": "Assistant", "tool": "Tool", "model": "Model", "unknown": "Message" }
+    },
+    "payloads": {
+      "pretty": "Format JSON",
+      "empty": "This part is empty (0 bytes).",
+      "formatHint": "Formatting only affects this view and may merge duplicate keys. Downloads preserve the original bytes.",
+      "range": "{from}–{to} / {total} bytes",
+      "pageSize": "Up to 64 KiB per page",
+      "manifest": "Capture manifest:",
+      "manifestBytes": "{count} bytes expected",
+      "previous": "Previous segment",
+      "next": "Next segment"
+    },
     "banRetryReady": "No active rule was found for this attempt. Your draft is preserved and can be submitted again; existing active bans will not be duplicated.",
     "createdBy": "Created by",
     "revokedBy": "Revoked by",
@@ -24,6 +60,15 @@ export default {
     "to": "To",
     "apiKey": "API key",
     "user": "User",
+    "userSearchPlaceholder": "Search by username or email",
+    "userSearchEmpty": "Enter a keyword, then select a matching user",
+    "userSearchNoResults": "No matching users",
+    "userSearchFailed": "User search failed. Re-enter a keyword to retry.",
+    "deletedUser": "Deleted",
+    "group": "Group",
+    "groupId": "Group ID",
+    "groupFallback": "Group #{id}",
+    "unidentifiedGroup": "Unidentified group",
     "session": "Session",
     "kind": "Kind",
     "integrity": "Integrity",
@@ -32,9 +77,20 @@ export default {
     "empty": "No request records in this window.",
     "time": "Received",
     "identity": "Identity",
+    "groupPlatform": "Group platform",
+    "groupPlatformHint": "The current platform of the group linked to this record; a multi-platform group does not identify this request's final route.",
+    "multiPlatform": "Multi-platform",
+    "userFallback": "User #{id}",
+    "keyFallback": "Key #{id}",
+    "unidentifiedUser": "Unidentified user",
+    "unidentifiedKey": "Unidentified key",
+    "userId": "User ID",
+    "apiKeyId": "API key ID",
+    "technicalDetails": "More request information",
     "request": "Request",
     "result": "Result",
     "bytes": "Bytes (stored / observed)",
+    "dataSize": "Data size",
     "actions": "Actions",
     "details": "Details",
     "previous": "Previous",
@@ -96,11 +152,10 @@ export default {
       "unknown": "Unknown"
     },
     "kinds": {
-      "http": "HTTP request",
-      "ws_handshake": "WebSocket handshake",
-      "ws_message": "WebSocket message"
+      "http_request": "HTTP request",
+      "websocket_handshake": "WebSocket handshake",
+      "websocket_message": "WebSocket message"
     },
-    "sessionNeedsKey": "Enter an API key ID before filtering by session.",
     "failed": "Request audit operation failed.",
     "invalidTimeWindow": "The start time must not be later than the end time.",
     "retentionConfirmTitle": "Shorten retention?",

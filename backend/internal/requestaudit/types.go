@@ -106,6 +106,12 @@ type Record struct {
 	MessageType     string    `json:"message_type,omitempty"`
 	Identity
 	Completion
+	UserUsername string `json:"user_username"`
+	UserEmail    string `json:"user_email"`
+	APIKeyName   string `json:"api_key_name"`
+	GroupName    string `json:"group_name"`
+	// GroupPlatform is the saved group's current platform, not a captured routing decision.
+	GroupPlatform     string                  `json:"group_platform"`
 	CaptureState      string                  `json:"capture_state"`
 	CaptureReason     string                  `json:"capture_reason,omitempty"`
 	TerminalManifest  map[string]PartManifest `json:"terminal_manifest"`

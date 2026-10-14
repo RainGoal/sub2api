@@ -3,6 +3,7 @@ package requestaudit
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -23,15 +24,19 @@ func mockManager(t *testing.T) (*Manager, sqlmock.Sqlmock) {
 	return NewManager(db), mock
 }
 
-func recordRows(id, state, reason string, manifests map[string]PartManifest) *sqlmock.Rows {
+func recordRows(id, state, reason string, manifests map[string]PartManifest, metadata ...driver.Value) *sqlmock.Rows {
 	columns := strings.Split(strings.TrimSuffix(strings.TrimPrefix(recordSelect, "SELECT "), " FROM request_audits"), ",")
+	columns = append(columns, "user_username", "user_email", "api_key_name", "group_platform", "group_name")
+	var display [5]driver.Value
+	copy(display[:], metadata)
 	now := time.Now()
 	return sqlmock.NewRows(columns).AddRow(id, now, now, "http_request", "test", "POST", "/v1/messages", "HTTP/1.1", nil, nil, nil, nil,
-		1, 2, 3, "session", "header", "resolved", "test-model", 200, 1, "completed", nil, state, reason, jsonBytes(manifests), 0, 0, now, now)
+		1, 2, 3, "session", "header", "resolved", "test-model", 200, 1, "completed", nil, state, reason, jsonBytes(manifests), 0, 0, now, now,
+		display[0], display[1], display[2], display[3], display[4])
 }
 
 func expectRecord(mock sqlmock.Sqlmock, id, state, reason string, manifests map[string]PartManifest) {
-	mock.ExpectQuery(regexp.QuoteMeta(recordSelect + ` WHERE id=$1 AND ` + visibleRecordSQL)).WithArgs(id).WillReturnRows(recordRows(id, state, reason, manifests))
+	mock.ExpectQuery(regexp.QuoteMeta(withRecordMetadata(recordSelect + ` WHERE id=$1 AND ` + visibleRecordSQL))).WithArgs(id).WillReturnRows(recordRows(id, state, reason, manifests))
 }
 
 func expectRetention(mock sqlmock.Sqlmock) {

@@ -32,8 +32,8 @@
         <form class="grid gap-3 border-b border-gray-200 p-4 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-4" @submit.prevent="search">
           <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.from') }}<input v-model="filters.from" type="datetime-local" class="input w-full" /></label>
           <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.to') }}<input v-model="filters.to" type="datetime-local" class="input w-full" /></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.apiKey') }}<input v-model="filters.apiKey" type="number" min="1" class="input w-full" /></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.user') }}<input v-model="filters.user" type="number" min="1" class="input w-full" /></label>
+          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.apiKeyId') }}<input v-model="filters.apiKey" type="number" min="1" class="input w-full" /></label>
+          <RequestAuditUserFilter :key="userFilterRevision" v-model="filters.user" v-model:label="filters.userLabel" />
           <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.session') }}<input v-model="filters.session" class="input w-full" maxlength="255" /></label>
           <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.kind') }}<select v-model="filters.kind" class="input w-full"><option value="">{{ t('admin.requestAudit.all') }}</option><option v-for="kind in kinds" :key="kind" :value="kind">{{ t(`admin.requestAudit.kinds.${kind}`) }}</option></select></label>
           <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.integrity') }}<select v-model="filters.state" class="input w-full"><option value="">{{ t('admin.requestAudit.all') }}</option><option v-for="state in states" :key="state" :value="state">{{ t(`admin.requestAudit.states.${state}`) }}</option></select></label>
@@ -45,8 +45,29 @@
         <p v-else-if="!records.items.length && !errors.list" class="p-12 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.empty') }}</p>
         <div v-else-if="records.items.length" class="overflow-x-auto">
           <table class="w-full whitespace-nowrap text-left text-sm">
-            <thead class="border-b border-gray-200 bg-gray-50 text-xs text-gray-500 dark:border-dark-700 dark:bg-dark-800"><tr><th class="p-3">{{ t('admin.requestAudit.time') }}</th><th class="p-3">{{ t('admin.requestAudit.identity') }}</th><th class="p-3">{{ t('admin.requestAudit.request') }}</th><th class="p-3">{{ t('admin.requestAudit.result') }}</th><th class="p-3">{{ t('admin.requestAudit.integrity') }}</th><th class="p-3">{{ t('admin.requestAudit.bytes') }}</th><th class="p-3">{{ t('admin.requestAudit.actions') }}</th></tr></thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-dark-700"><tr v-for="item in records.items" :key="item.id" class="hover:bg-gray-50 dark:hover:bg-dark-800/60"><td class="p-3 font-mono text-xs">{{ formatDate(item.received_at) }}</td><td class="p-3"><p>{{ t('admin.requestAudit.apiKey') }} {{ item.api_key_id || '—' }} · {{ t('admin.requestAudit.user') }} {{ item.user_id || '—' }}</p><p class="mt-1 max-w-48 truncate font-mono text-xs text-gray-500" :title="item.session_id || ''">{{ item.session_id || t('admin.requestAudit.noSession') }}</p></td><td class="p-3"><p class="max-w-64 truncate font-mono text-xs">{{ item.method }} {{ item.route_pattern || item.kind }}</p><p class="mt-1 max-w-56 truncate text-xs text-gray-500">{{ item.model || '—' }}</p></td><td class="p-3"><span :class="(item.http_status || 0) >= 400 ? 'text-red-500' : 'text-gray-600 dark:text-dark-200'">{{ item.http_status || item.outcome || '—' }}</span><p class="mt-1 text-xs text-gray-500">{{ item.duration_ms ?? '—' }} ms</p></td><td class="p-3"><span class="rounded border px-2 py-1 text-xs" :class="item.capture_state === 'complete' ? 'border-emerald-600/30 text-emerald-500' : 'border-amber-500/30 text-amber-500'">{{ stateLabel(item.capture_state) }}</span></td><td class="p-3 font-mono text-xs">{{ formatBytes(item.stored_body_bytes || 0) }} / {{ formatBytes(item.observed_body_bytes || 0) }}</td><td class="p-3"><button class="btn btn-secondary btn-sm" :data-test="`detail-${item.id}`" @click="openDetail(item.id)">{{ t('admin.requestAudit.details') }}</button></td></tr></tbody>
+            <thead class="border-b border-gray-200 bg-gray-50 text-xs text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300">
+              <tr><th v-for="column in ['time', 'user', 'apiKey', 'group', 'request', 'result', 'integrity', 'dataSize', 'actions']" :key="column" class="px-4 py-3 font-medium" :class="{ 'sticky right-0 bg-gray-50 dark:bg-dark-800': column === 'actions' }">{{ t(`admin.requestAudit.${column}`) }}</th></tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+              <tr v-for="item in records.items" :key="item.id" class="align-top hover:bg-gray-50 dark:hover:bg-dark-800/60" :data-test="`record-${item.id}`">
+                <td class="px-4 py-4 font-mono text-xs tabular-nums text-gray-600 dark:text-dark-200"><time :datetime="item.received_at">{{ new Date(item.received_at).toLocaleDateString(locale) }}<span class="mt-1 block text-gray-500 dark:text-dark-300">{{ new Date(item.received_at).toLocaleTimeString(locale) }}</span></time></td>
+                <td class="px-4 py-4">
+                  <p class="max-w-48 truncate font-medium text-gray-900 dark:text-white" :title="userName(item)">{{ userName(item) }}</p>
+                  <p v-if="item.user_username && item.user_email" class="mt-1 max-w-48 truncate text-xs text-gray-500 dark:text-dark-300" :title="item.user_email">{{ item.user_email }}</p>
+                </td>
+                <td class="px-4 py-4"><p class="max-w-44 truncate text-gray-700 dark:text-dark-100" :title="keyName(item)">{{ keyName(item) }}</p></td>
+                <td class="px-4 py-3"><p class="mb-2 max-w-44 truncate font-medium text-gray-700 dark:text-dark-100" :title="groupName(item)">{{ groupName(item) }}</p><RequestAuditPlatform :platform="item.group_platform" /></td>
+                <td class="px-4 py-4">
+                  <p class="max-w-64 truncate font-mono text-xs text-gray-800 dark:text-dark-100" :title="`${item.method || ''} ${item.route_pattern || item.kind}`"><span class="text-primary-600 dark:text-primary-400">{{ item.method }}</span> {{ item.route_pattern || kindLabel(item.kind) }}</p>
+                  <p class="mt-1 max-w-56 truncate text-xs text-gray-500 dark:text-dark-300" :title="item.model || ''">{{ item.model || '—' }}</p>
+                  <p class="mt-1 max-w-56 truncate font-mono text-[11px] text-gray-400 dark:text-dark-400" :title="item.session_id || ''">{{ item.session_id || t('admin.requestAudit.noSession') }}</p>
+                </td>
+                <td class="px-4 py-4"><span class="font-mono text-xs font-semibold" :class="(item.http_status || 0) >= 400 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-dark-100'">{{ item.http_status || item.outcome || '—' }}</span><p class="mt-1 font-mono text-xs text-gray-500 dark:text-dark-300">{{ item.duration_ms ?? '—' }} ms</p></td>
+                <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs" :class="item.capture_state === 'complete' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400' : 'border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400'"><span class="h-1 w-1 rounded-full bg-current" aria-hidden="true" />{{ stateLabel(item.capture_state) }}</span></td>
+                <td class="px-4 py-4 font-mono text-xs tabular-nums text-gray-600 dark:text-dark-200">{{ formatBytes(item.stored_body_bytes || 0) }}<p class="mt-1 text-gray-400 dark:text-dark-400">/ {{ formatBytes(item.observed_body_bytes || 0) }}</p></td>
+                <td class="sticky right-0 bg-white px-4 py-3 dark:bg-dark-900"><button class="btn btn-secondary btn-sm" :data-test="`detail-${item.id}`" @click="openDetail(item.id)">{{ t('admin.requestAudit.details') }}</button></td>
+              </tr>
+            </tbody>
           </table>
         </div>
         <div class="flex justify-end gap-2 border-t border-gray-200 p-3 dark:border-dark-700"><button class="btn btn-secondary btn-sm" :disabled="!cursorHistory.length || loading.list" @click="previousPage">{{ t('admin.requestAudit.previous') }}</button><button class="btn btn-secondary btn-sm" :disabled="!records.has_more || loading.list" @click="nextPage">{{ t('admin.requestAudit.next') }}</button></div>
@@ -101,26 +122,12 @@
 
     <BaseDialog :show="detailOpen" :title="t('admin.requestAudit.details')" width="extra-wide" @close="closeDetail">
       <p v-if="errors.detail" role="alert" class="text-sm text-red-500">{{ errors.detail }}</p>
-      <p v-if="loading.detail" class="py-8 text-center text-gray-500">{{ t('common.loading') }}</p>
+      <p v-if="loading.detail && !detail" class="py-8 text-center text-gray-500">{{ t('common.loading') }}</p>
       <div v-if="detail" class="space-y-4">
-        <dl class="grid gap-3 text-sm sm:grid-cols-2"><div><dt class="text-xs text-gray-500">{{ t('admin.requestAudit.requestId') }}</dt><dd class="break-all font-mono text-xs">{{ detail.id }}</dd></div><div><dt class="text-xs text-gray-500">{{ t('admin.requestAudit.integrity') }}</dt><dd>{{ stateLabel(detail.capture_state) }}<span v-if="detail.capture_reason"> · {{ detail.capture_reason }}</span></dd></div><div><dt class="text-xs text-gray-500">{{ t('admin.requestAudit.identity') }}</dt><dd>{{ t('admin.requestAudit.apiKey') }} {{ detail.api_key_id || '—' }} · {{ t('admin.requestAudit.user') }} {{ detail.user_id || '—' }}</dd></div><div><dt class="text-xs text-gray-500">{{ t('admin.requestAudit.session') }}</dt><dd class="break-all font-mono text-xs">{{ detail.session_id || t('admin.requestAudit.noSession') }}</dd></div></dl>
         <RequestAuditMetadata :record="detail" />
         <div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary btn-sm" :disabled="!detail.api_key_id || !detail.session_id" @click="showSessionRequests">{{ t('admin.requestAudit.sameSession') }}</button><button class="btn btn-danger btn-sm" data-test="open-ban" :disabled="!detail.api_key_id || !detail.session_id || loading.detail || !!detailBans.length" @click="openBan">{{ t('admin.requestAudit.ban') }}</button><span v-if="!detail.api_key_id || !detail.session_id" class="text-xs text-gray-500">{{ t('admin.requestAudit.banUnavailable') }}</span></div>
         <div v-if="detailBans.length" class="rounded border border-amber-500/30 p-3 text-sm text-amber-500">{{ t('admin.requestAudit.alreadyBanned') }}: {{ detailBans[0]?.public_reason }}</div>
-        <div class="flex flex-wrap items-center gap-3 border-t border-gray-200 pt-4 dark:border-dark-700"><label class="text-sm">{{ t('admin.requestAudit.payloadPart') }}<select v-model="payloadPart" class="input ml-2" @change="resetPayload"><option v-for="part in parts" :key="part" :value="part">{{ t(`admin.requestAudit.parts.${part}`) }}</option></select></label><label v-if="payloadPart !== 'body'" class="flex items-center gap-2 text-xs"><input v-model="revealSensitive" type="checkbox" @change="resetPayload" />{{ t('admin.requestAudit.reveal') }}</label><label class="flex items-center gap-2 text-xs"><input v-model="allowPartial" type="checkbox" @change="resetPayload" />{{ t('admin.requestAudit.allowPartial') }}</label></div>
-        <div class="flex flex-wrap gap-2"><button data-test="load-payload" class="btn btn-primary btn-sm" :disabled="loading.payload || loading.download" @click="loadPayload(0)">{{ t('admin.requestAudit.viewPayload') }}</button><button class="btn btn-secondary btn-sm" :disabled="loading.payload || loading.download" @click="downloadPayload">{{ loading.download ? t('admin.requestAudit.downloading') : t('admin.requestAudit.download') }}</button></div>
-        <p v-if="errors.payload" role="alert" class="text-sm text-red-500">{{ errors.payload }}</p>
-        <p v-if="!payload && !loading.payload" class="py-5 text-center text-xs text-gray-500">{{ t('admin.requestAudit.payloadOnDemand') }}</p>
-        <p v-if="loading.payload" role="status" class="text-sm text-gray-500">{{ t('common.loading') }}</p>
-        <div v-if="payload" class="space-y-2">
-          <p class="text-xs text-gray-500">{{ payload.encoding }} · {{ payload.offset }}–{{ payload.offset + payload.returned_bytes }} / {{ payload.part_bytes }} B · {{ stateLabel(payload.capture_state) }}</p>
-          <p v-if="payload.partial" role="note" class="text-xs text-amber-500">{{ t('admin.requestAudit.partialHint') }}</p>
-          <p v-if="payload.redacted" class="text-xs text-amber-500">{{ t('admin.requestAudit.redactedHint') }}</p>
-          <p v-if="payload.encoding === 'base64'" class="text-xs text-gray-500">{{ t('admin.requestAudit.binaryHint') }}</p>
-          <label v-if="formattedPayload !== null" class="flex items-center gap-2 text-xs"><input v-model="formatPayload" type="checkbox" />{{ t('admin.requestAudit.formatJson') }}</label>
-          <pre data-test="payload-content" class="max-h-[45vh] overflow-auto whitespace-pre-wrap break-all rounded border border-gray-200 bg-gray-50 p-3 font-mono text-xs dark:border-dark-700 dark:bg-dark-950">{{ formatPayload && formattedPayload !== null ? formattedPayload : payload.content }}</pre>
-          <div class="flex justify-end gap-2"><button class="btn btn-secondary btn-sm" :disabled="payload.offset === 0 || loading.payload" @click="loadPayload(Math.max(0, payload.offset - 65536))">{{ t('admin.requestAudit.previous') }}</button><button class="btn btn-secondary btn-sm" :disabled="!payload.has_more || loading.payload" @click="loadPayload(payload.offset + payload.returned_bytes)">{{ t('admin.requestAudit.next') }}</button></div>
-        </div>
+        <RequestAuditPayloads :key="detail.id" :record="detail" />
       </div>
     </BaseDialog>
 
@@ -151,23 +158,27 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import RequestAuditRuntime from './RequestAuditRuntime.vue'
 import RequestAuditMetadata from './RequestAuditMetadata.vue'
+import RequestAuditPlatform from './RequestAuditPlatform.vue'
+import RequestAuditPayloads from './RequestAuditPayloads.vue'
+import RequestAuditUserFilter from './RequestAuditUserFilter.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMetadata, extractI18nErrorMessage } from '@/utils/apiError'
 import api from './api'
-import type { RequestAuditBan, RequestAuditBanPage, RequestAuditConfig, RequestAuditFilters, RequestAuditPage, RequestAuditPayload, RequestAuditRecord, RequestAuditStatus } from './types'
+import { REQUEST_AUDIT_KINDS } from './types'
+import type { RequestAuditBan, RequestAuditBanPage, RequestAuditConfig, RequestAuditFilters, RequestAuditPage, RequestAuditRecord, RequestAuditStatus } from './types'
 
 const { t, locale } = useI18n()
 const app = useAppStore()
 const tabs = ['requests', 'bans', 'settings'] as const
 type Tab = typeof tabs[number]
 const activeTab = ref<Tab>('requests')
-const kinds = ['http', 'ws_handshake', 'ws_message'] as const
+const kinds = REQUEST_AUDIT_KINDS
 const states = ['complete', 'capturing', 'partial']
-const parts = ['headers', 'body', 'trailers'] as const
-const loading = reactive({ list: false, detail: false, payload: false, config: false, status: false, save: false, bans: false, createBan: false, revoke: false, download: false })
-const errors = reactive({ list: '', detail: '', payload: '', config: '', status: '', bans: '', createBan: '' })
-const emptyFilters = { from: '', to: '', apiKey: '', user: '', session: '', kind: '', state: '', httpStatus: '' }
+const loading = reactive({ list: false, detail: false, config: false, status: false, save: false, bans: false, createBan: false, revoke: false })
+const errors = reactive({ list: '', detail: '', config: '', status: '', bans: '', createBan: '' })
+const emptyFilters = { from: '', to: '', apiKey: '', user: '', userLabel: '', session: '', kind: '', state: '', httpStatus: '' }
 const filters = reactive({ ...emptyFilters })
+const userFilterRevision = ref(0)
 const appliedFilters = ref<RequestAuditFilters>({ limit: 50 })
 const banFilters = reactive({ apiKey: '', session: '', state: '' })
 const records = ref<RequestAuditPage>({ items: [], next_cursor: '', has_more: false })
@@ -180,18 +191,12 @@ const cursorHistory = ref<string[]>([])
 const detail = ref<RequestAuditRecord | null>(null)
 const detailBans = ref<RequestAuditBan[]>([])
 const detailOpen = ref(false)
-const payloadPart = ref<typeof parts[number]>('body')
-const payload = ref<RequestAuditPayload | null>(null)
-const formatPayload = ref(false)
-const revealSensitive = ref(false)
-const allowPartial = ref(false)
 const banOpen = ref(false)
 const banDraft = reactive({ public_reason: '', internal_note: '', expires: '' })
 const unknownBan = ref<{ id?: string, sourceID: string } | null>(null)
 const revokeTarget = ref<RequestAuditBan | null>(null)
 const confirmRetention = ref(false)
 let detailGeneration = 0
-let payloadGeneration = 0
 let recordsGeneration = 0
 let bansGeneration = 0
 const healthState = computed(() => {
@@ -200,20 +205,18 @@ const healthState = computed(() => {
   if (status.value.dropped_requests || status.value.dropped_events || status.value.write_failures || status.value.ban_check_failures || status.value.cleanup_failures || (status.value.writer_backoff_until && Date.parse(status.value.writer_backoff_until) > Date.now())) return 'degraded'
   return status.value.config.enabled ? 'healthy' : 'disabled'
 })
-const formattedPayload = computed(() => {
-  const value = payload.value
-  if (!value || value.encoding !== 'utf8' || value.offset || value.has_more || value.partial) return null
-  try { return JSON.stringify(JSON.parse(value.content), null, 2) } catch { return null }
-})
 const configDirty = computed(() => config.value && draft.value && (config.value.enabled !== draft.value.enabled || config.value.retention_days !== draft.value.retention_days || config.value.session_ban_enabled !== draft.value.session_ban_enabled))
 const errorText = (error: unknown) => extractI18nErrorMessage(error, t, 'admin.requestAudit.errors', t('admin.requestAudit.failed'))
 const stateLabel = (state: string) => states.includes(state) ? t(`admin.requestAudit.states.${state}`) : state
+const kindLabel = (kind: RequestAuditRecord['kind']) => kinds.includes(kind) ? t(`admin.requestAudit.kinds.${kind}`) : kind
+const userName = (record: RequestAuditRecord) => record.user_username || record.user_email || (record.user_id ? t('admin.requestAudit.userFallback', { id: record.user_id }) : t('admin.requestAudit.unidentifiedUser'))
+const keyName = (record: RequestAuditRecord) => record.api_key_name || (record.api_key_id ? t('admin.requestAudit.keyFallback', { id: record.api_key_id }) : t('admin.requestAudit.unidentifiedKey'))
+const groupName = (record: RequestAuditRecord) => record.group_name || (record.group_id ? t('admin.requestAudit.groupFallback', { id: record.group_id }) : t('admin.requestAudit.unidentifiedGroup'))
 const formatDate = (value: string) => new Date(value).toLocaleString(locale.value)
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1048576).toFixed(1)} MiB`
 const banState = (ban: RequestAuditBan) => ban.revoked_at ? 'revoked' : ban.expires_at && Date.parse(ban.expires_at) <= Date.now() ? 'expired' : 'active'
 
 function buildFilters(): RequestAuditFilters {
-  if (filters.session && !filters.apiKey) throw new Error(t('admin.requestAudit.sessionNeedsKey'))
   const from = filters.from ? new Date(filters.from).toISOString() : undefined
   const to = filters.to ? new Date(filters.to).toISOString() : undefined
   if (from && to && from > to) throw new Error(t('admin.requestAudit.invalidTimeWindow'))
@@ -227,7 +230,7 @@ async function loadRecords() {
 function search() {
   try { appliedFilters.value = buildFilters(); cursor.value = ''; cursorHistory.value = []; void loadRecords() } catch (error) { errors.list = errorText(error) }
 }
-function resetFilters() { Object.assign(filters, emptyFilters); search() }
+function resetFilters() { userFilterRevision.value++; Object.assign(filters, emptyFilters); search() }
 function nextPage() { if (loading.list || !records.value.has_more) return; cursorHistory.value.push(cursor.value); cursor.value = records.value.next_cursor; void loadRecords() }
 function previousPage() { if (loading.list || !cursorHistory.value.length) return; cursor.value = cursorHistory.value.pop() || ''; void loadRecords() }
 async function loadConfig() {
@@ -265,7 +268,6 @@ async function loadBans(next = '', append = false) {
 async function openDetail(id: string) {
   const generation = ++detailGeneration
   detailOpen.value = true; detail.value = null; detailBans.value = []; errors.detail = ''; loading.detail = true
-  revealSensitive.value = false; allowPartial.value = false; payloadPart.value = 'body'; resetPayload()
   try {
     const result = await api.get(id)
     if (generation !== detailGeneration) return
@@ -276,28 +278,7 @@ async function openDetail(id: string) {
     }
   } catch (error) { if (generation === detailGeneration) errors.detail = errorText(error) } finally { if (generation === detailGeneration) loading.detail = false }
 }
-function closeDetail() { if (banOpen.value) return; detailGeneration++; detailOpen.value = false; detail.value = null; detailBans.value = []; resetPayload(); loading.detail = false }
-function resetPayload() { payloadGeneration++; payload.value = null; errors.payload = ''; loading.payload = false; formatPayload.value = false }
-async function loadPayload(offset: number) {
-  if (!detail.value || loading.payload) return
-  const generation = ++payloadGeneration
-  loading.payload = true; errors.payload = ''; payload.value = null
-  try { const result = await api.payload(detail.value.id, payloadPart.value, offset, 65536, revealSensitive.value, allowPartial.value); if (generation === payloadGeneration) payload.value = result } catch (error) { if (generation === payloadGeneration) errors.payload = errorText(error) } finally { if (generation === payloadGeneration) loading.payload = false }
-}
-async function downloadPayload() {
-  if (!detail.value || loading.download) return
-  const id = detail.value.id, part = payloadPart.value
-  const generation = payloadGeneration
-  const partial = allowPartial.value
-  loading.download = true; errors.payload = ''
-  try {
-    const blob = await api.download(id, part, partial)
-    if (generation !== payloadGeneration) return
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a'); link.href = url; link.download = `request-${id}-${part}${partial ? '-partial-allowed' : ''}.bin`; document.body.appendChild(link); link.click(); link.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  } catch (error) { if (generation === payloadGeneration) errors.payload = errorText(error) } finally { loading.download = false }
-}
+function closeDetail() { if (banOpen.value) return; detailGeneration++; detailOpen.value = false; detail.value = null; detailBans.value = []; loading.detail = false }
 function showSessionRequests() {
   if (!detail.value?.api_key_id || !detail.value.session_id) return
   Object.assign(filters, emptyFilters, { apiKey: String(detail.value.api_key_id), session: detail.value.session_id })
@@ -353,5 +334,5 @@ async function revokeBan() {
 }
 
 onMounted(() => { void loadConfig(); void loadStatus(); void loadRecords() })
-onUnmounted(() => { detailGeneration++; payloadGeneration++; recordsGeneration++; bansGeneration++ })
+onUnmounted(() => { detailGeneration++; recordsGeneration++; bansGeneration++ })
 </script>

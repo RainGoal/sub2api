@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import RequestAuditView from '../RequestAuditView.vue'
+import RequestAuditUserFilter from '../RequestAuditUserFilter.vue'
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn() }))
 vi.mock('../api', () => ({ default: mocks }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n: () => ({ locale: { value: 'en' }, t: (key: string) => key }) }))
 
-const record = { id: 'audit-one', received_at: '2026-10-14T00:00:00Z', kind: 'http', api_key_id: 12, user_id: 3, session_id: 'session-1', method: 'POST', route_pattern: '/v1/messages', capture_state: 'complete' }
+const record = { id: 'audit-one', received_at: '2026-10-14T00:00:00Z', kind: 'http_request', api_key_id: 12, user_id: 3, user_username: 'alice', user_email: 'alice@example.com', api_key_name: 'Production assistant', group_id: 7, group_name: 'Claude Pro', group_platform: 'anthropic', session_id: 'session-1', method: 'POST', route_pattern: '/v1/messages', capture_state: 'complete' }
 const activeBan = { id: 'ban-one', api_key_id: 12, session_id: 'session-1', source_audit_id: record.id, public_reason: 'Reason', created_at: '2026-10-14T00:00:00Z' }
 function createView() {
   return mount(RequestAuditView, { global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' },
+    RequestAuditUserFilter: true,
     BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
     ConfirmDialog: { props: ['show'], emits: ['confirm'], template: '<div v-if="show"><button data-test="confirm" @click="$emit(\'confirm\')">confirm</button></div>' },
   } } })
@@ -55,17 +57,60 @@ describe('RequestAuditView', () => {
     expect(mocks.payload).not.toHaveBeenCalled()
   })
 
-  it('loads payload on demand and displays HTML as text', async () => {
+  it('automatically loads all three payload sections when opened and displays HTML as text', async () => {
     const wrapper = createView()
     await flushPromises()
     await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
     await flushPromises()
-    expect(mocks.payload).not.toHaveBeenCalled()
-    await wrapper.get('[data-test="load-payload"]').trigger('click')
+    expect(mocks.payload).toHaveBeenCalledTimes(3)
+    for (const part of ['headers', 'body', 'trailers']) {
+      expect(mocks.payload).toHaveBeenCalledWith('audit-one', part, 0, 65536, false, false)
+      expect(wrapper.get(`[data-test="content-${part}"]`).text()).toBe('<script>alert(1)</script>')
+      expect(wrapper.get(`[data-test="content-${part}"]`).find('script').exists()).toBe(false)
+    }
+    expect(wrapper.find('[data-test="load-payload"]').exists()).toBe(false)
+  })
+
+  it('shows user names, email, key names and the group platform in the list and detail', async () => {
+    const wrapper = createView()
     await flushPromises()
-    expect(mocks.payload).toHaveBeenCalledWith('audit-one', 'body', 0, 65536, false, false)
-    expect(wrapper.get('[data-test="payload-content"]').text()).toBe('<script>alert(1)</script>')
-    expect(wrapper.get('[data-test="payload-content"]').find('script').exists()).toBe(false)
+    const row = wrapper.get('[data-test="record-audit-one"]').text()
+    for (const value of ['alice', 'alice@example.com', 'Production assistant', 'Claude Pro', 'Anthropic']) expect(row).toContain(value)
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    const summary = wrapper.get('[data-test="request-summary"]').text()
+    for (const value of ['alice', 'alice@example.com', 'Production assistant', 'Claude Pro', 'Anthropic']) expect(summary).toContain(value)
+    expect(summary).toContain('admin.requestAudit.kinds.http_request')
+  })
+
+  it('falls back to email and shows multi-platform groups without inventing a request platform', async () => {
+    mocks.list.mockResolvedValue({ items: [{ ...record, user_username: '', group_platform: 'composite' }], has_more: false })
+    const wrapper = createView()
+    await flushPromises()
+    const row = wrapper.get('[data-test="record-audit-one"]').text()
+    expect(row).toContain('alice@example.com')
+    expect(row).toContain('admin.requestAudit.multiPlatform')
+    expect(row).not.toContain('Anthropic')
+  })
+
+  it('keeps records with missing display metadata and uses explicit fallbacks', async () => {
+    mocks.list.mockResolvedValue({ items: [{ ...record, user_username: '', user_email: '', api_key_name: '', group_name: '', group_platform: '' }], has_more: false })
+    const wrapper = createView()
+    await flushPromises()
+    const row = wrapper.get('[data-test="record-audit-one"]').text()
+    expect(row).toContain('admin.requestAudit.userFallback')
+    expect(row).toContain('admin.requestAudit.keyFallback')
+    expect(row).toContain('admin.requestAudit.groupFallback')
+    expect(row).toContain('admin.requestAudit.unknown')
+  })
+
+  it.each(['http_request', 'websocket_handshake', 'websocket_message'])('submits the stored request kind %s', async (kind) => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('select').setValue(kind)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind }))
   })
 
   it('requires confirmation before shortening retention and preserves separate ban toggle', async () => {
@@ -119,6 +164,52 @@ describe('RequestAuditView', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ api_key_id: 12, http_status: 403, session_id: ' session-1 ' }))
+  })
+
+  it('filters by session without requiring a key', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('input[maxlength="255"]').setValue('session-1')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ api_key_id: undefined, session_id: 'session-1' }))
+  })
+
+  it('uses the selected user ID and clears it on reset', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    wrapper.getComponent(RequestAuditUserFilter).vm.$emit('update:modelValue', '3')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 3 }))
+    await wrapper.get('form button[type="button"]').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: undefined }))
+    expect(wrapper.getComponent(RequestAuditUserFilter).props('modelValue')).toBe('')
+  })
+
+  it.each(['settings', 'bans'])('preserves the selected user when returning from %s and clears its label on reset', async (tab) => {
+    const wrapper = createView()
+    await flushPromises()
+    const originalFilter = wrapper.getComponent(RequestAuditUserFilter)
+    originalFilter.vm.$emit('update:modelValue', '3')
+    originalFilter.vm.$emit('update:label', 'alice@example.com · #3')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get(`[data-test="tab-${tab}"]`).trigger('click')
+    expect(wrapper.findComponent(RequestAuditUserFilter).exists()).toBe(false)
+    await wrapper.get('[data-test="tab-requests"]').trigger('click')
+    const restoredFilter = wrapper.getComponent(RequestAuditUserFilter)
+    expect(restoredFilter.vm === originalFilter.vm).toBe(false)
+    expect(restoredFilter.props()).toMatchObject({ modelValue: '3', label: 'alice@example.com · #3' })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 3 }))
+    await wrapper.get('form button[type="button"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(RequestAuditUserFilter).props()).toMatchObject({ modelValue: '', label: '' })
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: undefined }))
+    wrapper.unmount()
   })
 
   it('keeps newer query results when a prior request finishes late', async () => {

@@ -1,9 +1,17 @@
+export const REQUEST_AUDIT_KINDS = ['http_request', 'websocket_handshake', 'websocket_message'] as const
+
 export interface RequestAuditRecord {
   id: string
   received_at: string
-  kind: 'http' | 'ws_handshake' | 'ws_message'
+  kind: typeof REQUEST_AUDIT_KINDS[number]
   api_key_id?: number | null
   user_id?: number | null
+  user_username?: string
+  user_email?: string
+  api_key_name?: string
+  group_id?: number | null
+  group_name?: string
+  group_platform?: string
   session_id?: string | null
   session_source?: string | null
   connection_id?: string | null

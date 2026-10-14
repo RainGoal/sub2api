@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/requestaudit"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -128,10 +130,6 @@ func (h *RequestAuditHandler) List(c *gin.Context) {
 	}
 	filter := requestaudit.ListFilter{Limit: limit, UserID: user, APIKeyID: key,
 		SessionID: c.Query("session_id"), Kind: c.Query("kind"), CaptureState: c.Query("capture_state"), Cursor: c.Query("cursor")}
-	if filter.SessionID != "" && key == 0 {
-		requestAuditInvalid(c, "session_id requires api_key_id")
-		return
-	}
 	for name, dst := range map[string]*time.Time{"from": &filter.From, "to": &filter.To} {
 		if raw := c.Query(name); raw != "" {
 			parsed, err := time.Parse(time.RFC3339Nano, raw)
@@ -409,8 +407,10 @@ func redactRequestAuditHeaders(data []byte) ([]byte, error) {
 		for key, value := range values {
 			lower := strings.ToLower(key)
 			if lower == "request_uri" {
-				// A binary URI envelope cannot be safely parsed for secret queries.
-				if _, text := value.(string); !text {
+				if rawURI, text := value.(string); text {
+					values[key] = redactRequestAuditURI(rawURI)
+				} else {
+					// A binary URI envelope cannot be safely parsed for secret queries.
 					values[key] = "[REDACTED]"
 				}
 			} else if lower == "authorization" || lower == "proxy-authorization" || lower == "cookie" || lower == "set-cookie" || strings.Contains(lower, "api-key") || strings.Contains(lower, "api_key") || strings.Contains(lower, "token") || strings.Contains(lower, "secret") {
@@ -429,6 +429,47 @@ func redactRequestAuditHeaders(data []byte) ([]byte, error) {
 	}
 	redact(envelope)
 	return json.MarshalIndent(envelope, "", "  ")
+}
+
+func redactRequestAuditURI(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	uri, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return "[REDACTED]"
+	}
+	query, err := url.ParseQuery(uri.RawQuery)
+	if err != nil {
+		// ParseQuery may return only part of malformed input; never preview it.
+		return "[REDACTED]"
+	}
+	// Reuse RedactAuditQuery's key policy, but decode parameter names before
+	// matching and retain every duplicate value and all nonsensitive fields.
+	names := make(map[string]any, len(query))
+	for key := range query {
+		names[key] = nil
+	}
+	masked := logredact.RedactMap(names, "api_key", "apikey", "token", "secret", "key")
+	changed := false
+	if uri.User != nil {
+		// Absolute-form request targets may carry credentials outside the query.
+		uri.User = url.User("[REDACTED]")
+		changed = true
+	}
+	for key, values := range query {
+		if masked[key] != nil {
+			for i := range values {
+				values[i] = "[REDACTED]"
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	uri.RawQuery = query.Encode()
+	return uri.String()
 }
 
 func (h *RequestAuditHandler) rawPayload(c *gin.Context, id, part string, offset int64, allowPartial bool) {

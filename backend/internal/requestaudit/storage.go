@@ -200,6 +200,15 @@ func decodeCursor(value string) (time.Time, string, error) {
 
 const recordSelect = `SELECT id,received_at,updated_at,kind,instance_id,method,route_pattern,protocol,client_request_id,connection_id,message_seq,message_type,user_id,api_key_id,group_id,session_id,session_source,session_resolution,model,http_status,duration_ms,outcome,upstream_summary,capture_state,capture_reason,terminal_manifest,observed_body_bytes,stored_body_bytes,finished_at,last_event_at FROM request_audits`
 
+// Resolve display metadata after selecting the audit page. LEFT JOIN also keeps
+// history readable when an association is missing or has been soft-deleted.
+func withRecordMetadata(query string) string {
+	return `SELECT r.*,u.username,u.email,k.name,g.platform,g.name FROM (` + query + `) r
+LEFT JOIN users u ON u.id=r.user_id
+LEFT JOIN api_keys k ON k.id=r.api_key_id
+LEFT JOIN groups g ON g.id=r.group_id`
+}
+
 func (m *Manager) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 100 {
@@ -244,6 +253,7 @@ func (m *Manager) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	}
 	args = append(args, limit+1)
 	query := recordSelect + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY received_at DESC,id DESC LIMIT $` + strconv.Itoa(len(args))
+	query = withRecordMetadata(query) + ` ORDER BY r.received_at DESC,r.id DESC`
 	rows, err := m.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return ListResult{}, err
@@ -274,16 +284,19 @@ type rowScanner interface{ Scan(...any) error }
 func scanRecord(row rowScanner) (*Record, error) {
 	var r Record
 	var client, conn, msgType, session, source, resolution, model, outcome, upstream, state, reason sql.NullString
+	var username, email, keyName, platform, groupName sql.NullString
 	var seq, uid, key, gid, status, duration sql.NullInt64
 	var manifest []byte
 	var finished sql.NullTime
-	err := row.Scan(&r.ID, &r.ReceivedAt, &r.UpdatedAt, &r.Kind, &r.InstanceID, &r.Method, &r.RoutePattern, &r.Protocol, &client, &conn, &seq, &msgType, &uid, &key, &gid, &session, &source, &resolution, &model, &status, &duration, &outcome, &upstream, &state, &reason, &manifest, &r.ObservedBodyBytes, &r.StoredBodyBytes, &finished, &r.LastEventAt)
+	err := row.Scan(&r.ID, &r.ReceivedAt, &r.UpdatedAt, &r.Kind, &r.InstanceID, &r.Method, &r.RoutePattern, &r.Protocol, &client, &conn, &seq, &msgType, &uid, &key, &gid, &session, &source, &resolution, &model, &status, &duration, &outcome, &upstream, &state, &reason, &manifest, &r.ObservedBodyBytes, &r.StoredBodyBytes, &finished, &r.LastEventAt, &username, &email, &keyName, &platform, &groupName)
 	if err != nil {
 		return nil, err
 	}
 	r.ClientRequestID, r.ConnectionID, r.MessageType = client.String, conn.String, msgType.String
 	r.MessageSeq = seq.Int64
 	r.UserID, r.APIKeyID, r.GroupID = uid.Int64, key.Int64, gid.Int64
+	r.UserUsername, r.UserEmail, r.APIKeyName, r.GroupPlatform = username.String, email.String, keyName.String, platform.String
+	r.GroupName = groupName.String
 	r.SessionID, r.SessionSource, r.SessionResolution, r.Model = session.String, source.String, resolution.String, model.String
 	r.HTTPStatus, r.DurationMS, r.Outcome, r.UpstreamSummary, r.CaptureState, r.CaptureReason = int(status.Int64), duration.Int64, outcome.String, upstream.String, state.String, reason.String
 	_ = json.Unmarshal(manifest, &r.TerminalManifest)
@@ -297,7 +310,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*Record, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, failure(400, "INVALID_AUDIT_ID", "Invalid request audit ID")
 	}
-	r, err := scanRecord(m.db.QueryRowContext(ctx, recordSelect+` WHERE id=$1 AND `+visibleRecordSQL, id))
+	r, err := scanRecord(m.db.QueryRowContext(ctx, withRecordMetadata(recordSelect+` WHERE id=$1 AND `+visibleRecordSQL), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, failure(404, "AUDIT_NOT_FOUND", "Request audit record not found")
 	}

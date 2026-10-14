@@ -2,15 +2,23 @@
 
 请求记录位于管理端「请求审计」（`/admin/request-audits`）。采集和人工会话封禁是两个独立开关，默认关闭；默认保留最近 3 天，可配置 1～30 天。
 
+列表和详情优先显示用户名/邮箱、API Key 名称、分组名称及平台。`user_username`、`user_email`、`api_key_name`、`group_name`、`group_platform` 随列表和详情一次查询返回，旧 ID 字段保留；软删除关联仍可显示名称，关联缺失时回退到 ID。这些名称和平台是关联对象的当前值；多平台分组显示「多平台」，不代表该次请求最终路由的平台。
+
+用户筛选复用已有管理员用户搜索，输入用户名或邮箱后选择匹配用户（含软删除用户），再按其 ID 精确查询。会话 ID 可单独筛选并返回跨 API Key 的匹配记录，填写 API Key ID 可以缩小范围。客户端提供的会话 ID 不保证跨 Key 全局唯一，因此会话封禁仍严格作用于「API Key + 会话 ID」。
+
+打开详情后自动分块预览 Headers、请求体和 Trailers，每部分先读取 64 KiB，可独立翻段、重试和下载。预览及下载最多同时读取两部分；关闭或切换记录后忽略旧返回。Headers 和 Trailers 的完整 JSON 默认格式化；允许读取不完整前缀与显示敏感值仍需显式选择。
+
+请求体默认按消息角色展示文本与内嵌图片，支持 OpenAI Chat/Responses、Anthropic Messages、Gemini Contents 常见结构，并保留「原文」切换。完整请求体不超过 4 MiB 时自动连续读取最多 64 段，先按字节拼接再解析 UTF-8/JSON，避免跨段字符或 Base64 图片被截断。单张图片最多 2 MiB，只预览通过 MIME、Base64、文件签名及尺寸检查的 PNG/JPEG/GIF/WebP；单边最多 8192 像素，单图最多 16 × 1024² 像素，整份请求体最多 32 × 1024² 像素，动画按帧累计画布占用。外部图片 URL 不会自动加载。消息/区块展示有数量上限，未支持的内容明确提示。超限、不完整、二进制、读取失败或无法识别的消息结构自动展示原文片段，仍可分页或下载完整原文。
+
 ## 数据与使用边界
 
 - 保存模型网关收到的原始 body 字节、多值 headers、Host、原始 URL、协议和 trailers；HTTP 与 WebSocket 消息分别记录。入站内容在解压、协议转换和上游凭据改写之前采集。
 - header 值、Host 或 URL 含有非 UTF-8 字节时，该单值使用 `{encoding:"base64",content:"..."}` 保真表示，正常文本仍是字符串，多值顺序不变。
 - `User-Agent` 的原始多值与完整长度在全局会话绑定归一化前保留，业务侧仍使用原有归一化值。包含 NUL 或无效 UTF-8 的摘要值不写入数据库摘要字段，原文 `BYTEA` 不变；明确的数据错误只隔离对应请求，不拖累同批其他请求。
 - 请求记录与用量、操作审计分开存储。原文分为 headers、body、trailers 三部分，每块最多 256 KiB，以 PostgreSQL `BYTEA` **明文**保存，无额外应用层加密。数据库默认 TOAST 行为不等同于加密。
-- 管理员可以预览、分段查看和下载原始字节。二进制预览采用 base64；下载不把正文重新序列化。headers 默认遮盖常见凭据，管理员可显式显示或下载完整内容，无二次验证要求。
+- 管理员可以预览、分段查看和下载原始字节。二进制预览采用 base64；下载不把正文重新序列化。headers 默认遮盖常见凭据、请求 URL 的用户名/密码及敏感查询参数（包括 `key`、`api_key`）；无法安全解析的 URL 整体遮盖。管理员可显式显示或下载完整内容，无二次验证要求，原始存储不变。
 - 复用管理员鉴权与操作审计；读取原文、修改配置、封禁、解封都会留操作记录。非管理员不能调用这些接口，响应不允许缓存。
-- `complete` 表示终结清单与数据库实际分块数、顺序和字节数一致；`partial` 表示正文未读完、读取错误、预算耗尽或缺块；`capturing` 表示未收到完整终结信息。HTTP 成功不能替代完整性验证。
+- `complete` 表示终结清单与数据库实际分块数、顺序和字节数一致；`partial` 表示正文未读完、读取错误、预算耗尽或缺块；`capturing` 表示未收到完整终结信息。详情顶部显示整条记录状态，各部分预览依据读取接口的 `partial` 独立判定完整性，其他部分不完整不会阻止完整请求体的消息视图。HTTP 成功不能替代完整性验证。
 - 原文采集不会预读请求，不等待数据库，也不会为审计继续读取已被拒绝的 body。鉴权失败、断连或超限时，只能保存入口信息及业务实际读取到的前缀。
 - 队列拥塞、数据库故障或进程崩溃时优先继续业务，审计可能丢失。运行状态展示已知丢弃、写入失败、封禁查询失败等实例级指标，不能将此功能视为零丢失存档。
 - 不记录响应正文。代理/CDN 在进入应用前拒绝的请求、HTTP/TLS 帧，以及直接发往上游的 WebRTC 媒体不在采集范围内。
@@ -55,7 +63,7 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 
 | 方法 / 路径 | 输入和输出 |
 | --- | --- |
-| `GET /request-audits` | `from/to`（RFC3339）、`user_id`、`api_key_id`、`session_id`、`kind`、`capture_state`、`http_status`、`cursor`、`limit`；返回 `items/next_cursor/has_more`，单页最多 100 条；会话筛选必须同时指定 API Key ID |
+| `GET /request-audits` | `from/to`（RFC3339）、`user_id`、`api_key_id`、`session_id`、`kind`、`capture_state`、`http_status`、`cursor`、`limit`；返回 `items/next_cursor/has_more`，单页最多 100 条；会话 ID 可独立筛选，API Key ID 可选 |
 | `GET /request-audits/:id` | UUID；返回入口摘要、身份、结果、终结清单与完整性状态，不返回原文 |
 | `GET /request-audits/:id/payload` | `part=headers/body/trailers`；`mode=preview/raw`；`offset/limit`；不完整内容需 `allow_partial=true` |
 | `GET /request-audits/config` | 返回开关、保留天数、版本、更新时间和管理员 ID |
@@ -73,7 +81,7 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 ## 部署与回退
 
 1. 发布前完成后端全量、unit、lint、integration，前端 typecheck、test 和 build；真实 PostgreSQL/Redis 集成验证需 Docker。自动跳过不代表验证通过。
-2. 部署镜像包含迁移 `243_request_audit.sql`、`244_request_audit_cleanup_index.sql` 和新的内嵌管理端。后者为清理中的记录补充部分索引；清理分别查询删除中记录与新过期记录，避免每条记录重复全表扫描排序。沿用现有迁移机制执行，不修改历史业务数据；不要删除数据卷或直接覆盖线上 compose。
+2. 部署镜像包含迁移 `243_request_audit.sql`、`244_request_audit_cleanup_index.sql`、`245_request_audit_global_session_index.sql` 和新的内嵌管理端。244 为清理中的记录补充部分索引；清理分别查询删除中记录与新过期记录，避免每条记录重复全表扫描排序。245 为独立会话查询增加有序部分索引；索引构建期间会阻塞审计表写入，建议在低峰更新并观察写入失败/丢弃计数，大表需预留构建时间。沿用现有迁移机制执行，不修改历史业务数据；不要删除数据卷或直接覆盖线上 compose。
 3. 确认 `/admin/request-audits` 页面、`/api/v1/admin/request-audits/*`、`/api/v1/admin/session-bans/*` 经 Nginx 正常转发，非管理员被拒绝。此次不新增 OAuth 或支付回调。
 4. 首次部署保持两个开关关闭，先验证健康接口与既有 HTTP/SSE/WS 行为。再启用采集，以真实 JSON、压缩体、multipart、大请求与 WS 消息核对原始字节和 headers；启用后重连已有 WS。
 5. 用隔离测试 Key 验证封禁原因、后续 HTTP/WS 请求拦截和解封；不要用正在服务的用户会话做破坏性验证。监测网关 p95/p99、吞吐、内存、数据库 I/O、WAL、丢弃和清理延迟，按实际流量确定资源预算。
@@ -141,3 +149,30 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 | `gofmt -l`、`git diff --check`、`git status --short` | 格式与空白检查通过，无暂存文件；保留本地功能改动，未提交、推送或部署 |
 
 发布前仍需在可用 Docker 环境完成全量 integration 和远端 CI，并验证启用采集、封禁与过期清理时的网关延迟及数据库负载。此次保持两个运行开关默认关闭。
+
+## 审计可读性改造验证（2026-10-15）
+
+本轮在 `feat/my-sub` 完成名称/分组展示、用户名或邮箱选择、独立会话查询、自动原文预览及消息/内嵌图片视图，纳入个人版本 `v0.1.52`。发布流程为先推分支，确认该提交的 CI（含真实数据库集成）及 Security Scan 全部通过，再单独推送 annotated Tag；不直接部署生产。
+
+| 命令 / 检查 | 实际结果 |
+| --- | --- |
+| `go test -p 2 ./...` | 全包通过 |
+| `go test -p 2 -tags=unit ./...` | 全包通过，含 API 契约 |
+| `golangci-lint run --concurrency 2 --timeout=30m ./...` | 官方 2.14.0，全量 0 issues |
+| `go test -p 2 -tags embed ./internal/web` | 新管理端构建后通过 |
+| `pnpm --dir frontend run typecheck` / `run lint:check` / `run build` | 通过 |
+| `pnpm --dir frontend run test:run --maxWorkers=2 --minWorkers=1` | 发布前审查修复后，全量 373 个文件、3004 项通过；含请求审计 6 个文件、117 项 |
+| `pnpm --dir frontend exec vitest run src/features/request-audit/__tests__ --maxWorkers=2 --minWorkers=1` | 读取段数边界补丁后，6 个文件、97 项通过；后续图片与完整性回归已纳入上述最终全量验证 |
+| 本地模拟 API 浏览器检查 | 1600px / 390px 布局、用户名搜索、无 Key 会话查询、消息内嵌图片、原文切换通过；未操作生产数据 |
+| `gofmt -l` / `git diff --check` / `git status --short` | Go 格式与空白检查通过，仅本次相关源码、测试和文档；构建产物/截图未纳入提交 |
+| `go test -tags=integration ./internal/requestaudit -run '^$'` | 仅编译通过；本机无可用 Docker，数据库用例尚未实际执行 |
+
+初次前端全量测试遇到 Vitest worker 的调用栈溢出，限制并发后完整通过；一次并行 lint 遇到已被 Vite 删除的临时配置文件，重新执行通过。上述环境失败没有计为通过。真实 PostgreSQL 的 metadata JOIN、跨 Key 会话查询和迁移 245 索引计划仍需在 CI 执行，不能以编译检查替代。新索引在大表上的构建时间与写入等待需按部署章节处理。
+
+发布前交叉审查确认并修复了以下问题：
+
+- 高压缩图片可能以很小的文件产生超大解码画布：在设置图片地址前检查容器尺寸、动画帧与累计像素预算，覆盖四种支持的格式及 APNG 声明帧数一致性。
+- 绝对请求 URI 的用户名/密码未被默认遮盖：与查询参数一并脱敏，显式显示和原文下载保持原始字节。
+- 其他部分不完整导致完整 Body 无法展示：依据当前部分的 `partial` 判断；缺少明确完整性结果时仍回退原文，整体状态保留在详情顶部。
+
+专项回归已覆盖普通/渐进 JPEG、PNG、GIF、WebP 和动画图片、超大画布/帧预算、URI 脱敏与原文保真，以及整体部分状态下的完整 Body 跨段读取。审查未发现剩余阻断问题；本机不具备 Docker，发布前仍必须确认待发布提交的远端 CI 集成步骤实际通过。

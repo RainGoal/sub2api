@@ -30,9 +30,12 @@ func TestRequestAuditPostgresIntegration(t *testing.T) {
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	_, err = db.ExecContext(ctx, `CREATE TABLE settings(key text PRIMARY KEY,value text NOT NULL,updated_at timestamptz NOT NULL DEFAULT NOW())`)
+	_, err = db.ExecContext(ctx, `CREATE TABLE settings(key text PRIMARY KEY,value text NOT NULL,updated_at timestamptz NOT NULL DEFAULT NOW());
+CREATE TABLE users(id bigint PRIMARY KEY,username text,email text,deleted_at timestamptz);
+CREATE TABLE api_keys(id bigint PRIMARY KEY,user_id bigint,name text,deleted_at timestamptz);
+CREATE TABLE groups(id bigint PRIMARY KEY,platform text,name text,deleted_at timestamptz)`)
 	require.NoError(t, err)
-	for _, name := range []string{"243_request_audit.sql", "244_request_audit_cleanup_index.sql"} {
+	for _, name := range []string{"243_request_audit.sql", "244_request_audit_cleanup_index.sql", "245_request_audit_global_session_index.sql"} {
 		migration, readErr := migrations.FS.ReadFile(name)
 		require.NoError(t, readErr)
 		for range 2 {
@@ -55,6 +58,67 @@ func TestRequestAuditPostgresIntegration(t *testing.T) {
 		m.releaseEvents(events)
 		return c.id
 	}
+
+	t.Run("display metadata retains soft deleted and missing associations", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `INSERT INTO users VALUES(101,'alice','alice@example.com',NULL);
+INSERT INTO api_keys VALUES(201,101,'Production',NULL);
+INSERT INTO groups VALUES(301,'composite','Engineering',NULL)`)
+		require.NoError(t, err)
+		olderID := create([]byte(`{"model":"older"}`))
+		_, err = db.ExecContext(ctx, `UPDATE request_audits SET user_id=101,api_key_id=201,group_id=301,received_at=NOW()-INTERVAL '1 minute' WHERE id=$1`, olderID)
+		require.NoError(t, err)
+		id := create([]byte(`{"model":"gpt-5"}`))
+		_, err = db.ExecContext(ctx, `UPDATE request_audits SET user_id=101,api_key_id=201,group_id=301,model='gpt-5',route_pattern='/antigravity/v1/messages' WHERE id=$1`, id)
+		require.NoError(t, err)
+		for _, phase := range []string{"active", "soft_deleted", "missing"} {
+			t.Run(phase, func(t *testing.T) {
+				if phase == "soft_deleted" {
+					_, err = db.ExecContext(ctx, `UPDATE users SET deleted_at=NOW(); UPDATE api_keys SET deleted_at=NOW(); UPDATE groups SET deleted_at=NOW()`)
+					require.NoError(t, err)
+				} else if phase == "missing" {
+					_, err = db.ExecContext(ctx, `DELETE FROM users; DELETE FROM api_keys; DELETE FROM groups`)
+					require.NoError(t, err)
+				}
+				detail, err := m.Get(ctx, id)
+				require.NoError(t, err)
+				list, err := m.List(ctx, ListFilter{UserID: 101, APIKeyID: 201, Limit: 1})
+				require.NoError(t, err)
+				require.Len(t, list.Items, 1)
+				require.True(t, list.HasMore)
+				require.NotEmpty(t, list.NextCursor)
+				require.Equal(t, id, detail.ID)
+				require.Equal(t, id, list.Items[0].ID)
+				next, err := m.List(ctx, ListFilter{UserID: 101, APIKeyID: 201, Limit: 1, Cursor: list.NextCursor})
+				require.NoError(t, err)
+				require.Len(t, next.Items, 1)
+				require.False(t, next.HasMore)
+				require.Empty(t, next.NextCursor)
+				require.Equal(t, olderID, next.Items[0].ID)
+				for _, record := range []*Record{detail, list.Items[0], next.Items[0]} {
+					require.EqualValues(t, 101, record.UserID)
+					require.EqualValues(t, 201, record.APIKeyID)
+					require.EqualValues(t, 301, record.GroupID)
+					if phase == "missing" {
+						require.Empty(t, record.UserUsername)
+						require.Empty(t, record.UserEmail)
+						require.Empty(t, record.APIKeyName)
+						require.Empty(t, record.GroupPlatform)
+						require.Empty(t, record.GroupName)
+					} else {
+						require.Equal(t, "alice", record.UserUsername)
+						require.Equal(t, "alice@example.com", record.UserEmail)
+						require.Equal(t, "Production", record.APIKeyName)
+						require.Equal(t, "Engineering", record.GroupName)
+						require.Equal(t, "composite", record.GroupPlatform, "do not infer request platform from model or path")
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("session filter spans keys and supports key narrowing", func(t *testing.T) {
+		testGlobalSessionFilter(t, ctx, db, m)
+	})
 
 	t.Run("invalid summaries preserve raw bytes and healthy requests", func(t *testing.T) {
 		body := []byte(`{"model":"bad\u0000model"}`)
@@ -199,5 +263,9 @@ CASE WHEN s%100=0 THEN 'deleting' ELSE 'active' END FROM generate_series(1,20000
 			require.NotContains(t, plan, "Seq Scan", plan)
 			require.NotContains(t, plan, "Sort", plan)
 		}
+	})
+
+	t.Run("global session page has an ordered index path", func(t *testing.T) {
+		testGlobalSessionIndexPlan(t, ctx, db)
 	})
 }
