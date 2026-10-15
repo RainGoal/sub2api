@@ -59,8 +59,8 @@ func ExtractClientSessionID(c *gin.Context) string {
 	return ""
 }
 
-// ExtractRequestAuditSessionID preserves usage correlation semantics while
-// exposing the exact selected header and conflicting or invalid input for audit.
+// ExtractRequestAuditSessionID keeps existing header priority and adds Codex's
+// explicit metadata session only for audit, without changing usage correlation.
 // It never substitutes cache keys or server-generated scheduling hashes.
 func ExtractRequestAuditSessionID(c *gin.Context) (sessionID, source, resolution string) {
 	resolution = "missing"
@@ -88,7 +88,101 @@ func ExtractRequestAuditSessionID(c *gin.Context) (sessionID, source, resolution
 			}
 		}
 	}
+	for n, value := range c.Request.Header.Values(openAIWSTurnMetadataHeader) {
+		candidate, metadataResolution := requestAuditCodexTurnSession(value)
+		if candidate == "" {
+			if sessionID == "" && metadataResolution == "invalid" {
+				resolution = "invalid"
+			}
+			continue
+		}
+		if sessionID == "" && n == 0 {
+			sessionID, source, resolution = candidate, "header.x-codex-turn-metadata.session_id", metadataResolution
+		} else if sessionID != "" && (candidate != sessionID || metadataResolution == "conflict") {
+			resolution = "conflict"
+		}
+	}
 	return
+}
+
+func requestAuditCodexTurnSession(raw string) (string, string) {
+	if raw == "" {
+		return "", "missing"
+	}
+	if !utf8.ValidString(raw) || !gjson.Valid(raw) {
+		return "", "invalid"
+	}
+	sessionID, resolution := requestAuditJSONSessionID(gjson.Parse(raw))
+	// A short ID must not retain the complete header through a gjson substring,
+	// particularly while a WebSocket ingress or routing candidate stays alive.
+	return strings.Clone(sessionID), resolution
+}
+
+// As with duplicate session headers, only the first field can supply the ID;
+// later differing values report a conflict and cannot replace invalid input.
+func requestAuditJSONSessionID(metadata gjson.Result) (sessionID, resolution string) {
+	if !metadata.IsObject() {
+		return "", "invalid"
+	}
+	resolution = "missing"
+	seen := false
+	metadata.ForEach(func(key, value gjson.Result) bool {
+		if key.String() != "session_id" {
+			return true
+		}
+		candidate := ""
+		if value.Type == gjson.String {
+			candidate = sanitizeSessionID(value.String())
+		}
+		if !seen {
+			seen = true
+			sessionID, resolution = candidate, "invalid"
+			if candidate != "" {
+				resolution = "resolved"
+			}
+		} else if sessionID != "" && candidate != "" && candidate != sessionID {
+			resolution = "conflict"
+		}
+		return true
+	})
+	return
+}
+
+// CodexMetadataSessionID reads the first decoded inbound Responses body before
+// fingerprint masking or protocol conversion. Normalization uses the business
+// reader's limit and a parsing copy, leaving captured input bytes untouched.
+func CodexMetadataSessionID(body []byte, maxNormalizedBytes int64) (sessionID, source, resolution string) {
+	if !utf8.Valid(body) || maxNormalizedBytes > 0 && int64(len(body)) > maxNormalizedBytes {
+		return "", "", "invalid"
+	}
+	normalized, err := httputil.NormalizeLenientJSONRequestBody(body, maxNormalizedBytes)
+	if err != nil || !gjson.ValidBytes(normalized) {
+		return "", "", "invalid"
+	}
+	return codexMetadataSessionID(normalized)
+}
+
+// The WS caller validates the original frame and already enforces its read
+// limit. Keep the parsing view synchronous; persist only the bounded ID copy.
+func codexMetadataSessionID(body []byte) (sessionID, source, resolution string) {
+	metadata := openAIRequestPayloadView(body).Get("client_metadata")
+	sessionID, resolution = requestAuditJSONSessionID(metadata)
+	source = "body.client_metadata.session_id"
+	if sessionID == "" {
+		turnMetadata := metadata.Get(openAIWSTurnMetadataHeader)
+		if turnMetadata.Type != gjson.String {
+			return "", "", resolution
+		}
+		sessionID, resolution = requestAuditCodexTurnSession(turnMetadata.String())
+		source = "body.client_metadata.x-codex-turn-metadata.session_id"
+	}
+	if sessionID == "" {
+		return "", "", resolution
+	}
+	if resolution == "resolved" {
+		resolution = "codex_metadata"
+	}
+	return strings.Clone(sessionID), source, resolution
 }
 
 // ClaudeMetadataSessionID returns only a validated explicit Claude conversation

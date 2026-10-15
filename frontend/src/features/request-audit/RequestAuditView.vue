@@ -56,7 +56,7 @@
                   <p v-if="item.user_username && item.user_email" class="mt-1 max-w-48 truncate text-xs text-gray-500 dark:text-dark-300" :title="item.user_email">{{ item.user_email }}</p>
                 </td>
                 <td class="px-4 py-4"><p class="max-w-44 truncate text-gray-700 dark:text-dark-100" :title="keyName(item)">{{ keyName(item) }}</p></td>
-                <td class="px-4 py-3"><p class="mb-2 max-w-44 truncate font-medium text-gray-700 dark:text-dark-100" :title="groupName(item)">{{ groupName(item) }}</p><RequestAuditPlatform :platform="item.group_platform" /></td>
+                <td class="px-4 py-3"><RequestAuditPlatform :platform="item.group_platform" :group-name="groupName(item)" /></td>
                 <td class="px-4 py-4">
                   <p class="max-w-64 truncate font-mono text-xs text-gray-800 dark:text-dark-100" :title="`${item.method || ''} ${item.route_pattern || item.kind}`"><span class="text-primary-600 dark:text-primary-400">{{ item.method }}</span> {{ item.route_pattern || kindLabel(item.kind) }}</p>
                   <p class="mt-1 max-w-56 truncate text-xs text-gray-500 dark:text-dark-300" :title="item.model || ''">{{ item.model || '—' }}</p>

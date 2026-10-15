@@ -2,9 +2,13 @@
 
 请求记录位于管理端「请求审计」（`/admin/request-audits`）。采集和人工会话封禁是两个独立开关，默认关闭；默认保留最近 3 天，可配置 1～30 天。
 
-列表和详情优先显示用户名/邮箱、API Key 名称、分组名称及平台。`user_username`、`user_email`、`api_key_name`、`group_name`、`group_platform` 随列表和详情一次查询返回，旧 ID 字段保留；软删除关联仍可显示名称，关联缺失时回退到 ID。这些名称和平台是关联对象的当前值；多平台分组显示「多平台」，不代表该次请求最终路由的平台。
+列表和详情优先显示用户名/邮箱、API Key 名称、分组名称及平台。列表的所属分组使用一个彩色标签，例如 `OpenAI-分组名称`，长名称省略并提供完整悬停提示。`user_username`、`user_email`、`api_key_name`、`group_name`、`group_platform` 随列表和详情一次查询返回，旧 ID 字段保留；软删除关联仍可显示名称，关联缺失时回退到 ID。这些名称和平台是关联对象的当前值；多平台分组显示「多平台」，不代表该次请求最终路由的平台。
 
 用户筛选复用已有管理员用户搜索，输入用户名或邮箱后选择匹配用户（含软删除用户），再按其 ID 精确查询。会话 ID 可单独筛选并返回跨 API Key 的匹配记录，填写 API Key ID 可以缩小范围。客户端提供的会话 ID 不保证跨 Key 全局唯一，因此会话封禁仍严格作用于「API Key + 会话 ID」。
+
+审计优先使用既有明确会话请求头（包括按目标平台识别的 Grok 会话头），再读取 `X-Codex-Turn-Metadata` JSON 中的 `session_id`。Responses 原始请求体还支持 `client_metadata.session_id` 和 `client_metadata.x-codex-turn-metadata` JSON 字符串中的 `session_id`；Messages 保留 Claude `metadata.user_id` 的会话解析。提取发生在入站协议/指纹改写之前，并用于 HTTP 与 WS 的会话封禁检查，不改变用量记录、调度或缓存规则。`thread_id`、`turn_id`、`window_id`、`prompt_cache_key` 和内容哈希不会被当作审计会话 ID。客户端没有提供有效的明确标识时仍显示「无会话 ID」。
+
+`v0.1.53` 修复了 Codex 元数据里已有 `session_id`、审计却漏取的情况；无需数据库迁移，只影响升级后的新请求，旧记录不会自动回填。
 
 打开详情后自动分块预览 Headers、请求体和 Trailers，每部分先读取 64 KiB，可独立翻段、重试和下载。预览及下载最多同时读取两部分；关闭或切换记录后忽略旧返回。Headers 和 Trailers 的完整 JSON 默认格式化；允许读取不完整前缀与显示敏感值仍需显式选择。
 
@@ -176,3 +180,20 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 - 其他部分不完整导致完整 Body 无法展示：依据当前部分的 `partial` 判断；缺少明确完整性结果时仍回退原文，整体状态保留在详情顶部。
 
 专项回归已覆盖普通/渐进 JPEG、PNG、GIF、WebP 和动画图片、超大画布/帧预算、URI 脱敏与原文保真，以及整体部分状态下的完整 Body 跨段读取。审查未发现剩余阻断问题；本机不具备 Docker，发布前仍必须确认待发布提交的远端 CI 集成步骤实际通过。
+
+## Codex 会话识别与分组标签验证（2026-10-15）
+
+`v0.1.53` 补齐 Codex 明确会话来源，并将列表分组合并为单个「平台-分组名称」彩色标签。独立审查发现并修复了两个边界：Composite Responses WebSocket 握手必须等首帧确定平台后再绑定低优先级元数据；从元数据 Header 提取的短 ID 必须复制，避免长连接保留整段 Header。最终审查未发现剩余阻断问题。
+
+| 命令 / 检查 | 实际结果 |
+| --- | --- |
+| `go test -p 2 ./...` / `go test -p 2 -tags=unit ./...` | 全包通过，含 API 契约 |
+| `golangci-lint run --concurrency 2 --timeout=30m ./...` | 官方 2.14.0，全量 0 issues；已补齐新测试的返回值检查 |
+| service、middleware、handler 的 RequestAudit 与既有会话专项回归 | 通过；含真实 Composite WS 中间件链、普通头/Grok 优先级、压缩体、原文保真、非法输入与长度限制 |
+| `go test -p 2 -tags embed ./internal/web` | 新前端构建后通过 |
+| `pnpm --dir frontend run typecheck` / `run build`、改动文件 ESLint | 通过 |
+| `pnpm --dir frontend run test:run --maxWorkers=2 --minWorkers=1` | 373 个文件、3004 项通过 |
+| 本地模拟 API 浏览器检查 | 1600px / 390px 单标签、长名称完整提示、多平台与缺失关联回退通过，无页面水平溢出和控制台错误 |
+| `gofmt -l` / `git diff --check` / `git status --short` | 格式、空白检查通过；仅本轮源码、测试和文档，截图/构建产物未纳入提交 |
+
+本机无可用 Docker，本轮真实 PostgreSQL/Redis 集成测试由远端完整 CI 执行；必须等同一待发布提交的 CI 与 Security Scan 全部通过后再推 Tag。无需新增配置或迁移，部署后核对新请求的会话 ID 与分组标签，已有 WebSocket 连接需重连；历史记录不回填。

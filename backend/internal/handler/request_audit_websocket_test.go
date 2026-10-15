@@ -17,10 +17,12 @@ import (
 
 func TestRequestAuditCompositeWebSocketGrokSessionAdmission(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		blockedAt int
+		name         string
+		blockedAt    int
+		turnMetadata string
 	}{
 		{name: "first turn ban", blockedAt: 1},
+		{name: "Codex metadata waits for first frame platform", blockedAt: 1, turnMetadata: `{"session_id":"codex-session","thread_id":"codex-session"}`},
 		{name: "ban after admitted turn", blockedAt: 2},
 		{name: "transparent forwarding"},
 	} {
@@ -58,8 +60,12 @@ func TestRequestAuditCompositeWebSocketGrokSessionAdmission(t *testing.T) {
 					identity <- requestaudit.IngressFromContext(c.Request.Context()).Identity()
 				},
 			}
+			headers := http.Header{"X-Grok-Conv-Id": {"original-grok-session"}}
+			if tc.turnMetadata != "" {
+				headers.Set("X-Codex-Turn-Metadata", tc.turnMetadata)
+			}
 			result := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-				middleware: middlewares, requestHeaders: http.Header{"X-Grok-Conv-Id": {"original-grok-session"}},
+				middleware: middlewares, requestHeaders: headers,
 				firstPayload:  `{"type":"response.create","model":"public-alias","input":"hello"}`,
 				secondPayload: `{"type":"response.create","input":"again"}`,
 				group:         compositeWSGroup("public-alias"), accountPlatform: service.PlatformGrok,

@@ -49,10 +49,12 @@ func requestAuditInboundHeaders(c *gin.Context, capture bool) http.Header {
 }
 
 type requestAuditState struct {
-	ingress              *requestaudit.Ingress
-	started              time.Time
-	checkedSession       string
-	pendingClaudeSession string
+	ingress           *requestaudit.Ingress
+	started           time.Time
+	checkedSession    string
+	pendingSession    string
+	pendingSource     string
+	pendingResolution string
 }
 
 // RequestAuditBegin snapshots the client request before authentication and
@@ -96,7 +98,7 @@ func RequestAuditBegin(manager *requestaudit.Manager) gin.HandlerFunc {
 		defer func() {
 			recovered := recover()
 			if ingress != nil {
-				state.bindPendingClaudeSession()
+				state.bindPendingSession()
 				outcome := "completed"
 				status := c.Writer.Status()
 				if recovered != nil {
@@ -149,7 +151,7 @@ func RequestAuditAfterAuth(protocol string, normalizedBodyLimit ...int64) gin.Ha
 			c.Next()
 			return
 		}
-		bindRequestAuditIdentity(c, state.ingress, apiKey)
+		bindRequestAuditIdentity(c, state, apiKey)
 		if requestAuditCheckHTTPBan(c, state, protocol) {
 			return
 		}
@@ -167,9 +169,16 @@ func RequestAuditAfterRouting(protocol string) gin.HandlerFunc {
 		state := requestAuditStateFromContext(c.Request.Context())
 		if state != nil && state.ingress != nil {
 			if key, ok := GetAPIKeyFromContext(c); ok {
-				bindRequestAuditIdentity(c, state.ingress, key)
+				bindRequestAuditIdentity(c, state, key)
 			}
-			state.bindPendingClaudeSession()
+			_, resolved := service.ResolvedTargetPlatformFromContext(c.Request.Context())
+			// Responses WS resolves composite routing from its first frame, after
+			// this handshake middleware. Keep metadata behind the Grok header.
+			awaitFirstFrame := !resolved && c.Request.Method == http.MethodGet &&
+				strings.Contains(c.Request.URL.Path, "/responses") && strings.EqualFold(c.GetHeader("Upgrade"), "websocket")
+			if !awaitFirstFrame {
+				state.bindPendingSession()
+			}
 			if requestAuditCheckHTTPBan(c, state, protocol) {
 				return
 			}
@@ -192,16 +201,12 @@ func requestAuditObserveBody(c *gin.Context, state *requestAuditState, body []by
 	}
 	if ingress.Identity().SessionID == "" && strings.Contains(c.Request.URL.Path, "/messages") {
 		if sessionID := service.ClaudeMetadataSessionID(body, maxNormalizedBytes); sessionID != "" {
-			// Composite routing can reveal a higher-priority Grok header after
-			// this pre-rewrite callback. Keep only the bounded body candidate until
-			// the platform is known, so metadata cannot bypass a Grok header ban.
-			key, _ := GetAPIKeyFromContext(c)
-			_, resolved := service.ResolvedTargetPlatformFromContext(c.Request.Context())
-			if !resolved && key != nil && key.Group != nil && key.Group.Platform == service.PlatformComposite && c.GetHeader("x-grok-conv-id") != "" {
-				state.pendingClaudeSession = sessionID
-			} else {
-				ingress.SetSession(sessionID, "body.metadata.user_id", "claude_metadata")
-			}
+			state.bindMetadataSession(c, sessionID, "body.metadata.user_id", "claude_metadata")
+		}
+	}
+	if ingress.Identity().SessionID == "" && strings.Contains(c.Request.URL.Path, "/responses") {
+		if sessionID, source, resolution := service.CodexMetadataSessionID(body, maxNormalizedBytes); sessionID != "" {
+			state.bindMetadataSession(c, sessionID, source, resolution)
 		}
 	}
 	if requestAuditCheckHTTPBan(c, state, protocol) {
@@ -210,10 +215,24 @@ func requestAuditObserveBody(c *gin.Context, state *requestAuditState, body []by
 	return nil
 }
 
-func (state *requestAuditState) bindPendingClaudeSession() {
-	if state.pendingClaudeSession != "" {
-		state.ingress.SetSession(state.pendingClaudeSession, "body.metadata.user_id", "claude_metadata")
-		state.pendingClaudeSession = ""
+func (state *requestAuditState) bindMetadataSession(c *gin.Context, sessionID, source, resolution string) {
+	// Composite routing can still reveal a higher-priority Grok header. Keep
+	// only the first bounded metadata candidate (header before body) until then.
+	key, _ := GetAPIKeyFromContext(c)
+	_, resolved := service.ResolvedTargetPlatformFromContext(c.Request.Context())
+	if !resolved && key != nil && key.Group != nil && key.Group.Platform == service.PlatformComposite && c.GetHeader("x-grok-conv-id") != "" {
+		if state.pendingSession == "" {
+			state.pendingSession, state.pendingSource, state.pendingResolution = sessionID, source, resolution
+		}
+		return
+	}
+	state.ingress.SetSession(sessionID, source, resolution)
+}
+
+func (state *requestAuditState) bindPendingSession() {
+	if state.pendingSession != "" {
+		state.ingress.SetSession(state.pendingSession, state.pendingSource, state.pendingResolution)
+		state.pendingSession, state.pendingSource, state.pendingResolution = "", "", ""
 	}
 }
 
@@ -233,7 +252,8 @@ func requestAuditCheckHTTPBan(c *gin.Context, state *requestAuditState, protocol
 	return true
 }
 
-func bindRequestAuditIdentity(c *gin.Context, ingress *requestaudit.Ingress, key *service.APIKey) {
+func bindRequestAuditIdentity(c *gin.Context, state *requestAuditState, key *service.APIKey) {
+	ingress := state.ingress
 	if ingress == nil || key == nil {
 		return
 	}
@@ -246,7 +266,11 @@ func bindRequestAuditIdentity(c *gin.Context, ingress *requestaudit.Ingress, key
 		ingress.SetModel(strings.TrimSpace(c.Query("model")))
 	}
 	sessionID, source, resolution := service.ExtractRequestAuditSessionID(c)
-	ingress.SetSession(sessionID, source, resolution)
+	if source == "header.x-codex-turn-metadata.session_id" {
+		state.bindMetadataSession(c, sessionID, source, resolution)
+	} else {
+		ingress.SetSession(sessionID, source, resolution)
+	}
 }
 
 func writeRequestAuditBan(c *gin.Context, protocol string, ban *requestaudit.SessionBan) {

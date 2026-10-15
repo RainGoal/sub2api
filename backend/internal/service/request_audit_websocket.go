@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/requestaudit"
 	coderws "github.com/coder/websocket"
@@ -22,6 +23,7 @@ func AuditOpenAIWSClientFirstMessage(c *gin.Context, client *coderws.Conn, kind 
 	if ingress := requestaudit.IngressFromContext(ctx); ingress != nil {
 		sessionID, source, resolution := ExtractRequestAuditSessionID(c)
 		ingress.SetSession(sessionID, source, resolution)
+		bindRequestAuditWSMetadataSession(ingress, payload)
 		ingress.SetModel(strings.TrimSpace(gjson.GetBytes(payload, "model").String()))
 	}
 	return auditGatewayWSMessage(ctx, client, kind, payload, true)
@@ -31,7 +33,20 @@ func AuditOpenAIWSClientFirstMessage(c *gin.Context, client *coderws.Conn, kind 
 // messages belonging to an admitted turn must not trigger another policy lookup.
 func auditGatewayResponsesWSMessage(ctx context.Context, client *coderws.Conn, kind coderws.MessageType, payload []byte) error {
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	return auditGatewayWSMessage(ctx, client, kind, payload, eventType == "" || eventType == "response.create")
+	admit := eventType == "" || eventType == "response.create"
+	if admit {
+		bindRequestAuditWSMetadataSession(requestaudit.IngressFromContext(ctx), payload)
+	}
+	return auditGatewayWSMessage(ctx, client, kind, payload, admit)
+}
+
+func bindRequestAuditWSMetadataSession(ingress *requestaudit.Ingress, payload []byte) {
+	if ingress == nil || ingress.Identity().SessionID != "" || !utf8.Valid(payload) || !gjson.ValidBytes(payload) {
+		return
+	}
+	if sessionID, source, resolution := codexMetadataSessionID(payload); sessionID != "" {
+		ingress.SetSession(sessionID, source, resolution)
+	}
 }
 
 // auditGatewayClientWSMessage runs at the actual client receive boundary,

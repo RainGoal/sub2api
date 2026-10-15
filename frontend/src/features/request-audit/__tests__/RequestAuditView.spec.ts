@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import RequestAuditView from '../RequestAuditView.vue'
+import RequestAuditPlatform from '../RequestAuditPlatform.vue'
 import RequestAuditUserFilter from '../RequestAuditUserFilter.vue'
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn() }))
@@ -74,8 +75,10 @@ describe('RequestAuditView', () => {
   it('shows user names, email, key names and the group platform in the list and detail', async () => {
     const wrapper = createView()
     await flushPromises()
-    const row = wrapper.get('[data-test="record-audit-one"]').text()
-    for (const value of ['alice', 'alice@example.com', 'Production assistant', 'Claude Pro', 'Anthropic']) expect(row).toContain(value)
+    const row = wrapper.get('[data-test="record-audit-one"]')
+    for (const value of ['alice', 'alice@example.com', 'Production assistant', 'Anthropic-Claude Pro']) expect(row.text()).toContain(value)
+    expect(row.getComponent(RequestAuditPlatform).text()).toBe('Anthropic-Claude Pro')
+    expect(row.getComponent(RequestAuditPlatform).attributes('title')).toContain('Anthropic-Claude Pro')
     await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
     await flushPromises()
     const summary = wrapper.get('[data-test="request-summary"]').text()
@@ -89,7 +92,7 @@ describe('RequestAuditView', () => {
     await flushPromises()
     const row = wrapper.get('[data-test="record-audit-one"]').text()
     expect(row).toContain('alice@example.com')
-    expect(row).toContain('admin.requestAudit.multiPlatform')
+    expect(row).toContain('admin.requestAudit.multiPlatform-Claude Pro')
     expect(row).not.toContain('Anthropic')
   })
 
@@ -100,8 +103,7 @@ describe('RequestAuditView', () => {
     const row = wrapper.get('[data-test="record-audit-one"]').text()
     expect(row).toContain('admin.requestAudit.userFallback')
     expect(row).toContain('admin.requestAudit.keyFallback')
-    expect(row).toContain('admin.requestAudit.groupFallback')
-    expect(row).toContain('admin.requestAudit.unknown')
+    expect(row).toContain('admin.requestAudit.unknown-admin.requestAudit.groupFallback')
   })
 
   it.each(['http_request', 'websocket_handshake', 'websocket_message'])('submits the stored request kind %s', async (kind) => {
