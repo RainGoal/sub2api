@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,6 +22,10 @@ func AuditOpenAIWSClientFirstMessage(c *gin.Context, client *coderws.Conn, kind 
 	}
 	ctx := c.Request.Context()
 	if ingress := requestaudit.IngressFromContext(ctx); ingress != nil {
+		if ingress.DeviceTrackingEnabled() {
+			deviceType, deviceID, deviceSource, deviceResolution := RequestAuditHeaderDevice(c.Request.Header)
+			ingress.SetDevice(deviceType, deviceID, deviceSource, deviceResolution)
+		}
 		sessionID, source, resolution := ExtractRequestAuditSessionID(c)
 		ingress.SetSession(sessionID, source, resolution)
 		bindRequestAuditWSMetadataSession(ingress, payload)
@@ -41,11 +46,22 @@ func auditGatewayResponsesWSMessage(ctx context.Context, client *coderws.Conn, k
 }
 
 func bindRequestAuditWSMetadataSession(ingress *requestaudit.Ingress, payload []byte) {
-	if ingress == nil || ingress.Identity().SessionID != "" || !utf8.Valid(payload) || !gjson.ValidBytes(payload) {
+	if ingress == nil {
 		return
 	}
-	if sessionID, source, resolution := codexMetadataSessionID(payload); sessionID != "" {
-		ingress.SetSession(sessionID, source, resolution)
+	identity := ingress.Identity()
+	bindDevice := ingress.DeviceTrackingEnabled() && identity.DeviceID == ""
+	if (!bindDevice && identity.SessionID != "") || !utf8.Valid(payload) || !gjson.ValidBytes(payload) {
+		return
+	}
+	if bindDevice {
+		deviceType, deviceID, source, resolution := requestAuditBodyDevice(payload, false)
+		ingress.SetDevice(deviceType, deviceID, source, resolution)
+	}
+	if identity.SessionID == "" {
+		if sessionID, source, resolution := codexMetadataSessionID(payload); sessionID != "" {
+			ingress.SetSession(sessionID, source, resolution)
+		}
 	}
 }
 
@@ -66,16 +82,23 @@ func auditGatewayWSMessage(ctx context.Context, client *coderws.Conn, kind coder
 	if !admit {
 		return nil
 	}
+	if ban, err := ingress.CheckDeviceBan(ctx); err == nil && ban != nil {
+		return rejectRequestAuditWSBan(ctx, client, payload, "device_banned", ban.PublicReason, errRequestAuditDeviceBlocked)
+	}
 	ban, err := ingress.CheckBan(ctx)
 	if err != nil || ban == nil {
 		return nil
 	}
-	reason := strings.TrimSpace(ban.PublicReason)
+	return rejectRequestAuditWSBan(ctx, client, payload, "session_banned", ban.PublicReason, errRequestAuditSessionBlocked)
+}
+
+func rejectRequestAuditWSBan(ctx context.Context, client *coderws.Conn, payload []byte, code, publicReason string, blocked error) error {
+	reason := strings.TrimSpace(publicReason)
 	if reason == "" {
-		reason = "This session has been blocked"
+		reason = "This request has been blocked"
 	}
 	details := map[string]string{
-		"type": "permission_error", "code": "session_banned", "message": reason,
+		"type": "permission_error", "code": code, "message": reason,
 	}
 	event := map[string]any{"type": "error", "error": details}
 	if eventID := gjson.GetBytes(payload, "event_id"); eventID.Type == gjson.String && len(eventID.Str) > 0 && len(eventID.Str) <= 255 {
@@ -86,9 +109,16 @@ func auditGatewayWSMessage(ctx context.Context, client *coderws.Conn, kind coder
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		_ = client.Write(writeCtx, coderws.MessageText, message)
 		cancel()
-		_ = client.Close(coderws.StatusPolicyViolation, "session_banned")
+		_ = client.Close(coderws.StatusPolicyViolation, code)
 	}
-	return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "session_banned", errRequestAuditSessionBlocked)
+	return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, code, blocked)
+}
+
+var errRequestAuditDeviceBlocked = errors.New("device blocked")
+
+// IsRequestAuditDeviceBlockedError distinguishes local policy from upstream failure.
+func IsRequestAuditDeviceBlockedError(err error) bool {
+	return errors.Is(err, errRequestAuditDeviceBlocked)
 }
 
 var errRequestAuditSessionBlocked = &requestAuditSessionBlockedError{}

@@ -42,7 +42,7 @@ func TestNULModelIsNotIndexedAndOriginalPayloadIsPreserved(t *testing.T) {
 func TestStorageOmitsInvalidSummariesWithoutChangingInputOrPayload(t *testing.T) {
 	original := auditEvent{
 		meta:       &RequestMeta{Method: "POST", Protocol: "HTTP/1.1", ClientRequestID: "bad\x00id", MessageType: string([]byte{0xff})},
-		identity:   &Identity{SessionID: "bad\x00session", SessionSource: "header", Model: string([]byte{0xff})},
+		identity:   &Identity{SessionID: "bad\x00session", SessionSource: "header", Model: string([]byte{0xff}), DeviceType: "codex", DeviceID: "bad\x00device", DeviceSource: "header", DeviceResolution: string([]byte{0xff})},
 		completion: &Completion{Outcome: "failed", UpstreamSummary: "bad\x00summary"}, raw: []byte{0, 0xff, 'a'},
 	}
 	safe := storageEvent(original)
@@ -50,11 +50,15 @@ func TestStorageOmitsInvalidSummariesWithoutChangingInputOrPayload(t *testing.T)
 	require.Empty(t, safe.meta.MessageType)
 	require.Empty(t, safe.identity.SessionID, "invalid identity must not be changed into another usable session")
 	require.Empty(t, safe.identity.Model)
+	require.Empty(t, safe.identity.DeviceID)
+	require.Empty(t, safe.identity.DeviceResolution)
+	require.Equal(t, "header", safe.identity.DeviceSource)
 	require.Empty(t, safe.completion.UpstreamSummary)
 	require.Equal(t, "POST", safe.meta.Method)
 	require.Equal(t, "header", safe.identity.SessionSource)
 	require.Equal(t, "failed", safe.completion.Outcome)
 	require.Equal(t, "bad\x00session", original.identity.SessionID)
+	require.Equal(t, "bad\x00device", original.identity.DeviceID)
 	require.Equal(t, []byte{0, 0xff, 'a'}, safe.raw)
 }
 
@@ -64,7 +68,7 @@ func TestPersistSanitizesSummariesAtDatabaseBoundary(t *testing.T) {
 	raw := []byte{0, 0xff, 1}
 	mock.ExpectBegin()
 	expectRetention(mock)
-	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WithArgs(id, int64(1), int64(2), int64(3), "", "header", "resolved", "", 3).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WithArgs(id, int64(1), int64(2), int64(3), "", "header", "resolved", "", "", "", "", "", 3).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO request_audit_payload_chunks`).WithArgs(id, PartBody, 0, raw, len(raw), 3).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WithArgs(id, PartBody, len(raw)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()

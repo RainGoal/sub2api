@@ -203,6 +203,15 @@ func (m *Manager) SessionBanEnabled() bool {
 	return m.configKnown && m.config.SessionBanEnabled
 }
 
+func (m *Manager) DeviceBanEnabled() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.configKnown && m.config.DeviceBanEnabled
+}
+
 func (m *Manager) Status() Status {
 	if m == nil {
 		return Status{}
@@ -257,7 +266,7 @@ func (m *Manager) enqueue(e auditEvent) bool {
 		e.queued += int64(len(e.meta.Method) + len(e.meta.RoutePattern) + len(e.meta.Protocol) + len(e.meta.ClientRequestID) + len(e.meta.ConnectionID) + len(e.meta.MessageType) + len(e.meta.Host) + len(e.meta.RequestURI))
 	}
 	if e.identity != nil {
-		e.queued += int64(len(e.identity.SessionID) + len(e.identity.SessionSource) + len(e.identity.SessionResolution) + len(e.identity.Model))
+		e.queued += int64(len(e.identity.SessionID) + len(e.identity.SessionSource) + len(e.identity.SessionResolution) + len(e.identity.Model) + len(e.identity.DeviceType) + len(e.identity.DeviceID) + len(e.identity.DeviceSource) + len(e.identity.DeviceResolution))
 	}
 	if !m.reserve(e.queued, len(e.raw) > 0) {
 		m.droppedEvents.Add(1)

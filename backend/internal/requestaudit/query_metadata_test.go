@@ -41,6 +41,10 @@ func TestRecordQueriesReturnMetadataWithoutLosingIDs(t *testing.T) {
 				require.EqualValues(t, 1, record.UserID)
 				require.EqualValues(t, 2, record.APIKeyID)
 				require.EqualValues(t, 3, record.GroupID)
+				require.Equal(t, "codex", record.DeviceType)
+				require.Equal(t, "Original-Device", record.DeviceID)
+				require.Equal(t, "header", record.DeviceSource)
+				require.Equal(t, "resolved", record.DeviceResolution)
 				if populated {
 					require.Equal(t, "alice", record.UserUsername)
 					require.Equal(t, "alice@example.com", record.UserEmail)

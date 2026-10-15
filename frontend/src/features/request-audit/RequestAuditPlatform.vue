@@ -20,6 +20,6 @@ const props = defineProps<{ platform?: string; groupName?: string }>()
 const { t } = useI18n()
 const label = computed(() => {
   const platform = props.platform === 'composite' ? t('admin.requestAudit.multiPlatform') : props.platform ? platformLabel(props.platform) : t('admin.requestAudit.unknown')
-  return props.groupName ? `${platform}-${props.groupName}` : platform
+  return props.groupName || platform
 })
 </script>

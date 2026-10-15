@@ -32,6 +32,11 @@ func storageEvent(e auditEvent) auditEvent {
 		id := *e.identity
 		id.SessionID, id.SessionSource = safeSummaryText(id.SessionID), safeSummaryText(id.SessionSource)
 		id.SessionResolution, id.Model = safeSummaryText(id.SessionResolution), safeSummaryText(id.Model)
+		if !ValidDeviceIdentity(id.DeviceType, id.DeviceID) {
+			id.DeviceID = ""
+		}
+		id.DeviceType, id.DeviceSource = safeSummaryText(id.DeviceType), safeSummaryText(id.DeviceSource)
+		id.DeviceResolution = safeSummaryText(id.DeviceResolution)
 		e.identity = &id
 	}
 	if e.completion != nil {

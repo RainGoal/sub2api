@@ -1,4 +1,5 @@
 export const REQUEST_AUDIT_KINDS = ['http_request', 'websocket_handshake', 'websocket_message'] as const
+export type RequestAuditDeviceType = 'claude' | 'codex'
 
 export interface RequestAuditRecord {
   id: string
@@ -14,6 +15,10 @@ export interface RequestAuditRecord {
   group_platform?: string
   session_id?: string | null
   session_source?: string | null
+  device_type?: RequestAuditDeviceType | null
+  device_id?: string | null
+  device_source?: string | null
+  device_resolution?: string | null
   connection_id?: string | null
   client_request_id?: string
   instance_id?: string
@@ -56,6 +61,8 @@ export interface RequestAuditFilters {
   group_id?: number
   request_id?: string
   session_id?: string
+  device_type?: RequestAuditDeviceType
+  device_id?: string
   kind?: string
   capture_state?: string
   http_status?: number
@@ -67,6 +74,7 @@ export interface RequestAuditConfig {
   enabled: boolean
   retention_days: number
   session_ban_enabled: boolean
+  device_ban_enabled: boolean
   version: number
   updated_at?: string
   updated_by?: number
@@ -125,6 +133,37 @@ export interface RequestAuditBanPage {
   items: RequestAuditBan[]
   next_cursor: string
   has_more: boolean
+}
+
+export interface RequestAuditDeviceBan {
+  id: string
+  device_type: RequestAuditDeviceType
+  device_id: string
+  device_source: string
+  source_audit_id: string
+  public_reason: string
+  internal_note?: string | null
+  created_at: string
+  expires_at?: string | null
+  revoked_at?: string | null
+  created_by?: number
+  revoked_by?: number | null
+  state?: string
+}
+
+export interface RequestAuditDeviceBanPage {
+  items: RequestAuditDeviceBan[]
+  next_cursor: string
+  has_more: boolean
+}
+
+export interface RequestAuditDeviceBanFilters {
+  device_type?: RequestAuditDeviceType
+  device_id?: string
+  source_audit_id?: string
+  state?: 'active' | 'expired' | 'revoked'
+  cursor?: string
+  limit?: number
 }
 
 export interface RequestAuditBanFilters {

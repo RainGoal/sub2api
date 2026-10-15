@@ -33,6 +33,43 @@ func TestDeriveAuditAction(t *testing.T) {
 	}
 }
 
+func TestDeviceBanMutationsRecordStableActionsAndSafeDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	for _, path := range []string{"/api/v1/admin/device-bans", "/api/v1/admin/device-bans/:id/revoke"} {
+		router.POST(path, func(c *gin.Context) {
+			SetAuditExtra(c, map[string]any{"audit_id": "audit-1", "ban_id": "ban-1", "device_ban_enabled": true, "device_id": "untrusted-device-id"})
+			c.Status(http.StatusOK)
+		})
+	}
+	for _, path := range []string{"/api/v1/admin/device-bans", "/api/v1/admin/device-bans/ban-1/revoke"} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	auditService.Stop()
+	require.Len(t, repository.logs, 2)
+	byAction := make(map[string]*service.AuditLog, 2)
+	for _, entry := range repository.logs {
+		byAction[entry.Action] = entry
+		require.Equal(t, int64(77), *entry.ActorUserID)
+		require.Equal(t, "audit-1", entry.Extra["audit_id"])
+		require.Equal(t, "ban-1", entry.Extra["ban_id"])
+		require.Equal(t, true, entry.Extra["device_ban_enabled"])
+		require.NotContains(t, entry.Extra, "device_id")
+	}
+	require.Contains(t, byAction, "admin.device_ban.create")
+	require.Contains(t, byAction, "admin.device_ban.revoke")
+}
+
 func TestRequestAuditDownloadAbortStillRecordsAdminAccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repository := &auditCaptureRepository{}

@@ -9,12 +9,14 @@ import (
 )
 
 const (
-	PartHeaders    = "headers"
-	PartBody       = "body"
-	PartTrailers   = "trailers"
-	ChunkBytes     = 256 * 1024
-	MaxPayloadRead = 256 * 1024
-	ConfigKey      = "request_audit_config"
+	PartHeaders      = "headers"
+	PartBody         = "body"
+	PartTrailers     = "trailers"
+	ChunkBytes       = 256 * 1024
+	MaxPayloadRead   = 256 * 1024
+	ConfigKey        = "request_audit_config"
+	DeviceTypeClaude = "claude"
+	DeviceTypeCodex  = "codex"
 )
 
 type Error struct {
@@ -33,6 +35,7 @@ type Config struct {
 	Enabled           bool      `json:"enabled"`
 	RetentionDays     int       `json:"retention_days"`
 	SessionBanEnabled bool      `json:"session_ban_enabled"`
+	DeviceBanEnabled  bool      `json:"device_ban_enabled"`
 	Version           int64     `json:"version"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	UpdatedBy         int64     `json:"updated_by"`
@@ -44,6 +47,7 @@ type ConfigUpdate struct {
 	Enabled           bool  `json:"enabled"`
 	RetentionDays     int   `json:"retention_days"`
 	SessionBanEnabled bool  `json:"session_ban_enabled"`
+	DeviceBanEnabled  bool  `json:"device_ban_enabled"`
 	ExpectedVersion   int64 `json:"expected_version"`
 	UpdatedBy         int64 `json:"-"`
 }
@@ -74,6 +78,10 @@ type Identity struct {
 	SessionID         string `json:"session_id,omitempty"`
 	SessionSource     string `json:"session_source,omitempty"`
 	SessionResolution string `json:"session_resolution,omitempty"`
+	DeviceType        string `json:"device_type,omitempty"`
+	DeviceID          string `json:"device_id,omitempty"`
+	DeviceSource      string `json:"device_source,omitempty"`
+	DeviceResolution  string `json:"device_resolution,omitempty"`
 	Model             string `json:"model,omitempty"`
 }
 
@@ -129,6 +137,8 @@ type ListFilter struct {
 	GroupID      int64
 	RequestID    string
 	SessionID    string
+	DeviceType   string
+	DeviceID     string
 	Kind         string
 	CaptureState string
 	HTTPStatus   int
@@ -187,6 +197,39 @@ type BanList struct {
 	Items      []*SessionBan `json:"items"`
 	NextCursor string        `json:"next_cursor,omitempty"`
 	HasMore    bool          `json:"has_more"`
+}
+
+type DeviceBan struct {
+	ID            string     `json:"id"`
+	DeviceType    string     `json:"device_type"`
+	DeviceID      string     `json:"device_id"`
+	DeviceSource  string     `json:"device_source"`
+	PublicReason  string     `json:"public_reason"`
+	InternalNote  string     `json:"internal_note,omitempty"`
+	SourceAuditID string     `json:"source_audit_id,omitempty"`
+	CreatedBy     int64      `json:"created_by"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	RevokedBy     *int64     `json:"revoked_by,omitempty"`
+	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
+	State         string     `json:"state"`
+}
+
+type CreateDeviceBanInput = CreateBanInput
+
+type DeviceBanFilter struct {
+	DeviceType    string
+	DeviceID      string
+	SourceAuditID string
+	State         string
+	Cursor        string
+	Limit         int
+}
+
+type DeviceBanList struct {
+	Items      []*DeviceBan `json:"items"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+	HasMore    bool         `json:"has_more"`
 }
 
 type Status struct {

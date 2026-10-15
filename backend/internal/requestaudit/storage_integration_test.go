@@ -35,7 +35,7 @@ CREATE TABLE users(id bigint PRIMARY KEY,username text,email text,deleted_at tim
 CREATE TABLE api_keys(id bigint PRIMARY KEY,user_id bigint,name text,deleted_at timestamptz);
 CREATE TABLE groups(id bigint PRIMARY KEY,platform text,name text,deleted_at timestamptz)`)
 	require.NoError(t, err)
-	for _, name := range []string{"243_request_audit.sql", "244_request_audit_cleanup_index.sql", "245_request_audit_global_session_index.sql", "246_request_audit_filter_indexes.sql"} {
+	for _, name := range []string{"243_request_audit.sql", "244_request_audit_cleanup_index.sql", "245_request_audit_global_session_index.sql", "246_request_audit_filter_indexes.sql", "247_request_audit_device_bans.sql"} {
 		migration, readErr := migrations.FS.ReadFile(name)
 		require.NoError(t, readErr)
 		for range 2 {
@@ -283,5 +283,9 @@ CASE WHEN s%100=0 THEN 'deleting' ELSE 'active' END FROM generate_series(1,20000
 
 	t.Run("request IDs have exact indexed lookup paths", func(t *testing.T) {
 		testRequestIDIndexPlans(t, ctx, db)
+	})
+
+	t.Run("device policy spans keys and survives source retention", func(t *testing.T) {
+		testDevicePolicyIntegration(t, ctx, db, m)
 	})
 }

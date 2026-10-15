@@ -50,7 +50,7 @@ ON CONFLICT(id) DO NOTHING`,
 			if e.identity == nil {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model) WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($9::int * INTERVAL '1 day')`, e.id, e.identity.UserID, e.identity.APIKeyID, e.identity.GroupID, e.identity.SessionID, e.identity.SessionSource, e.identity.SessionResolution, e.identity.Model, retention)
+			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),device_type=COALESCE(NULLIF($9,''),device_type),device_id=COALESCE(NULLIF($10,''),device_id),device_source=COALESCE(NULLIF($11,''),device_source),device_resolution=COALESCE(NULLIF($12,''),device_resolution) WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($13::int * INTERVAL '1 day')`, e.id, e.identity.UserID, e.identity.APIKeyID, e.identity.GroupID, e.identity.SessionID, e.identity.SessionSource, e.identity.SessionResolution, e.identity.Model, e.identity.DeviceType, e.identity.DeviceID, e.identity.DeviceSource, e.identity.DeviceResolution, retention)
 		case "chunk":
 			err = persistChunk(ctx, tx, e, retention)
 		case "usage_link":
@@ -66,10 +66,11 @@ ON CONFLICT(id) DO NOTHING`,
 			if e.completion == nil {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),http_status=$9,duration_ms=$10,outcome=$11,upstream_summary=$12,terminal_manifest=$13::jsonb,observed_body_bytes=$14,finished_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($15::int * INTERVAL '1 day')`,
+			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),http_status=$9,duration_ms=$10,outcome=$11,upstream_summary=$12,terminal_manifest=$13::jsonb,observed_body_bytes=$14,device_type=COALESCE(NULLIF($15,''),device_type),device_id=COALESCE(NULLIF($16,''),device_id),device_source=COALESCE(NULLIF($17,''),device_source),device_resolution=COALESCE(NULLIF($18,''),device_resolution),finished_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($19::int * INTERVAL '1 day')`,
 				e.id, identityValue(e.identity, func(i Identity) int64 { return i.UserID }), identityValue(e.identity, func(i Identity) int64 { return i.APIKeyID }), identityValue(e.identity, func(i Identity) int64 { return i.GroupID }),
 				identityValue(e.identity, func(i Identity) string { return i.SessionID }), identityValue(e.identity, func(i Identity) string { return i.SessionSource }), identityValue(e.identity, func(i Identity) string { return i.SessionResolution }), identityValue(e.identity, func(i Identity) string { return i.Model }),
-				e.completion.HTTPStatus, e.completion.DurationMS, nullString(e.completion.Outcome), nullString(e.completion.UpstreamSummary), string(jsonBytes(e.manifests)), e.observedBodyBytes, retention)
+				e.completion.HTTPStatus, e.completion.DurationMS, nullString(e.completion.Outcome), nullString(e.completion.UpstreamSummary), string(jsonBytes(e.manifests)), e.observedBodyBytes,
+				identityValue(e.identity, func(i Identity) string { return i.DeviceType }), identityValue(e.identity, func(i Identity) string { return i.DeviceID }), identityValue(e.identity, func(i Identity) string { return i.DeviceSource }), identityValue(e.identity, func(i Identity) string { return i.DeviceResolution }), retention)
 			if err == nil {
 				err = reconcileRecord(ctx, tx, e.id)
 			}
@@ -167,7 +168,7 @@ func (m *Manager) UpdateConfig(ctx context.Context, input ConfigUpdate) (Config,
 	if input.ExpectedVersion != current.Version {
 		return Config{}, failure(409, "CONFIG_VERSION_CONFLICT", "configuration was updated by another administrator")
 	}
-	next := Config{Enabled: input.Enabled, RetentionDays: input.RetentionDays, SessionBanEnabled: input.SessionBanEnabled, Version: current.Version + 1, UpdatedAt: time.Now().UTC(), UpdatedBy: input.UpdatedBy}
+	next := Config{Enabled: input.Enabled, RetentionDays: input.RetentionDays, SessionBanEnabled: input.SessionBanEnabled, DeviceBanEnabled: input.DeviceBanEnabled, Version: current.Version + 1, UpdatedAt: time.Now().UTC(), UpdatedBy: input.UpdatedBy}
 	b, _ := json.Marshal(next)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, ConfigKey, string(b)); err != nil {
 		return Config{}, err
@@ -200,7 +201,7 @@ func decodeCursor(value string) (time.Time, string, error) {
 	return t, p[1], err
 }
 
-const recordSelect = `SELECT id,received_at,updated_at,kind,instance_id,method,route_pattern,protocol,client_request_id,connection_id,message_seq,message_type,user_id,api_key_id,group_id,session_id,session_source,session_resolution,model,http_status,duration_ms,outcome,upstream_summary,capture_state,capture_reason,terminal_manifest,observed_body_bytes,stored_body_bytes,finished_at,last_event_at FROM request_audits`
+const recordSelect = `SELECT id,received_at,updated_at,kind,instance_id,method,route_pattern,protocol,client_request_id,connection_id,message_seq,message_type,user_id,api_key_id,group_id,session_id,session_source,session_resolution,model,http_status,duration_ms,outcome,upstream_summary,capture_state,capture_reason,terminal_manifest,observed_body_bytes,stored_body_bytes,finished_at,last_event_at,device_type,device_id,device_source,device_resolution FROM request_audits`
 
 // Resolve display metadata after selecting the audit page. LEFT JOIN also keeps
 // history readable when an association is missing or has been soft-deleted.
@@ -212,6 +213,9 @@ LEFT JOIN groups g ON g.id=r.group_id`
 }
 
 func (m *Manager) List(ctx context.Context, f ListFilter) (ListResult, error) {
+	if err := validateDeviceFilter(f.DeviceType, f.DeviceID); err != nil {
+		return ListResult{}, err
+	}
 	if f.RequestID != "" && !ValidRequestID(f.RequestID) {
 		return ListResult{}, failure(400, "INVALID_ARGUMENT", "Invalid request_id")
 	}
@@ -250,6 +254,12 @@ UNION SELECT audit_id FROM request_audit_usage_links WHERE usage_request_id=$%d)
 	}
 	if f.SessionID != "" {
 		add("session_id = $%d", f.SessionID)
+	}
+	if f.DeviceType != "" {
+		add("device_type = $%d", f.DeviceType)
+	}
+	if f.DeviceID != "" {
+		add("device_id = $%d", f.DeviceID)
 	}
 	if f.Kind != "" {
 		add("kind = $%d", f.Kind)
@@ -302,10 +312,11 @@ func scanRecord(row rowScanner) (*Record, error) {
 	var r Record
 	var client, conn, msgType, session, source, resolution, model, outcome, upstream, state, reason sql.NullString
 	var username, email, keyName, platform, groupName sql.NullString
+	var deviceType, deviceID, deviceSource, deviceResolution sql.NullString
 	var seq, uid, key, gid, status, duration sql.NullInt64
 	var manifest []byte
 	var finished sql.NullTime
-	err := row.Scan(&r.ID, &r.ReceivedAt, &r.UpdatedAt, &r.Kind, &r.InstanceID, &r.Method, &r.RoutePattern, &r.Protocol, &client, &conn, &seq, &msgType, &uid, &key, &gid, &session, &source, &resolution, &model, &status, &duration, &outcome, &upstream, &state, &reason, &manifest, &r.ObservedBodyBytes, &r.StoredBodyBytes, &finished, &r.LastEventAt, &username, &email, &keyName, &platform, &groupName)
+	err := row.Scan(&r.ID, &r.ReceivedAt, &r.UpdatedAt, &r.Kind, &r.InstanceID, &r.Method, &r.RoutePattern, &r.Protocol, &client, &conn, &seq, &msgType, &uid, &key, &gid, &session, &source, &resolution, &model, &status, &duration, &outcome, &upstream, &state, &reason, &manifest, &r.ObservedBodyBytes, &r.StoredBodyBytes, &finished, &r.LastEventAt, &deviceType, &deviceID, &deviceSource, &deviceResolution, &username, &email, &keyName, &platform, &groupName)
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +326,7 @@ func scanRecord(row rowScanner) (*Record, error) {
 	r.UserUsername, r.UserEmail, r.APIKeyName, r.GroupPlatform = username.String, email.String, keyName.String, platform.String
 	r.GroupName = groupName.String
 	r.SessionID, r.SessionSource, r.SessionResolution, r.Model = session.String, source.String, resolution.String, model.String
+	r.DeviceType, r.DeviceID, r.DeviceSource, r.DeviceResolution = deviceType.String, deviceID.String, deviceSource.String, deviceResolution.String
 	r.HTTPStatus, r.DurationMS, r.Outcome, r.UpstreamSummary, r.CaptureState, r.CaptureReason = int(status.Int64), duration.Int64, outcome.String, upstream.String, state.String, reason.String
 	_ = json.Unmarshal(manifest, &r.TerminalManifest)
 	if finished.Valid {

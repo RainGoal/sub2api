@@ -5,6 +5,9 @@ import type {
   RequestAuditBanFilters,
   RequestAuditBanPage,
   RequestAuditConfig,
+  RequestAuditDeviceBan,
+  RequestAuditDeviceBanFilters,
+  RequestAuditDeviceBanPage,
   RequestAuditFilters,
   RequestAuditPage,
   RequestAuditPayload,
@@ -14,6 +17,7 @@ import type {
 
 const audits = '/admin/request-audits'
 const bans = '/admin/session-bans'
+const deviceBans = '/admin/device-bans'
 const segment = (id: string) => encodeURIComponent(id)
 
 export const requestAuditAPI = {
@@ -60,6 +64,7 @@ export const requestAuditAPI = {
       enabled: config.enabled,
       retention_days: config.retention_days,
       session_ban_enabled: config.session_ban_enabled,
+      device_ban_enabled: config.device_ban_enabled,
       expected_version: config.version,
     })
     return data
@@ -82,6 +87,22 @@ export const requestAuditAPI = {
   },
   async revokeBan(id: string): Promise<RequestAuditBan> {
     const { data } = await apiClient.post<RequestAuditBan>(`${bans}/${segment(id)}/revoke`, {})
+    return data
+  },
+  async listDeviceBans(filters: RequestAuditDeviceBanFilters = {}): Promise<RequestAuditDeviceBanPage> {
+    const { data } = await apiClient.get<RequestAuditDeviceBanPage>(deviceBans, { params: filters })
+    return data
+  },
+  async getDeviceBan(id: string): Promise<RequestAuditDeviceBan> {
+    const { data } = await apiClient.get<RequestAuditDeviceBan>(`${deviceBans}/${segment(id)}`)
+    return data
+  },
+  async createDeviceBan(input: CreateRequestAuditBan): Promise<RequestAuditDeviceBan> {
+    const { data } = await apiClient.post<RequestAuditDeviceBan>(deviceBans, input)
+    return data
+  },
+  async revokeDeviceBan(id: string): Promise<RequestAuditDeviceBan> {
+    const { data } = await apiClient.post<RequestAuditDeviceBan>(`${deviceBans}/${segment(id)}/revoke`, {})
     return data
   },
 }

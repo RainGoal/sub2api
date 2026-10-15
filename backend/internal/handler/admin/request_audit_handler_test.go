@@ -20,11 +20,15 @@ const testRequestAuditID = "693b5cb0-cdef-4acf-a2e6-3f760debb1ee"
 
 type requestAuditStoreStub struct {
 	RequestAuditAdminStore
+	config func() (requestaudit.Config, error)
 	update func(requestaudit.ConfigUpdate) (requestaudit.Config, error)
 	read   func(string, string, int64, int64, bool) (requestaudit.PayloadResult, error)
 	create func(requestaudit.CreateBanInput) (*requestaudit.SessionBan, error)
 }
 
+func (s requestAuditStoreStub) GetConfig(context.Context) (requestaudit.Config, error) {
+	return s.config()
+}
 func (s requestAuditStoreStub) UpdateConfig(_ context.Context, input requestaudit.ConfigUpdate) (requestaudit.Config, error) {
 	return s.update(input)
 }
@@ -62,6 +66,8 @@ func TestRequestAuditEndpointsRequireAdministrator(t *testing.T) {
 		"list": h.List, "get": h.Get, "config": h.GetConfig, "update": h.UpdateConfig,
 		"status": h.Status, "payload": h.Payload, "bans": h.ListBans,
 		"ban": h.GetBan, "create": h.CreateBan, "revoke": h.RevokeBan,
+		"device_bans": h.ListDeviceBans, "device_ban": h.GetDeviceBan,
+		"create_device_ban": h.CreateDeviceBan, "revoke_device_ban": h.RevokeDeviceBan,
 	} {
 		t.Run(name, func(t *testing.T) {
 			for role, status := range map[string]int{"": 401, "user": 403} {
@@ -77,7 +83,7 @@ func TestRequestAuditConfigValidationAndActor(t *testing.T) {
 	var updates []requestaudit.ConfigUpdate
 	h := &RequestAuditHandler{store: requestAuditStoreStub{update: func(input requestaudit.ConfigUpdate) (requestaudit.Config, error) {
 		updates = append(updates, input)
-		return requestaudit.Config{RetentionDays: input.RetentionDays, Version: 2}, nil
+		return requestaudit.Config{RetentionDays: input.RetentionDays, DeviceBanEnabled: input.DeviceBanEnabled, Version: 2}, nil
 	}}}
 	router := requestAuditTestRouter("admin", h.UpdateConfig)
 	for _, body := range []string{
@@ -88,12 +94,13 @@ func TestRequestAuditConfigValidationAndActor(t *testing.T) {
 		require.Equal(t, 400, requestAuditTestRequest(router, "PUT", "", body).Code)
 	}
 	require.Empty(t, updates)
-	w := requestAuditTestRequest(router, "PUT", "", `{"enabled":false,"session_ban_enabled":false,"retention_days":3,"expected_version":1,"updated_by":999}`)
+	w := requestAuditTestRequest(router, "PUT", "", `{"enabled":false,"session_ban_enabled":false,"device_ban_enabled":true,"retention_days":3,"expected_version":1,"updated_by":999}`)
 	require.Equal(t, 200, w.Code)
 	require.Len(t, updates, 1)
 	require.Equal(t, int64(77), updates[0].UpdatedBy)
 	require.False(t, updates[0].Enabled)
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"enabled":false,"retention_days":3,"session_ban_enabled":false,"version":2,"updated_at":"0001-01-01T00:00:00Z","updated_by":0}}`, w.Body.String())
+	require.True(t, updates[0].DeviceBanEnabled)
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"enabled":false,"retention_days":3,"session_ban_enabled":false,"device_ban_enabled":true,"version":2,"updated_at":"0001-01-01T00:00:00Z","updated_by":0}}`, w.Body.String())
 }
 
 func TestRequestAuditBanActorAndUncertainResult(t *testing.T) {

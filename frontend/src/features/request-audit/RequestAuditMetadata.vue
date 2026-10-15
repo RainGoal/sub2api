@@ -28,6 +28,7 @@
       <div class="min-w-0"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.group') }}</dt><dd class="mt-1 break-all font-medium text-gray-900 dark:text-white">{{ groupName }}</dd></div>
       <div class="min-w-0"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.model') }}</dt><dd class="mt-1 break-all font-mono text-xs leading-5 text-gray-700 dark:text-dark-100">{{ record.model || '—' }}</dd></div>
       <div class="min-w-0 border-t border-gray-200 pt-3 dark:border-dark-700 sm:col-span-2 lg:col-span-4"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.session') }}</dt><dd class="mt-1 break-all font-mono text-xs text-gray-700 dark:text-dark-100">{{ record.session_id || t('admin.requestAudit.noSession') }}</dd></div>
+      <div class="min-w-0 sm:col-span-2 lg:col-span-4" data-test="device-identity"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.deviceId') }}</dt><dd class="mt-1 break-all font-mono text-xs text-gray-700 dark:text-dark-100">{{ record.device_id || t('admin.requestAudit.noDevice') }}</dd><dd v-if="record.device_type" class="mt-1 text-xs text-gray-500 dark:text-dark-300">{{ t(`admin.requestAudit.deviceTypes.${record.device_type}`) }} · {{ record.device_source || '—' }}</dd></div>
     </dl>
     <details class="border-t border-gray-200 dark:border-dark-700">
       <summary class="cursor-pointer px-4 py-3 text-xs font-medium text-gray-600 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white">{{ t('admin.requestAudit.technicalDetails') }}</summary>
@@ -62,6 +63,9 @@ const fields = computed(() => [
   { key: 'result', value: [props.record.http_status, props.record.outcome, props.record.upstream_summary].filter(Boolean).join(' · ') },
   { key: 'sessionSource', value: props.record.session_source },
   { key: 'sessionResolution', value: props.record.session_resolution },
+  { key: 'deviceType', value: props.record.device_type },
+  { key: 'deviceSource', value: props.record.device_source },
+  { key: 'deviceResolution', value: props.record.device_resolution },
   { key: 'clientRequestId', value: props.record.client_request_id },
   { key: 'connectionId', value: props.record.connection_id },
   { key: 'messageSequence', value: props.record.message_seq },

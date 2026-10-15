@@ -33,6 +33,10 @@ type RequestAuditAdminStore interface {
 	GetBan(context.Context, string) (*requestaudit.SessionBan, error)
 	CreateBan(context.Context, requestaudit.CreateBanInput) (*requestaudit.SessionBan, error)
 	RevokeBan(context.Context, string, int64) (*requestaudit.SessionBan, error)
+	ListDeviceBans(context.Context, requestaudit.DeviceBanFilter) (requestaudit.DeviceBanList, error)
+	GetDeviceBan(context.Context, string) (*requestaudit.DeviceBan, error)
+	CreateDeviceBan(context.Context, requestaudit.CreateDeviceBanInput) (*requestaudit.DeviceBan, error)
+	RevokeDeviceBan(context.Context, string, int64) (*requestaudit.DeviceBan, error)
 }
 
 type RequestAuditHandler struct {
@@ -134,6 +138,7 @@ func (h *RequestAuditHandler) List(c *gin.Context) {
 	}
 	filter := requestaudit.ListFilter{Limit: limit, UserID: user, APIKeyID: key, GroupID: group,
 		RequestID: strings.TrimSpace(c.Query("request_id")), SessionID: c.Query("session_id"),
+		DeviceType: c.Query("device_type"), DeviceID: c.Query("device_id"),
 		Kind: c.Query("kind"), CaptureState: c.Query("capture_state"), Cursor: c.Query("cursor")}
 	if filter.RequestID != "" && !requestaudit.ValidRequestID(filter.RequestID) {
 		requestAuditInvalid(c, "Invalid request_id")
@@ -204,6 +209,7 @@ func (h *RequestAuditHandler) UpdateConfig(c *gin.Context) {
 	var input struct {
 		Enabled           *bool  `json:"enabled" binding:"required"`
 		SessionBanEnabled *bool  `json:"session_ban_enabled" binding:"required"`
+		DeviceBanEnabled  *bool  `json:"device_ban_enabled"`
 		RetentionDays     int    `json:"retention_days" binding:"min=1,max=30"`
 		ExpectedVersion   *int64 `json:"expected_version" binding:"required"`
 	}
@@ -211,13 +217,27 @@ func (h *RequestAuditHandler) UpdateConfig(c *gin.Context) {
 		requestAuditInvalid(c, "Invalid audit configuration")
 		return
 	}
+	if input.DeviceBanEnabled == nil {
+		current, err := h.store.GetConfig(c.Request.Context())
+		if err != nil {
+			requestAuditError(c, err)
+			return
+		}
+		// GetConfig may be cached on another instance's previous version.
+		// Preserve only a switch read from the client's exact config version.
+		if current.Version != *input.ExpectedVersion {
+			requestAuditError(c, &requestaudit.Error{Status: http.StatusConflict, Code: "CONFIG_VERSION_CONFLICT", Message: "configuration was updated by another administrator"})
+			return
+		}
+		input.DeviceBanEnabled = &current.DeviceBanEnabled
+	}
 	subject, _ := middleware.GetAuthSubjectFromContext(c)
-	result, err := h.store.UpdateConfig(c.Request.Context(), requestaudit.ConfigUpdate{Enabled: *input.Enabled, SessionBanEnabled: *input.SessionBanEnabled, RetentionDays: input.RetentionDays, ExpectedVersion: *input.ExpectedVersion, UpdatedBy: subject.UserID})
+	result, err := h.store.UpdateConfig(c.Request.Context(), requestaudit.ConfigUpdate{Enabled: *input.Enabled, SessionBanEnabled: *input.SessionBanEnabled, DeviceBanEnabled: *input.DeviceBanEnabled, RetentionDays: input.RetentionDays, ExpectedVersion: *input.ExpectedVersion, UpdatedBy: subject.UserID})
 	if err != nil {
 		requestAuditError(c, err)
 		return
 	}
-	middleware.SetAuditExtra(c, map[string]any{"enabled": result.Enabled, "blocking_enabled": result.SessionBanEnabled, "config_version": result.Version})
+	middleware.SetAuditExtra(c, map[string]any{"enabled": result.Enabled, "blocking_enabled": result.SessionBanEnabled, "device_ban_enabled": result.DeviceBanEnabled, "config_version": result.Version})
 	response.Success(c, result)
 }
 

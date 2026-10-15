@@ -32,6 +32,7 @@ func recordRows(id, state, reason string, manifests map[string]PartManifest, met
 	now := time.Now()
 	return sqlmock.NewRows(columns).AddRow(id, now, now, "http_request", "test", "POST", "/v1/messages", "HTTP/1.1", nil, nil, nil, nil,
 		1, 2, 3, "session", "header", "resolved", "test-model", 200, 1, "completed", nil, state, reason, jsonBytes(manifests), 0, 0, now, now,
+		"codex", "Original-Device", "header", "resolved",
 		display[0], display[1], display[2], display[3], display[4])
 }
 

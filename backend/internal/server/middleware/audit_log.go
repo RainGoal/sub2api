@@ -52,7 +52,7 @@ func SkipAudit(c *gin.Context) {
 // scalar, non-secret operation summaries. Request bodies and arbitrary maps
 // are never accepted through this channel.
 var auditExtraAllowedKeys = map[string]struct{}{
-	"result": {}, "error_code": {}, "enabled": {}, "blocking_enabled": {},
+	"result": {}, "error_code": {}, "enabled": {}, "blocking_enabled": {}, "device_ban_enabled": {},
 	"config_version": {}, "endpoint_count": {}, "scanner_count": {},
 	"all_groups": {}, "group_count": {}, "guard_endpoint_id": {},
 	"http_status": {}, "latency_ms": {}, "token_applied": {}, "retryable": {},
@@ -147,6 +147,8 @@ var auditActionOverrides = map[string]string{
 	"PUT /api/v1/admin/request-audits/config":                 "admin.request_audit.config.update",
 	"POST /api/v1/admin/session-bans":                         "admin.session_ban.create",
 	"POST /api/v1/admin/session-bans/:id/revoke":              "admin.session_ban.revoke",
+	"POST /api/v1/admin/device-bans":                          "admin.device_ban.create",
+	"POST /api/v1/admin/device-bans/:id/revoke":               "admin.device_ban.revoke",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。

@@ -153,6 +153,11 @@ func registerRequestAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	bans.POST("", audit.CreateBan)
 	bans.GET("/:id", audit.GetBan)
 	bans.POST("/:id/revoke", audit.RevokeBan)
+	devices := admin.Group("/device-bans")
+	devices.GET("", audit.ListDeviceBans)
+	devices.POST("", audit.CreateDeviceBan)
+	devices.GET("/:id", audit.GetDeviceBan)
+	devices.POST("/:id/revoke", audit.RevokeDeviceBan)
 }
 
 func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

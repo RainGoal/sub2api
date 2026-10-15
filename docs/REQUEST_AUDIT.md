@@ -1,8 +1,8 @@
-# 请求记录与会话封禁
+# 请求记录、会话封禁与设备封禁
 
-请求记录位于管理端「请求审计」（`/admin/request-audits`）。采集和人工会话封禁是两个独立开关，默认关闭；默认保留最近 3 天，可配置 1～30 天。
+请求记录位于管理端「请求审计」（`/admin/request-audits`）。采集、人工会话封禁和设备封禁是三个独立开关，默认关闭；默认保留最近 3 天，可配置 1～30 天。
 
-列表和详情优先显示用户名/邮箱、API Key 名称、分组名称及平台。列表的所属分组使用一个彩色标签，例如 `OpenAI-分组名称`，长名称省略并提供完整悬停提示。`user_username`、`user_email`、`api_key_name`、`group_name`、`group_platform` 随列表和详情一次查询返回，旧 ID 字段保留；软删除关联仍可显示名称，关联缺失时回退到 ID。这些名称和平台是关联对象的当前值；多平台分组显示「多平台」，不代表该次请求最终路由的平台。
+列表和详情优先显示用户名/邮箱、API Key 名称和分组名称。列表的所属分组使用彩色标签，仅显示平台图标与分组名称，不再添加平台文字前缀；长名称省略并提供完整悬停提示。详情保留独立的平台标签。`user_username`、`user_email`、`api_key_name`、`group_name`、`group_platform` 随列表和详情一次查询返回，旧 ID 字段保留；软删除关联仍可显示名称，关联缺失时回退到 ID。这些名称和平台是关联对象的当前值，多平台分组不代表该次请求最终路由的平台。
 
 用户筛选复用已有管理员用户搜索，输入用户名或邮箱后选择匹配用户（含软删除用户），再按其 ID 精确查询。会话 ID 可单独筛选并返回跨 API Key 的匹配记录，填写 API Key ID 可以缩小范围。客户端提供的会话 ID 不保证跨 Key 全局唯一，因此会话封禁仍严格作用于「API Key + 会话 ID」。
 
@@ -45,6 +45,21 @@ HTTP 和 Responses 中已经准入的请求不会因重复检查而取消；实�
 
 封禁操作遇到网络或提交结果不确定时，先按返回的封禁 ID 或来源请求查询状态，再决定是否重试。明确查询到不存在或没有生效规则后，可保留草稿重试；查询仍失败时继续保持待确认状态。不要把超时直接理解为操作未生效。
 
+## 设备封禁
+
+在请求详情查看设备类型、原始标识、来源与解析状态，选择「封禁设备」，填写公开原因，可选内部备注和到期时间。「设备封禁」页签可查询及解封；「同设备请求」按类型和设备 ID 查询跨用户、Key 和会话的记录，仍受当前保留期限制。没有有效设备标识的历史记录显示缺失，不从正文回填或用会话/缓存标识代替。
+
+规则从来源审计记录读取 `device_type + device_id`，不接受前端自填身份。类型为 `claude` 或 `codex`，两者分别匹配；规则不限定用户、分组或 API Key。设备 ID 保留原始内容和大小写，不使用任何上游账号的 `openai_device_id`、收敛指纹或重新派生值。有效 ID 必须是非空、最多 255 UTF-8 字节、没有首尾空白和控制字符的字符串。
+
+- Claude Messages：从原始 body 的 `metadata.user_id` JSON 字符串读取 `device_id`；兼容旧版 `user_<64hex>_account_<uuid>_session_<uuid>`。JSON 格式即使没有会话 ID 仍能提取设备。Messages 不使用其他协议的 Codex 请求头覆盖 Claude 设备。
+- Codex：优先读 `X-Codex-Installation-Id`，其次读 `X-Codex-Turn-Metadata` JSON 中的 `installation_id`；没有有效头标识时，Responses 从 `client_metadata["x-codex-installation-id"]` 或 `client_metadata["x-codex-turn-metadata"]` JSON 字符串内的 `installation_id` 补齐。WS `response.create` 支持 `response` 包裹的请求体。同一解析层（请求头或请求体）内多个有效来源不一致时保留优先来源，并记录 `conflict`。
+
+设备识别发生在入站协议/指纹改写之前，HTTP 每个已解析设备只做一次准入检查；命中后返回 `403` 与公开原因，OpenAI 兼容错误码为 `device_banned`。WS 在首个及后续生成请求转发前检查，发送 `device_banned` 错误并以 1008 关闭连接；已准入 Responses 的取消等控制消息仍可通过。透明实时通道沿用逐条客户端消息检查机制。连接保留第一个有效设备标识，后续请求体或出站改写不替换它。
+
+`device_ban_enabled` 默认关闭，独立于采集和会话封禁；关闭采集、审计到期或清理均不删除设备规则。采集和设备封禁都关闭时，不执行新增的设备提取或设备规则查询，现有会话流程保持不变。规则支持到期失效、幂等解封和提交结果不确定时查询恢复。缺失或无效设备标识不触发设备封禁；查询故障沿用可用性优先策略放行，并累计 `ban_check_failures`。客户端可修改或省略这些标识，这属于安装标识匹配，不是不可绕过的硬件识别。
+
+WS 连接在采集和设备封禁都关闭时建立，不保留设备标识。之后开启设备封禁，Responses 只能从后续带有效设备标识的生成请求补齐；仅在握手或首帧发送安装标识的客户端需要重连。已经绑定的有效设备标识不会被后续消息替换。
+
 ## 保留和资源配置
 
 查询按请求接收时间计算滚动 `N × 24 小时` 窗口；后台每 5 分钟分批清理。清理中的记录不会因延长保留期而重新显示。封禁规则不随请求记录级联删除。PostgreSQL 删除释放的空间通常用于内部复用，文件不一定立即缩小；备份和 WAL 的保留周期独立管理。
@@ -71,16 +86,20 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 
 | 方法 / 路径 | 输入和输出 |
 | --- | --- |
-| `GET /request-audits` | `from/to`（RFC3339）、`user_id`、`api_key_id`、`group_id`、`request_id`、`session_id`、`kind`、`capture_state`、`http_status`、`cursor`、`limit`；返回 `items/next_cursor/has_more`，单页最多 100 条；会话/请求 ID 可独立筛选，API Key ID 可选；请求 ID 最多 256 UTF-8 字节，拒绝控制字符，按精确值查询 |
+| `GET /request-audits` | `from/to`（RFC3339）、`user_id`、`api_key_id`、`group_id`、`request_id`、`session_id`、`device_type`、`device_id`、`kind`、`capture_state`、`http_status`、`cursor`、`limit`；返回 `items/next_cursor/has_more`，单页最多 100 条；会话/请求/设备 ID 可独立筛选，API Key ID 可选；请求 ID 最多 256 UTF-8 字节，拒绝控制字符，按精确值查询 |
 | `GET /request-audits/:id` | UUID；返回入口摘要、身份、结果、终结清单与完整性状态，不返回原文 |
 | `GET /request-audits/:id/payload` | `part=headers/body/trailers`；`mode=preview/raw`；`offset/limit`；不完整内容需 `allow_partial=true` |
 | `GET /request-audits/config` | 返回开关、保留天数、版本、更新时间和管理员 ID |
-| `PUT /request-audits/config` | `enabled`、`session_ban_enabled`、`retention_days`、`expected_version`；返回新配置 |
+| `PUT /request-audits/config` | `enabled`、`session_ban_enabled`、`device_ban_enabled`、`retention_days`、`expected_version`；返回新配置；旧客户端省略 `device_ban_enabled` 时保留当前值，版本冲突保护不变 |
 | `GET /request-audits/status` | 返回当前实例配置状态、队列、失败/丢弃和清理指标 |
 | `GET /session-bans` | `api_key_id/session_id/source_audit_id/state/cursor/limit`；返回游标列表 |
 | `POST /session-bans` | `source_audit_id/public_reason` 必填，`internal_note/expires_at` 可选；成功返回 201 和封禁规则 |
 | `GET /session-bans/:id` | 查询规则及当前 active/expired/revoked 状态 |
 | `POST /session-bans/:id/revoke` | 幂等解封，返回规则 |
+| `GET /device-bans` | `device_type/device_id/source_audit_id/state/cursor/limit`；返回 `items/next_cursor/has_more`，每页最多 100 条 |
+| `POST /device-bans` | `source_audit_id/public_reason` 必填，`internal_note/expires_at` 可选；设备身份只从来源记录取得；成功返回 201 和规则 |
+| `GET /device-bans/:id` | 查询设备规则及当前 active/expired/revoked 状态 |
+| `POST /device-bans/:id/revoke` | 幂等解封设备，返回规则 |
 
 预览每次最多 256 KiB，返回 `content/encoding/offset/returned_bytes/part_bytes/has_more/capture_state/partial/redacted`；headers 预览可用 `reveal_sensitive=true` 显示凭据。原文下载支持单个 HTTP `Range`，失败范围返回 416；响应提供 `Content-Length` 和完整性标头。下载中途读库失败会中断连接，不能当作完整成功文件。并发原文读取最多 2 个，读取上下文与下载写入限时 30 秒，过长文件可分段下载；此限时仅作用于审计下载，不改变网关 SSE/WS 超时。
 
@@ -88,10 +107,12 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 
 ## 部署与回退
 
+设备封禁新增迁移 `247_request_audit_device_bans.sql`，增加审计设备摘要列、设备查询索引及独立 `device_bans` 表。升级时应用迁移并发布管理端资源；新增索引可能阻塞审计写入，建议低峰部署。设备开关默认关闭，先核对 Claude/Codex 的原始设备摘要，再使用隔离测试 Key 验证跨 Key/会话拦截、公开原因、到期及解封；HTTP/SSE/WS 行为应一并回归。升级前已建立的 WS 连接应重连以保证能识别原始设备。回退前先关闭设备封禁，保留新增列、表和规则，不删除数据卷。
+
 1. 发布前完成后端全量、unit、lint、integration，前端 typecheck、test 和 build；真实 PostgreSQL/Redis 集成验证需 Docker。自动跳过不代表验证通过。
-2. 部署镜像包含迁移 `243_request_audit.sql`、`244_request_audit_cleanup_index.sql`、`245_request_audit_global_session_index.sql`、`246_request_audit_filter_indexes.sql` 和新的内嵌管理端。244 为清理中的记录补充部分索引；清理分别查询删除中记录与新过期记录，避免每条记录重复全表扫描排序。245 为独立会话查询增加有序部分索引；246 增加分组/入站请求 ID 查询索引与独立用量 ID 关联表，关联表带精确查询和级联删除索引。索引构建期间会阻塞审计表写入，建议在低峰更新并观察写入失败/丢弃计数，大表需预留构建时间。沿用现有迁移机制执行，不修改历史业务数据；不要删除数据卷或直接覆盖线上 compose。
-3. 确认 `/admin/request-audits` 页面、`/api/v1/admin/request-audits/*`、`/api/v1/admin/session-bans/*` 经 Nginx 正常转发，非管理员被拒绝。此次不新增 OAuth 或支付回调。
-4. 首次部署保持两个开关关闭，先验证健康接口与既有 HTTP/SSE/WS 行为。再启用采集，以真实 JSON、压缩体、multipart、大请求与 WS 消息核对原始字节和 headers；启用后重连已有 WS。
+2. 部署镜像包含迁移 `243_request_audit.sql`、`244_request_audit_cleanup_index.sql`、`245_request_audit_global_session_index.sql`、`246_request_audit_filter_indexes.sql`、`247_request_audit_device_bans.sql` 和新的内嵌管理端。244 为清理中的记录补充部分索引；清理分别查询删除中记录与新过期记录，避免每条记录重复全表扫描排序。245 为独立会话查询增加有序部分索引；246 增加分组/入站请求 ID 查询索引与独立用量 ID 关联表，关联表带精确查询和级联删除索引；247 增加设备摘要、查询索引及设备规则表。索引构建期间会阻塞审计表写入，建议在低峰更新并观察写入失败/丢弃计数，大表需预留构建时间。沿用现有迁移机制执行，不修改历史业务数据；不要删除数据卷或直接覆盖线上 compose。
+3. 确认 `/admin/request-audits` 页面、`/api/v1/admin/request-audits/*`、`/api/v1/admin/session-bans/*`、`/api/v1/admin/device-bans/*` 经 Nginx 正常转发，非管理员被拒绝。此次不新增 OAuth 或支付回调。
+4. 首次部署保持采集、会话封禁和设备封禁三个开关关闭，先验证健康接口与既有 HTTP/SSE/WS 行为。再启用采集，以真实 JSON、压缩体、multipart、大请求与 WS 消息核对原始字节和 headers；启用后重连已有 WS。
 5. 用隔离测试 Key 验证封禁原因、后续 HTTP/WS 请求拦截和解封；不要用正在服务的用户会话做破坏性验证。监测网关 p95/p99、吞吐、内存、数据库 I/O、WAL、丢弃和清理延迟，按实际流量确定资源预算。
 6. 回退可先关闭采集；人工封禁开关独立处理。应用回退时保留新增表与规则，后续确认不再需要后再制定独立清理计划。
 
@@ -220,3 +241,47 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 | `gofmt -l` / `git diff --check` / `git status --short` | 格式和空白检查通过；只提交本轮源码、测试、迁移及文档，排除截图、构建产物和本地配置 |
 
 发布前须确认同一提交的 CI（含真实 PostgreSQL/Redis 集成）与 Security Scan 全部通过，再单独推送 annotated Tag。部署需执行迁移 246，并核对管理端分组选择、普通 HTTP 请求 ID 与新 Responses WebSocket 用量 ID 查询。WebSocket 查询定位所属连接；旧响应 ID、未传递采集上下文的通道及已过期/丢弃的审计不回填，详见本文开头的查询边界。运行开关及现有管理路由不变。
+
+## 设备封禁验证（2026-10-15）
+
+本轮增加原始设备摘要、跨用户和 Key 的设备精确封禁、独立开关、管理 API 和管理页面。回归覆盖 Claude 无会话设备、Codex Header/Body/WS 来源优先级、原始字节保真、采集关闭后拦截、过期与解封、并发去重及不确定写入恢复。额外修复两处边界：Messages 不让 Codex Header 覆盖 Claude 设备；WS 后续轮次的本地设备拦截不计入上游账号调度失败，真实上游 1008 认证错误仍会报告。
+
+| 命令 / 检查 | 实际结果 |
+| --- | --- |
+| `go test -p 2 ./...` / `go test -p 2 -tags=unit ./...` | WS 错误归因修正后最终全包通过，包含 API 契约 |
+| `golangci-lint run --concurrency 2 --timeout=30m ./...` | 官方 2.14.0，最终全量 0 issues |
+| service、middleware、handler、admin 的设备专项回归 | 通过，包含真实 Composite WS 中间件链与设备错误归因 |
+| `go test -race ./internal/requestaudit` | 通过 |
+| `pnpm --dir frontend run typecheck` / `run lint:check` / `run build` | 最终页面修正后通过；构建产物未纳入提交 |
+| `pnpm --dir frontend run test:run --maxWorkers=2 --minWorkers=1` | 最终全量 374 个文件、3021 项通过 |
+| `go test -p 2 -tags embed ./internal/web` | 最终管理端构建后通过 |
+| 本地模拟 API 浏览器检查 | 1440px / 390px 的设备详情、创建、解封、列表状态和作用范围提示通过，无页面水平溢出；浏览器与预览服务已关闭，未修改生产数据 |
+| 改动 Go 文件 `gofmt -l` / `git diff --check` / `git status --short` | 格式和空白检查通过；仅本次源码、测试、迁移和文档，未暂存构建产物、截图、配置或数据文件 |
+| `go test -tags=integration ./internal/requestaudit -run '^$'` | 仅编译通过 |
+| `go test -tags=integration ./internal/requestaudit -run TestRequestAuditPostgresIntegration -count=1` | 容器启动失败：`rootless Docker is not supported on Windows`；数据库断言未执行，不计为通过 |
+
+新增迁移 247 的真实数据库持久化、并发封禁、过期续封及来源清理用例须在可用 Docker 环境执行，发布前仍需完整 `go test -tags=integration ./...` 和同一提交的远端 CI。部署先应用迁移 247、更新内嵌管理端和核对 `/api/v1/admin/device-bans/*` 路由，再在请求审计设置启用默认关闭的设备封禁；已有 WS 连接需重连。本轮仅保留本地 `feat/my-sub` 工作区改动，未提交、推送、创建版本或部署。
+
+## v0.1.55 发布复核（2026-10-15）
+
+设备封禁及分组标签简化纳入 `v0.1.55`。本节记录上述初轮验证之后的最终复核：
+
+- 采集和设备封禁都关闭时跳过新增设备解析和规则查询，保留原有会话检查；覆盖 HTTP/SSE 原始请求体及真实 WS 两轮正常转发。
+- 封禁列表分页使用已应用的筛选快照，修改筛选草稿或新查询失败均不会将不同条件的结果混入旧列表；会话和设备两种列表均有回归。
+- 请求列表所属分组只显示平台图标和分组名称，详情保留独立平台标签。
+- 交叉复核管理权限、操作审计、旧配置兼容、规则持久化及 WS 拒绝归因，未发现剩余发布阻断。
+
+| 命令 / 检查 | 最终本地结果 |
+| --- | --- |
+| `go test -p 2 ./...` | 全包通过 |
+| `go test -p 2 -tags=unit ./...` | 全包通过，包含 API 契约 |
+| `golangci-lint run --concurrency 2 --timeout=30m ./...` | 官方 2.14.0，全量 0 issues |
+| `go test -race ./internal/requestaudit` | 通过 |
+| `pnpm --dir frontend run typecheck` / `run lint:check` / `run build` | 通过 |
+| `pnpm --dir frontend run test:run --maxWorkers=2 --minWorkers=1` | 374 个文件、3023 项通过 |
+| `go test -p 2 -tags embed ./internal/web` | 最终管理端构建后通过 |
+| 改动 Go 文件 `gofmt -l` / `git diff --check` | 格式和空白检查通过 |
+
+本机真实数据库集成仍受 Windows Docker 环境限制，不计为通过。发布顺序为推送 `feat/my-sub`，核对同一提交完整 CI 的 Integration tests 实际成功及 Security Scan 全部通过，再单独推送 annotated Tag；不直接部署生产。提交排除构建产物、截图、本地配置和数据文件。
+
+部署需执行迁移 247 并更新内嵌前端，设备封禁默认关闭。先验证健康接口及普通 HTTP/SSE/WS 请求，再以隔离测试 Key 验证 `/api/v1/admin/device-bans/*` 的创建、查询、解封和到期。新增索引可能阻塞审计写入，应在低峰更新并观察丢弃计数。启用后已有 WS 连接应重连；只在握手或首帧发送设备标识的旧连接无法从后续无标识消息补齐设备身份。

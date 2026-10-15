@@ -84,6 +84,12 @@ func (i *Ingress) Capture() *Capture {
 	return i.capture
 }
 
+// DeviceTrackingEnabled avoids parsing unused device metadata when both capture
+// and device policy are disabled. Existing bound identities remain unchanged.
+func (i *Ingress) DeviceTrackingEnabled() bool {
+	return i != nil && (i.capture != nil || i.manager != nil && i.manager.DeviceBanEnabled())
+}
+
 func (i *Ingress) Identity() Identity {
 	if i == nil {
 		return Identity{}
@@ -150,6 +156,40 @@ func (i *Ingress) CheckBan(ctx context.Context) (*SessionBan, error) {
 		return nil, nil
 	}
 	return i.manager.CheckBan(ctx, id.APIKeyID, id.SessionID)
+}
+
+// SetDevice preserves the first valid inbound identity, before upstream rewrites.
+// A missing or invalid header can still be completed from the original body.
+func (i *Ingress) SetDevice(deviceType, deviceID, source, resolution string) bool {
+	if i == nil || deviceID == "" && resolution == "" {
+		return false
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.finished || ValidDeviceIdentity(i.id.DeviceType, i.id.DeviceID) {
+		return false
+	}
+	if !ValidDeviceIdentity(deviceType, deviceID) {
+		deviceID = ""
+		if deviceType != DeviceTypeClaude && deviceType != DeviceTypeCodex {
+			deviceType = ""
+		}
+	}
+	i.id.DeviceType, i.id.DeviceID = deviceType, deviceID
+	i.id.DeviceSource, i.id.DeviceResolution = safeSummaryText(source), safeSummaryText(resolution)
+	i.capture.Bind(i.id)
+	return true
+}
+
+func (i *Ingress) CheckDeviceBan(ctx context.Context) (*DeviceBan, error) {
+	if i == nil || i.manager == nil || !i.manager.DeviceBanEnabled() {
+		return nil, nil
+	}
+	id := i.Identity()
+	if id.APIKeyID <= 0 {
+		return nil, nil
+	}
+	return i.manager.CheckDeviceBan(ctx, id.DeviceType, id.DeviceID)
 }
 
 // RecordMessage captures one client-to-server WS frame without retaining a

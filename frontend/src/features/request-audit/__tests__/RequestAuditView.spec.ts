@@ -5,7 +5,7 @@ import RequestAuditPlatform from '../RequestAuditPlatform.vue'
 import RequestAuditGroupFilter from '../RequestAuditGroupFilter.vue'
 import RequestAuditUserFilter from '../RequestAuditUserFilter.vue'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(), getGroups: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), listDeviceBans: vi.fn(), getDeviceBan: vi.fn(), createDeviceBan: vi.fn(), revokeDeviceBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(), getGroups: vi.fn() }))
 vi.mock('../api', () => ({ default: mocks }))
 vi.mock('@/api/admin/groups', () => ({ default: { getAllIncludingInactive: mocks.getGroups }, getAllIncludingInactive: mocks.getGroups }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
@@ -13,6 +13,8 @@ vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n
 
 const record = { id: 'audit-one', received_at: '2026-10-14T00:00:00Z', kind: 'http_request', api_key_id: 12, user_id: 3, user_username: 'alice', user_email: 'alice@example.com', api_key_name: 'Production assistant', group_id: 7, group_name: 'Claude Pro', group_platform: 'anthropic', session_id: 'session-1', method: 'POST', route_pattern: '/v1/messages', capture_state: 'complete' }
 const activeBan = { id: 'ban-one', api_key_id: 12, session_id: 'session-1', source_audit_id: record.id, public_reason: 'Reason', created_at: '2026-10-14T00:00:00Z' }
+const deviceRecord = { ...record, device_type: 'codex', device_id: 'installation-one', device_source: 'x-codex-turn-metadata.installation_id', device_resolution: 'resolved' }
+const deviceBan = { id: 'device-ban-one', device_type: 'codex', device_id: deviceRecord.device_id, device_source: deviceRecord.device_source, source_audit_id: record.id, public_reason: 'Reason', created_at: '2026-10-14T00:00:00Z' }
 function createView(stubGroupFilter = true) {
   return mount(RequestAuditView, { global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' },
@@ -44,12 +46,13 @@ async function createUncertainBan(hasBanID: boolean) {
 describe('RequestAuditView', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset())
-    mocks.getConfig.mockResolvedValue({ enabled: true, retention_days: 3, session_ban_enabled: false, version: 2 })
+    mocks.getConfig.mockResolvedValue({ enabled: true, retention_days: 3, session_ban_enabled: false, device_ban_enabled: false, version: 2 })
     mocks.status.mockResolvedValue({ instance_id: 'instance-one', running: true, config_known: true, config: { enabled: true }, dropped_requests: 0, dropped_events: 0, write_failures: 0, ban_check_failures: 0 })
     mocks.list.mockResolvedValue({ items: [record], has_more: false, next_cursor: '' })
     mocks.get.mockResolvedValue(record)
     mocks.getGroups.mockResolvedValue([{ id: 7, name: 'Claude Pro' }])
     mocks.listBans.mockResolvedValue({ items: [], has_more: false, next_cursor: '' })
+    mocks.listDeviceBans.mockResolvedValue({ items: [], has_more: false, next_cursor: '' })
     mocks.payload.mockResolvedValue({ content: '<script>alert(1)</script>', encoding: 'utf8', offset: 0, returned_bytes: 25, part_bytes: 25, has_more: false, capture_state: 'complete', redacted: false })
   })
 
@@ -77,13 +80,13 @@ describe('RequestAuditView', () => {
     expect(wrapper.find('[data-test="load-payload"]').exists()).toBe(false)
   })
 
-  it('shows user names, email, key names and the group platform in the list and detail', async () => {
+  it('shows user names, email, key names and group names in the list, with the platform in detail', async () => {
     const wrapper = createView()
     await flushPromises()
     const row = wrapper.get('[data-test="record-audit-one"]')
-    for (const value of ['alice', 'alice@example.com', 'Production assistant', 'Anthropic-Claude Pro']) expect(row.text()).toContain(value)
-    expect(row.getComponent(RequestAuditPlatform).text()).toBe('Anthropic-Claude Pro')
-    expect(row.getComponent(RequestAuditPlatform).attributes('title')).toContain('Anthropic-Claude Pro')
+    for (const value of ['alice', 'alice@example.com', 'Production assistant', 'Claude Pro']) expect(row.text()).toContain(value)
+    expect(row.getComponent(RequestAuditPlatform).text()).toBe('Claude Pro')
+    expect(row.getComponent(RequestAuditPlatform).attributes('title')).toContain('Claude Pro')
     await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
     await flushPromises()
     const summary = wrapper.get('[data-test="request-summary"]').text()
@@ -97,7 +100,7 @@ describe('RequestAuditView', () => {
     await flushPromises()
     const row = wrapper.get('[data-test="record-audit-one"]').text()
     expect(row).toContain('alice@example.com')
-    expect(row).toContain('admin.requestAudit.multiPlatform-Claude Pro')
+    expect(row).toContain('Claude Pro')
     expect(row).not.toContain('Anthropic')
   })
 
@@ -108,7 +111,7 @@ describe('RequestAuditView', () => {
     const row = wrapper.get('[data-test="record-audit-one"]').text()
     expect(row).toContain('admin.requestAudit.userFallback')
     expect(row).toContain('admin.requestAudit.keyFallback')
-    expect(row).toContain('admin.requestAudit.unknown-admin.requestAudit.groupFallback')
+    expect(row).toContain('admin.requestAudit.groupFallback')
   })
 
   it.each(['http_request', 'websocket_handshake', 'websocket_message'])('submits the stored request kind %s', async (kind) => {
@@ -171,10 +174,10 @@ describe('RequestAuditView', () => {
     await wrapper.get('input[min="1"][max="30"]').setValue('1')
     await wrapper.get('[data-test="save-config"]').trigger('submit')
     expect(mocks.updateConfig).not.toHaveBeenCalled()
-    mocks.updateConfig.mockResolvedValue({ enabled: true, retention_days: 1, session_ban_enabled: false, version: 3 })
+    mocks.updateConfig.mockResolvedValue({ enabled: true, retention_days: 1, session_ban_enabled: false, device_ban_enabled: false, version: 3 })
     await wrapper.get('[data-test="confirm"]').trigger('click')
     await flushPromises()
-    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ retention_days: 1, session_ban_enabled: false, version: 2 }))
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ retention_days: 1, session_ban_enabled: false, device_ban_enabled: false, version: 2 }))
   })
 
   it('never marks an uncertain ban write as successful and offers verification', async () => {
@@ -190,6 +193,200 @@ describe('RequestAuditView', () => {
     expect(mocks.showSuccess).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('admin.requestAudit.resultUnknown')
     expect(wrapper.get('[data-test="create-ban"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('shows the original device identity and finds its requests across keys and users', async () => {
+    mocks.get.mockResolvedValue({ ...deviceRecord, device_id: ' raw-device ' })
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="device-identity"]').text()).toContain('raw-device')
+    expect(wrapper.get('[data-test="device-identity"]').text()).toContain(deviceRecord.device_source)
+    expect(mocks.listDeviceBans).toHaveBeenCalledWith({ device_type: 'codex', device_id: ' raw-device ', state: 'active', limit: 1 })
+    await wrapper.get('[data-test="same-device"]').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ device_type: 'codex', device_id: ' raw-device ', api_key_id: undefined, user_id: undefined, session_id: undefined }))
+    await wrapper.get('[data-test="reset-filters"]').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ device_type: undefined, device_id: undefined }))
+    wrapper.unmount()
+  })
+
+  it('creates a device ban from its source audit without requiring a key or session', async () => {
+    mocks.get.mockResolvedValue({ ...deviceRecord, api_key_id: null, session_id: null })
+    mocks.createDeviceBan.mockResolvedValue(deviceBan)
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="open-ban"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="open-device-ban"]').trigger('click')
+    expect(wrapper.text()).toContain('admin.requestAudit.deviceBanPaused')
+    await wrapper.get('textarea[maxlength="500"]').setValue('Reason')
+    await wrapper.get('textarea[maxlength="4000"]').setValue('Private note')
+    await wrapper.get('#request-audit-ban input[type="datetime-local"]').setValue('2099-01-01T12:00')
+    await wrapper.get('#request-audit-ban').trigger('submit')
+    await flushPromises()
+    expect(mocks.createDeviceBan).toHaveBeenCalledWith({ source_audit_id: record.id, public_reason: 'Reason', internal_note: 'Private note', expires_at: new Date('2099-01-01T12:00').toISOString() })
+    expect(mocks.createBan).not.toHaveBeenCalled()
+    expect(mocks.showSuccess).toHaveBeenCalledWith('admin.requestAudit.deviceBanned')
+    expect(wrapper.get('[data-test="open-device-ban"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('keeps device enforcement independent when saving the audit settings', async () => {
+    mocks.updateConfig.mockResolvedValue({ enabled: true, retention_days: 3, session_ban_enabled: false, device_ban_enabled: true, version: 3 })
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-settings"]').trigger('click')
+    await wrapper.get('[data-test="device-ban-toggle"]').setValue(true)
+    await wrapper.get('[data-test="save-config"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ device_ban_enabled: true, session_ban_enabled: false, version: 2 }))
+    wrapper.unmount()
+  })
+
+  it('filters device rules by exact original identity and revokes them through the device route', async () => {
+    mocks.listDeviceBans.mockResolvedValue({ items: [deviceBan], has_more: false, next_cursor: '' })
+    mocks.revokeDeviceBan.mockResolvedValue({ ...deviceBan, revoked_at: '2026-10-15T00:00:00Z' })
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-deviceBans"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('#request-audit-ban-device-type').trigger('click')
+    await wrapper.findAll('[role="option"]').find(option => option.text() === 'admin.requestAudit.deviceTypes.codex')!.trigger('click')
+    await wrapper.get('[data-test="ban-device-id-filter"]').setValue(' raw-device ')
+    await wrapper.get('[data-test="search-bans"]').trigger('click')
+    await flushPromises()
+    expect(mocks.listDeviceBans).toHaveBeenLastCalledWith(expect.objectContaining({ device_type: 'codex', device_id: ' raw-device ' }))
+    expect(wrapper.text()).toContain(deviceRecord.device_id)
+    await wrapper.findAll('button').find(button => button.text() === 'admin.requestAudit.revoke')!.trigger('click')
+    await wrapper.get('[data-test="confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocks.revokeDeviceBan).toHaveBeenCalledWith(deviceBan.id)
+    expect(mocks.revokeBan).not.toHaveBeenCalled()
+    expect(mocks.showSuccess).toHaveBeenCalledWith('admin.requestAudit.deviceRevoked')
+    wrapper.unmount()
+  })
+
+  it('shows the cross-user device scope only on the device ban list', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-deviceBans"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.requestAudit.deviceBanScope')
+    expect(wrapper.text()).not.toContain('admin.requestAudit.banScope')
+    await wrapper.get('[data-test="tab-bans"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.requestAudit.banScope')
+    expect(wrapper.text()).not.toContain('admin.requestAudit.deviceBanScope')
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('keeps device pagination on its applied filters after editing the draft (failed new query: %s)', async (submitFailedQuery) => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-deviceBans"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('#request-audit-ban-device-type').trigger('click')
+    await wrapper.findAll('[role="option"]').find(option => option.text() === 'admin.requestAudit.deviceTypes.codex')!.trigger('click')
+    await wrapper.get('[data-test="ban-device-id-filter"]').setValue('device-A')
+    mocks.listDeviceBans.mockResolvedValueOnce({ items: [{ ...deviceBan, device_id: 'device-A' }], has_more: true, next_cursor: 'device-A-next' })
+    await wrapper.get('[data-test="search-bans"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('#request-audit-ban-device-type').trigger('click')
+    await wrapper.findAll('[role="option"]').find(option => option.text() === 'admin.requestAudit.deviceTypes.claude')!.trigger('click')
+    await wrapper.get('[data-test="ban-device-id-filter"]').setValue('device-B')
+    if (submitFailedQuery) {
+      mocks.listDeviceBans.mockRejectedValueOnce({ reason: 'AUDIT_STORAGE_UNAVAILABLE' })
+      await wrapper.get('[data-test="search-bans"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('device-A')
+    }
+    await wrapper.findAll('button').find(button => button.text() === 'admin.requestAudit.more')!.trigger('click')
+    await flushPromises()
+    expect(mocks.listDeviceBans).toHaveBeenLastCalledWith(expect.objectContaining({ device_type: 'codex', device_id: 'device-A', cursor: 'device-A-next' }))
+    expect(wrapper.get<HTMLInputElement>('[data-test="ban-device-id-filter"]').element.value).toBe('device-B')
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('confirms an uncertain device write before allowing retry (ban ID: %s)', async (hasBanID) => {
+    mocks.get.mockResolvedValue(deviceRecord)
+    mocks.createDeviceBan.mockRejectedValueOnce(hasBanID
+      ? { reason: 'BAN_RESULT_UNKNOWN', metadata: { ban_id: deviceBan.id } }
+      : { status: 0, code: 'ERR_NETWORK' })
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="open-device-ban"]').trigger('click')
+    await wrapper.get('textarea[maxlength="500"]').setValue('Reason')
+    await wrapper.get('textarea[maxlength="4000"]').setValue('Keep this note')
+    await wrapper.get('#request-audit-ban').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="create-ban"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('#request-audit-ban').trigger('submit')
+    expect(mocks.createDeviceBan).toHaveBeenCalledOnce()
+    if (hasBanID) mocks.getDeviceBan.mockRejectedValueOnce({ status: 404, reason: 'BAN_NOT_FOUND' })
+    await wrapper.get('[data-test="check-ban-result"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="create-ban"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get<HTMLTextAreaElement>('textarea[maxlength="4000"]').element.value).toBe('Keep this note')
+    if (hasBanID) expect(mocks.getDeviceBan).toHaveBeenCalledWith(deviceBan.id)
+    else expect(mocks.listDeviceBans).toHaveBeenLastCalledWith({ source_audit_id: record.id, state: 'active', limit: 1 })
+    mocks.createDeviceBan.mockResolvedValueOnce(deviceBan)
+    await wrapper.get('#request-audit-ban').trigger('submit')
+    await flushPromises()
+    expect(mocks.showSuccess).toHaveBeenCalledWith('admin.requestAudit.deviceBanned')
+    expect(mocks.createDeviceBan.mock.calls[1][0]).toEqual(mocks.createDeviceBan.mock.calls[0][0])
+    wrapper.unmount()
+  })
+
+  it('confirms a committed device ban after a timeout without submitting twice', async () => {
+    mocks.get.mockResolvedValue(deviceRecord)
+    mocks.createDeviceBan.mockRejectedValueOnce({ reason: 'BAN_RESULT_UNKNOWN', metadata: { ban_id: deviceBan.id } })
+    mocks.getDeviceBan.mockResolvedValueOnce(deviceBan)
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="open-device-ban"]').trigger('click')
+    await wrapper.get('textarea[maxlength="500"]').setValue('Reason')
+    await wrapper.get('#request-audit-ban').trigger('submit')
+    await flushPromises()
+    await wrapper.get('[data-test="check-ban-result"]').trigger('click')
+    await flushPromises()
+    expect(mocks.getDeviceBan).toHaveBeenCalledWith(deviceBan.id)
+    expect(mocks.createDeviceBan).toHaveBeenCalledOnce()
+    expect(mocks.showSuccess).toHaveBeenCalledWith('admin.requestAudit.deviceBanned')
+    expect(wrapper.find('#request-audit-ban').exists()).toBe(false)
+    expect(wrapper.get('[data-test="open-device-ban"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('loads active device rules even if the independent session rule query fails', async () => {
+    mocks.get.mockResolvedValue(deviceRecord)
+    mocks.listBans.mockRejectedValueOnce({ reason: 'AUDIT_STORAGE_UNAVAILABLE' })
+    mocks.listDeviceBans.mockResolvedValueOnce({ items: [deviceBan], has_more: false, next_cursor: '' })
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="open-device-ban"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="revoke-detail-device-ban"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('disables device actions when the record has no usable device identity', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="open-device-ban"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="same-device"]').attributes('disabled')).toBeDefined()
+    expect(mocks.listDeviceBans).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('shows degraded instance health beside the request list', async () => {

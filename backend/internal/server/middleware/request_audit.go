@@ -52,6 +52,7 @@ type requestAuditState struct {
 	ingress           *requestaudit.Ingress
 	started           time.Time
 	checkedSession    string
+	checkedDevice     string
 	pendingSession    string
 	pendingSource     string
 	pendingResolution string
@@ -192,6 +193,13 @@ func requestAuditObserveBody(c *gin.Context, state *requestAuditState, body []by
 		return nil
 	}
 	ingress := state.ingress
+	if ingress.DeviceTrackingEnabled() && ingress.Identity().DeviceID == "" {
+		isClaude := strings.Contains(c.Request.URL.Path, "/messages")
+		if isClaude || strings.Contains(c.Request.URL.Path, "/responses") {
+			deviceType, deviceID, source, resolution := service.RequestAuditBodyDevice(body, isClaude, maxNormalizedBytes)
+			ingress.SetDevice(deviceType, deviceID, source, resolution)
+		}
+	}
 	model := gjson.GetBytes(body, "model")
 	if model.Type != gjson.String {
 		model = gjson.GetBytes(body, "session.model")
@@ -237,7 +245,16 @@ func (state *requestAuditState) bindPendingSession() {
 }
 
 func requestAuditCheckHTTPBan(c *gin.Context, state *requestAuditState, protocol string) bool {
-	session := state.ingress.Identity().SessionID
+	identity := state.ingress.Identity()
+	device := identity.DeviceType + ":" + identity.DeviceID
+	if identity.DeviceID != "" && state.checkedDevice != device {
+		state.checkedDevice = device
+		if ban, err := state.ingress.CheckDeviceBan(c.Request.Context()); err == nil && ban != nil {
+			writeRequestAuditPolicyBan(c, protocol, "device_banned", ban.PublicReason)
+			return true
+		}
+	}
+	session := identity.SessionID
 	if session == "" || state.checkedSession == session {
 		return false
 	}
@@ -262,6 +279,12 @@ func bindRequestAuditIdentity(c *gin.Context, state *requestAuditState, key *ser
 		groupID = *key.GroupID
 	}
 	ingress.BindIdentity(key.UserID, key.ID, groupID)
+	// Messages identifies Claude clients from metadata.user_id. An unrelated
+	// Codex header must not suppress that protocol's original device identity.
+	if ingress.DeviceTrackingEnabled() && !strings.Contains(c.Request.URL.Path, "/messages") {
+		deviceType, deviceID, deviceSource, deviceResolution := service.RequestAuditHeaderDevice(c.Request.Header)
+		ingress.SetDevice(deviceType, deviceID, deviceSource, deviceResolution)
+	}
 	if c.Request.Method == http.MethodGet {
 		ingress.SetModel(strings.TrimSpace(c.Query("model")))
 	}
@@ -278,12 +301,19 @@ func writeRequestAuditBan(c *gin.Context, protocol string, ban *requestaudit.Ses
 	if ban != nil && strings.TrimSpace(ban.PublicReason) != "" {
 		reason = strings.TrimSpace(ban.PublicReason)
 	}
+	writeRequestAuditPolicyBan(c, protocol, "session_banned", reason)
+}
+
+func writeRequestAuditPolicyBan(c *gin.Context, protocol, code, reason string) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "device blocked"
+	}
 	if strings.HasPrefix(protocol, "anthropic") || strings.Contains(c.Request.URL.Path, "/messages") {
 		c.JSON(http.StatusForbidden, gin.H{"type": "error", "error": gin.H{"type": "permission_error", "message": reason}})
 	} else if strings.HasPrefix(protocol, "google") || strings.HasPrefix(c.Request.URL.Path, "/v1beta") {
 		GoogleErrorWriter(c, http.StatusForbidden, reason)
 	} else {
-		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "permission_error", "code": "session_banned", "message": reason}})
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "permission_error", "code": code, "message": reason}})
 	}
 	c.Abort()
 }

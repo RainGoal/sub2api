@@ -9,9 +9,9 @@ describe('Request audit API', () => {
 
   it('sends only editable config and its concurrency version', async () => {
     client.put.mockResolvedValue({ data: { version: 5 } })
-    await api.updateConfig({ enabled: false, retention_days: 3, session_ban_enabled: true, version: 4, updated_by: 999 })
+    await api.updateConfig({ enabled: false, retention_days: 3, session_ban_enabled: true, device_ban_enabled: false, version: 4, updated_by: 999 })
     expect(client.put).toHaveBeenCalledWith('/admin/request-audits/config', {
-      enabled: false, retention_days: 3, session_ban_enabled: true, expected_version: 4,
+      enabled: false, retention_days: 3, session_ban_enabled: true, device_ban_enabled: false, expected_version: 4,
     })
   })
 
@@ -50,5 +50,19 @@ describe('Request audit API', () => {
     expect(client.get).toHaveBeenCalledWith('/admin/session-bans/ban-id')
     await api.listBans({ source_audit_id: 'audit-id' })
     expect(client.get).toHaveBeenCalledWith('/admin/session-bans', { params: { source_audit_id: 'audit-id' } })
+  })
+
+  it('supports device ban creation, exact identity filtering, result checks and revocation', async () => {
+    const input = { source_audit_id: 'audit-id', public_reason: 'Reason', internal_note: 'Note', expires_at: null }
+    client.post.mockResolvedValue({ data: { id: 'device/ban' } })
+    client.get.mockResolvedValue({ data: { id: 'device/ban' } })
+    await api.createDeviceBan(input)
+    expect(client.post).toHaveBeenCalledWith('/admin/device-bans', input)
+    await api.listDeviceBans({ device_type: 'codex', device_id: ' raw-id ', source_audit_id: 'audit-id', state: 'active' })
+    expect(client.get).toHaveBeenCalledWith('/admin/device-bans', { params: { device_type: 'codex', device_id: ' raw-id ', source_audit_id: 'audit-id', state: 'active' } })
+    await api.getDeviceBan('device/ban')
+    expect(client.get).toHaveBeenCalledWith('/admin/device-bans/device%2Fban')
+    await api.revokeDeviceBan('device/ban')
+    expect(client.post).toHaveBeenCalledWith('/admin/device-bans/device%2Fban/revoke', {})
   })
 })
