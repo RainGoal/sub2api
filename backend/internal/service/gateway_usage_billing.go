@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/requestaudit"
 )
 
 func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
@@ -631,6 +632,9 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	if repo == nil || usageLog == nil {
 		return
 	}
+	// Correlate the final usage ID with the captured ingress without changing
+	// billing IDs or waiting for audit storage. WS IDs identify this connection.
+	requestaudit.LinkUsageRequest(ctx, usageLog.RequestID, usageLog.APIKeyID)
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 

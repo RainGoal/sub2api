@@ -53,6 +53,8 @@ ON CONFLICT(id) DO NOTHING`,
 			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model) WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($9::int * INTERVAL '1 day')`, e.id, e.identity.UserID, e.identity.APIKeyID, e.identity.GroupID, e.identity.SessionID, e.identity.SessionSource, e.identity.SessionResolution, e.identity.Model, retention)
 		case "chunk":
 			err = persistChunk(ctx, tx, e, retention)
+		case "usage_link":
+			err = persistUsageLink(ctx, tx, e, retention)
 		case "part_end":
 			if e.manifest != nil {
 				_, err = tx.ExecContext(ctx, `UPDATE request_audits SET terminal_manifest=jsonb_set(terminal_manifest,ARRAY[$2::text],$3::jsonb),updated_at=NOW(),last_event_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($4::int * INTERVAL '1 day')`, e.id, e.part, string(jsonBytes(e.manifest)), retention)
@@ -210,6 +212,9 @@ LEFT JOIN groups g ON g.id=r.group_id`
 }
 
 func (m *Manager) List(ctx context.Context, f ListFilter) (ListResult, error) {
+	if f.RequestID != "" && !ValidRequestID(f.RequestID) {
+		return ListResult{}, failure(400, "INVALID_ARGUMENT", "Invalid request_id")
+	}
 	limit := f.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 50
@@ -230,6 +235,18 @@ func (m *Manager) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	}
 	if f.APIKeyID > 0 {
 		add("api_key_id = $%d", f.APIKeyID)
+	}
+	if f.GroupID > 0 {
+		add("group_id = $%d", f.GroupID)
+	}
+	if f.RequestID != "" {
+		// Ordinary HTTP usage IDs add exactly one client: prefix. Other final
+		// IDs (including WS response IDs) use explicit entry associations.
+		// UNION keeps both lookups on equality indexes instead of an OR scan.
+		args = append(args, strings.TrimPrefix(f.RequestID, "client:"), f.RequestID)
+		where = append(where, `kind IN ('http_request','websocket_handshake')`, fmt.Sprintf(
+			`id IN (SELECT id FROM request_audits WHERE `+visibleRecordSQL+` AND kind IN ('http_request','websocket_handshake') AND client_request_id=$%d
+UNION SELECT audit_id FROM request_audit_usage_links WHERE usage_request_id=$%d)`, len(args)-1, len(args)))
 	}
 	if f.SessionID != "" {
 		add("session_id = $%d", f.SessionID)

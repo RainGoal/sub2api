@@ -2,19 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import RequestAuditView from '../RequestAuditView.vue'
 import RequestAuditPlatform from '../RequestAuditPlatform.vue'
+import RequestAuditGroupFilter from '../RequestAuditGroupFilter.vue'
 import RequestAuditUserFilter from '../RequestAuditUserFilter.vue'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(), getGroups: vi.fn() }))
 vi.mock('../api', () => ({ default: mocks }))
+vi.mock('@/api/admin/groups', () => ({ default: { getAllIncludingInactive: mocks.getGroups }, getAllIncludingInactive: mocks.getGroups }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n: () => ({ locale: { value: 'en' }, t: (key: string) => key }) }))
 
 const record = { id: 'audit-one', received_at: '2026-10-14T00:00:00Z', kind: 'http_request', api_key_id: 12, user_id: 3, user_username: 'alice', user_email: 'alice@example.com', api_key_name: 'Production assistant', group_id: 7, group_name: 'Claude Pro', group_platform: 'anthropic', session_id: 'session-1', method: 'POST', route_pattern: '/v1/messages', capture_state: 'complete' }
 const activeBan = { id: 'ban-one', api_key_id: 12, session_id: 'session-1', source_audit_id: record.id, public_reason: 'Reason', created_at: '2026-10-14T00:00:00Z' }
-function createView() {
+function createView(stubGroupFilter = true) {
   return mount(RequestAuditView, { global: { stubs: {
     AppLayout: { template: '<div><slot /></div>' },
     RequestAuditUserFilter: true,
+    RequestAuditGroupFilter: stubGroupFilter,
+    Teleport: true,
     BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
     ConfirmDialog: { props: ['show'], emits: ['confirm'], template: '<div v-if="show"><button data-test="confirm" @click="$emit(\'confirm\')">confirm</button></div>' },
   } } })
@@ -44,6 +48,7 @@ describe('RequestAuditView', () => {
     mocks.status.mockResolvedValue({ instance_id: 'instance-one', running: true, config_known: true, config: { enabled: true }, dropped_requests: 0, dropped_events: 0, write_failures: 0, ban_check_failures: 0 })
     mocks.list.mockResolvedValue({ items: [record], has_more: false, next_cursor: '' })
     mocks.get.mockResolvedValue(record)
+    mocks.getGroups.mockResolvedValue([{ id: 7, name: 'Claude Pro' }])
     mocks.listBans.mockResolvedValue({ items: [], has_more: false, next_cursor: '' })
     mocks.payload.mockResolvedValue({ content: '<script>alert(1)</script>', encoding: 'utf8', offset: 0, returned_bytes: 25, part_bytes: 25, has_more: false, capture_state: 'complete', redacted: false })
   })
@@ -109,10 +114,54 @@ describe('RequestAuditView', () => {
   it.each(['http_request', 'websocket_handshake', 'websocket_message'])('submits the stored request kind %s', async (kind) => {
     const wrapper = createView()
     await flushPromises()
-    await wrapper.get('select').setValue(kind)
+    await wrapper.get('#request-audit-kind').trigger('click')
+    await wrapper.findAll('[role="option"]').find(option => option.text() === `admin.requestAudit.kinds.${kind}`)!.trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind }))
+    await wrapper.get('[data-test="reset-filters"]').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind: undefined }))
+    expect(wrapper.get('#request-audit-kind').text()).toBe('admin.requestAudit.all')
+    wrapper.unmount()
+  })
+
+  it('selects integrity with the keyboard, closes on Escape, and resets to all', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('#request-audit-state').trigger('keydown', { key: 'ArrowDown' })
+    await wrapper.get('[role="listbox"]').trigger('keydown', { key: 'ArrowDown' })
+    await wrapper.get('[role="listbox"]').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.get('#request-audit-state').text()).toBe('admin.requestAudit.states.complete')
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ capture_state: 'complete' }))
+    await wrapper.get('#request-audit-state').trigger('click')
+    await wrapper.get('[role="listbox"]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.get('#request-audit-state').attributes('aria-expanded')).toBe('false')
+    await wrapper.get('[data-test="reset-filters"]').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ capture_state: undefined }))
+    expect(wrapper.get('#request-audit-state').text()).toBe('admin.requestAudit.all')
+    wrapper.unmount()
+  })
+
+  it('submits each session ban state and keeps the all option unfiltered', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-bans"]').trigger('click')
+    await flushPromises()
+    for (const state of ['active', 'expired', 'revoked', '']) {
+      await wrapper.get('#request-audit-ban-state').trigger('click')
+      const label = state ? `admin.requestAudit.banStates.${state}` : 'admin.requestAudit.all'
+      await wrapper.findAll('[role="option"]').find(option => option.text() === label)!.trigger('click')
+      await wrapper.get('[data-test="search-bans"]').trigger('click')
+      await flushPromises()
+      expect(mocks.listBans).toHaveBeenLastCalledWith(expect.objectContaining({ state: state || undefined }))
+    }
+    expect(wrapper.get('#request-audit-ban-state').attributes('aria-label')).toBe('admin.requestAudit.banState')
+    wrapper.unmount()
   })
 
   it('requires confirmation before shortening retention and preserves separate ban toggle', async () => {
@@ -184,10 +233,51 @@ describe('RequestAuditView', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 3 }))
-    await wrapper.get('form button[type="button"]').trigger('click')
+    await wrapper.get('[data-test="reset-filters"]').trigger('click')
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: undefined }))
     expect(wrapper.getComponent(RequestAuditUserFilter).props('modelValue')).toBe('')
+  })
+
+  it('submits the selected group and exact request ID, preserves applied filters on pagination, and resets both', async () => {
+    mocks.list.mockResolvedValue({ items: [record], has_more: true, next_cursor: 'next-page' })
+    const wrapper = createView()
+    await flushPromises()
+    wrapper.getComponent(RequestAuditGroupFilter).vm.$emit('update:modelValue', '7')
+    wrapper.getComponent(RequestAuditGroupFilter).vm.$emit('update:label', 'Claude Pro')
+    await wrapper.get('[data-test="request-id-filter"]').setValue(' usage-req-123 ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 7, request_id: 'usage-req-123', cursor: undefined }))
+    wrapper.getComponent(RequestAuditGroupFilter).vm.$emit('update:modelValue', '8')
+    await wrapper.get('[data-test="request-id-filter"]').setValue('not-applied')
+    await wrapper.findAll('button').find(button => button.text() === 'admin.requestAudit.next')!.trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 7, request_id: 'usage-req-123', cursor: 'next-page' }))
+    await wrapper.get('[data-test="reset-filters"]').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: undefined, request_id: undefined, cursor: undefined }))
+    expect(wrapper.getComponent(RequestAuditGroupFilter).props()).toMatchObject({ modelValue: '', label: '' })
+    expect(wrapper.get<HTMLInputElement>('[data-test="request-id-filter"]').element.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('keeps other filters usable while group loading fails and lets the group list be retried', async () => {
+    mocks.getGroups.mockRejectedValueOnce(new Error('unavailable'))
+    const wrapper = createView(false)
+    await flushPromises()
+    expect(wrapper.find('[data-test="detail-audit-one"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="retry-groups"]').exists()).toBe(true)
+    await wrapper.get('[data-test="http-status-filter"]').setValue('403')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: undefined, http_status: 403 }))
+    await wrapper.get('[data-test="retry-groups"]').trigger('click')
+    await flushPromises()
+    expect(mocks.getGroups).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="retry-groups"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="detail-audit-one"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it.each(['settings', 'bans'])('preserves the selected user when returning from %s and clears its label on reset', async (tab) => {
@@ -207,7 +297,7 @@ describe('RequestAuditView', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 3 }))
-    await wrapper.get('form button[type="button"]').trigger('click')
+    await wrapper.get('[data-test="reset-filters"]').trigger('click')
     await flushPromises()
     expect(wrapper.getComponent(RequestAuditUserFilter).props()).toMatchObject({ modelValue: '', label: '' })
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: undefined }))

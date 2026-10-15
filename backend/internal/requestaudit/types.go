@@ -126,6 +126,8 @@ type ListFilter struct {
 	To           time.Time
 	UserID       int64
 	APIKeyID     int64
+	GroupID      int64
+	RequestID    string
 	SessionID    string
 	Kind         string
 	CaptureState string

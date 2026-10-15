@@ -53,6 +53,8 @@ export interface RequestAuditFilters {
   to?: string
   user_id?: number
   api_key_id?: number
+  group_id?: number
+  request_id?: string
   session_id?: string
   kind?: string
   capture_state?: string

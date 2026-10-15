@@ -6,6 +6,10 @@
 
 用户筛选复用已有管理员用户搜索，输入用户名或邮箱后选择匹配用户（含软删除用户），再按其 ID 精确查询。会话 ID 可单独筛选并返回跨 API Key 的匹配记录，填写 API Key ID 可以缩小范围。客户端提供的会话 ID 不保证跨 Key 全局唯一，因此会话封禁仍严格作用于「API Key + 会话 ID」。
 
+所属分组可按名称搜索并选择，包含已停用分组，提交 `group_id` 精确筛选。「请求 ID」可粘贴使用记录中的系统请求 ID；普通 HTTP 的 `client:<ID>` 及裸入站关联 ID 兼容已有审计数据。`v0.1.54` 开始为有采集上下文的网关用量记录保存最终请求 ID 到审计入口的明确关联，Responses WebSocket 返回所属连接的握手记录，有会话 ID 时可再通过详情的「会话请求」查看该会话；不把连接内所有帧冒充某一用量轮次。视频轮询触发的用量结算关联到该次轮询 HTTP 请求。请求 ID 查询仅返回 HTTP 或 WebSocket 握手入口，且仍受时间、分组、用户、Key 和保留期限制。
+
+旧 WebSocket 响应 ID、Live 等未传递采集上下文的通道、独立后台任务及审计已过期/丢弃的请求没有可靠关联，不按时间或会话猜配，也不回填历史。关联通过原有审计队列异步写入，可能短暂延迟或随队列故障丢失，不改变计费 ID、金额、重试及业务准入；关联记录随审计入口级联清理。
+
 审计优先使用既有明确会话请求头（包括按目标平台识别的 Grok 会话头），再读取 `X-Codex-Turn-Metadata` JSON 中的 `session_id`。Responses 原始请求体还支持 `client_metadata.session_id` 和 `client_metadata.x-codex-turn-metadata` JSON 字符串中的 `session_id`；Messages 保留 Claude `metadata.user_id` 的会话解析。提取发生在入站协议/指纹改写之前，并用于 HTTP 与 WS 的会话封禁检查，不改变用量记录、调度或缓存规则。`thread_id`、`turn_id`、`window_id`、`prompt_cache_key` 和内容哈希不会被当作审计会话 ID。客户端没有提供有效的明确标识时仍显示「无会话 ID」。
 
 `v0.1.53` 修复了 Codex 元数据里已有 `session_id`、审计却漏取的情况；无需数据库迁移，只影响升级后的新请求，旧记录不会自动回填。
@@ -67,7 +71,7 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 
 | 方法 / 路径 | 输入和输出 |
 | --- | --- |
-| `GET /request-audits` | `from/to`（RFC3339）、`user_id`、`api_key_id`、`session_id`、`kind`、`capture_state`、`http_status`、`cursor`、`limit`；返回 `items/next_cursor/has_more`，单页最多 100 条；会话 ID 可独立筛选，API Key ID 可选 |
+| `GET /request-audits` | `from/to`（RFC3339）、`user_id`、`api_key_id`、`group_id`、`request_id`、`session_id`、`kind`、`capture_state`、`http_status`、`cursor`、`limit`；返回 `items/next_cursor/has_more`，单页最多 100 条；会话/请求 ID 可独立筛选，API Key ID 可选；请求 ID 最多 256 UTF-8 字节，拒绝控制字符，按精确值查询 |
 | `GET /request-audits/:id` | UUID；返回入口摘要、身份、结果、终结清单与完整性状态，不返回原文 |
 | `GET /request-audits/:id/payload` | `part=headers/body/trailers`；`mode=preview/raw`；`offset/limit`；不完整内容需 `allow_partial=true` |
 | `GET /request-audits/config` | 返回开关、保留天数、版本、更新时间和管理员 ID |
@@ -85,7 +89,7 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 ## 部署与回退
 
 1. 发布前完成后端全量、unit、lint、integration，前端 typecheck、test 和 build；真实 PostgreSQL/Redis 集成验证需 Docker。自动跳过不代表验证通过。
-2. 部署镜像包含迁移 `243_request_audit.sql`、`244_request_audit_cleanup_index.sql`、`245_request_audit_global_session_index.sql` 和新的内嵌管理端。244 为清理中的记录补充部分索引；清理分别查询删除中记录与新过期记录，避免每条记录重复全表扫描排序。245 为独立会话查询增加有序部分索引；索引构建期间会阻塞审计表写入，建议在低峰更新并观察写入失败/丢弃计数，大表需预留构建时间。沿用现有迁移机制执行，不修改历史业务数据；不要删除数据卷或直接覆盖线上 compose。
+2. 部署镜像包含迁移 `243_request_audit.sql`、`244_request_audit_cleanup_index.sql`、`245_request_audit_global_session_index.sql`、`246_request_audit_filter_indexes.sql` 和新的内嵌管理端。244 为清理中的记录补充部分索引；清理分别查询删除中记录与新过期记录，避免每条记录重复全表扫描排序。245 为独立会话查询增加有序部分索引；246 增加分组/入站请求 ID 查询索引与独立用量 ID 关联表，关联表带精确查询和级联删除索引。索引构建期间会阻塞审计表写入，建议在低峰更新并观察写入失败/丢弃计数，大表需预留构建时间。沿用现有迁移机制执行，不修改历史业务数据；不要删除数据卷或直接覆盖线上 compose。
 3. 确认 `/admin/request-audits` 页面、`/api/v1/admin/request-audits/*`、`/api/v1/admin/session-bans/*` 经 Nginx 正常转发，非管理员被拒绝。此次不新增 OAuth 或支付回调。
 4. 首次部署保持两个开关关闭，先验证健康接口与既有 HTTP/SSE/WS 行为。再启用采集，以真实 JSON、压缩体、multipart、大请求与 WS 消息核对原始字节和 headers；启用后重连已有 WS。
 5. 用隔离测试 Key 验证封禁原因、后续 HTTP/WS 请求拦截和解封；不要用正在服务的用户会话做破坏性验证。监测网关 p95/p99、吞吐、内存、数据库 I/O、WAL、丢弃和清理延迟，按实际流量确定资源预算。
@@ -197,3 +201,22 @@ WebSocket 消息保留握手入口快照。启用采集后，旧连接需要重�
 | `gofmt -l` / `git diff --check` / `git status --short` | 格式、空白检查通过；仅本轮源码、测试和文档，截图/构建产物未纳入提交 |
 
 本机无可用 Docker，本轮真实 PostgreSQL/Redis 集成测试由远端完整 CI 执行；必须等同一待发布提交的 CI 与 Security Scan 全部通过后再推 Tag。无需新增配置或迁移，部署后核对新请求的会话 ID 与分组标签，已有 WebSocket 连接需重连；历史记录不回填。
+
+## 分组与请求 ID 筛选验证（2026-10-15）
+
+`v0.1.54` 增加分组和使用记录请求 ID 查询，调整筛选区间距，并将类型、完整性、会话封禁状态统一为项目公共 Select。后端显式关联最终用量 ID 与采集入口，异步任务仅复制轻量关联标识，不保留原请求正文或上下文。独立审查覆盖关联队列、计费调用链、索引、分页、筛选重置及公共 Select 语义，未发现剩余阻断问题。
+
+| 命令 / 检查 | 实际结果 |
+| --- | --- |
+| `go test -p 2 ./...` / `go test -p 2 -tags=unit ./...` | 全包通过，含 API 契约 |
+| `golangci-lint run --concurrency 2 --timeout=30m ./...` | 官方 2.14.0，全量 0 issues |
+| `go test -race ./internal/requestaudit` | 通过 |
+| 审计筛选、关联队列、实际 usage 上下文与用量写入挂点专项测试 | 通过；覆盖原 Key 校验、Finish/取消后关联、队列故障不影响用量保存、分页与精确查询 |
+| `pnpm --dir frontend run typecheck` / `run build`、改动文件 ESLint | 通过；构建产物未纳入提交 |
+| `pnpm --dir frontend run test:run --maxWorkers=2 --minWorkers=1` | 最终统一下拉框后，全量 374 个文件、3010 项通过 |
+| `go test -p 2 -tags embed ./internal/web` | 最终前端构建后通过 |
+| 本地模拟 API 浏览器检查 | 1600px / 390px 布局、分组搜索、请求 ID 参数、重置及三个下拉菜单通过；方向键/Enter/Escape 正常，无页面水平溢出和控制台错误 |
+| `go test -tags=integration ./internal/requestaudit -run '^$'` | 仅编译通过；本机无可用 Docker，真实数据库用例需由远端 CI 执行 |
+| `gofmt -l` / `git diff --check` / `git status --short` | 格式和空白检查通过；只提交本轮源码、测试、迁移及文档，排除截图、构建产物和本地配置 |
+
+发布前须确认同一提交的 CI（含真实 PostgreSQL/Redis 集成）与 Security Scan 全部通过，再单独推送 annotated Tag。部署需执行迁移 246，并核对管理端分组选择、普通 HTTP 请求 ID 与新 Responses WebSocket 用量 ID 查询。WebSocket 查询定位所属连接；旧响应 ID、未传递采集上下文的通道及已过期/丢弃的审计不回填，详见本文开头的查询边界。运行开关及现有管理路由不变。

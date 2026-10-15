@@ -29,16 +29,23 @@
       </div>
 
       <section v-if="activeTab === 'requests'" class="card overflow-hidden">
-        <form class="grid gap-3 border-b border-gray-200 p-4 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-4" @submit.prevent="search">
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.from') }}<input v-model="filters.from" type="datetime-local" class="input w-full" /></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.to') }}<input v-model="filters.to" type="datetime-local" class="input w-full" /></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.apiKeyId') }}<input v-model="filters.apiKey" type="number" min="1" class="input w-full" /></label>
-          <RequestAuditUserFilter :key="userFilterRevision" v-model="filters.user" v-model:label="filters.userLabel" />
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.session') }}<input v-model="filters.session" class="input w-full" maxlength="255" /></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.kind') }}<select v-model="filters.kind" class="input w-full"><option value="">{{ t('admin.requestAudit.all') }}</option><option v-for="kind in kinds" :key="kind" :value="kind">{{ t(`admin.requestAudit.kinds.${kind}`) }}</option></select></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.integrity') }}<select v-model="filters.state" class="input w-full"><option value="">{{ t('admin.requestAudit.all') }}</option><option v-for="state in states" :key="state" :value="state">{{ t(`admin.requestAudit.states.${state}`) }}</option></select></label>
-          <label class="space-y-1 text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.httpStatus') }}<input v-model="filters.httpStatus" data-test="http-status-filter" type="number" min="100" max="599" class="input w-full" /></label>
-          <div class="flex items-end gap-2"><button type="submit" class="btn btn-primary" :disabled="loading.list">{{ t('admin.requestAudit.search') }}</button><button type="button" class="btn btn-secondary" :disabled="loading.list" @click="resetFilters">{{ t('common.reset') }}</button></div>
+        <form class="request-audit-filters space-y-5 border-b border-gray-200 p-5 dark:border-dark-700" @submit.prevent="search">
+          <div class="grid grid-cols-1 items-start gap-x-5 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
+            <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.from') }}</span><input v-model="filters.from" type="datetime-local" class="input h-11 min-w-0" /></label>
+            <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.to') }}</span><input v-model="filters.to" type="datetime-local" class="input h-11 min-w-0" /></label>
+            <RequestAuditUserFilter :key="`user-${filterRevision}`" v-model="filters.user" v-model:label="filters.userLabel" />
+            <RequestAuditGroupFilter :key="`group-${filterRevision}`" v-model="filters.group" v-model:label="filters.groupLabel" />
+            <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.apiKeyId') }}</span><input v-model="filters.apiKey" type="number" min="1" class="input h-11 min-w-0" /></label>
+            <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.requestIdFilter') }}</span><input v-model="filters.requestId" data-test="request-id-filter" class="input h-11 min-w-0" maxlength="256" :placeholder="t('admin.requestAudit.requestIdPlaceholder')" aria-describedby="request-audit-request-id-hint" /></label>
+            <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.session') }}</span><input v-model="filters.session" class="input h-11 min-w-0" maxlength="255" /></label>
+            <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.httpStatus') }}</span><input v-model="filters.httpStatus" data-test="http-status-filter" type="number" min="100" max="599" class="input h-11 min-w-0" /></label>
+            <div class="request-audit-filter-field"><label for="request-audit-kind">{{ t('admin.requestAudit.kind') }}</label><Select id="request-audit-kind" v-model="filters.kind" :options="kindOptions" :searchable="false" :aria-label="t('admin.requestAudit.kind')" /></div>
+            <div class="request-audit-filter-field"><label for="request-audit-state">{{ t('admin.requestAudit.integrity') }}</label><Select id="request-audit-state" v-model="filters.state" :options="stateOptions" :searchable="false" :aria-label="t('admin.requestAudit.integrity')" /></div>
+          </div>
+          <div class="flex flex-col gap-4 border-t border-gray-200 pt-4 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+            <p id="request-audit-request-id-hint" class="text-xs leading-5 text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.requestIdHint') }}</p>
+            <div class="flex shrink-0 gap-3"><button type="submit" class="btn btn-primary h-11 flex-1 sm:flex-none" :disabled="loading.list">{{ t('admin.requestAudit.search') }}</button><button type="button" data-test="reset-filters" class="btn btn-secondary h-11 flex-1 sm:flex-none" :disabled="loading.list" @click="resetFilters">{{ t('common.reset') }}</button></div>
+          </div>
         </form>
         <p v-if="errors.list" role="alert" class="p-4 text-sm text-red-500">{{ errors.list }}</p>
         <p v-if="loading.list" role="status" class="p-10 text-center text-sm text-gray-500">{{ t('common.loading') }}</p>
@@ -74,11 +81,11 @@
       </section>
 
       <section v-else-if="activeTab === 'bans'" class="card overflow-hidden">
-        <div class="flex flex-wrap items-end gap-3 border-b border-gray-200 p-4 dark:border-dark-700">
-          <label class="space-y-1 text-xs text-gray-500">{{ t('admin.requestAudit.apiKey') }}<input v-model="banFilters.apiKey" type="number" min="1" class="input block" /></label>
-          <label class="space-y-1 text-xs text-gray-500">{{ t('admin.requestAudit.session') }}<input v-model="banFilters.session" class="input block" maxlength="255" /></label>
-          <label class="space-y-1 text-xs text-gray-500">{{ t('admin.requestAudit.banState') }}<select v-model="banFilters.state" class="input block"><option value="">{{ t('admin.requestAudit.all') }}</option><option v-for="state in ['active', 'expired', 'revoked']" :key="state" :value="state">{{ t(`admin.requestAudit.banStates.${state}`) }}</option></select></label>
-          <button class="btn btn-primary" :disabled="loading.bans" @click="loadBans()">{{ t('admin.requestAudit.search') }}</button>
+        <div class="request-audit-filters grid grid-cols-1 items-end gap-5 border-b border-gray-200 p-5 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-4">
+          <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.apiKey') }}</span><input v-model="banFilters.apiKey" type="number" min="1" class="input h-11 min-w-0" /></label>
+          <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.session') }}</span><input v-model="banFilters.session" class="input h-11 min-w-0" maxlength="255" /></label>
+          <div class="request-audit-filter-field"><label for="request-audit-ban-state">{{ t('admin.requestAudit.banState') }}</label><Select id="request-audit-ban-state" v-model="banFilters.state" :options="banStateOptions" :searchable="false" :aria-label="t('admin.requestAudit.banState')" /></div>
+          <button class="btn btn-primary h-11 w-full justify-self-start sm:w-auto" data-test="search-bans" :disabled="loading.bans" @click="loadBans()">{{ t('admin.requestAudit.search') }}</button>
         </div>
         <p class="border-b border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-dark-700">{{ t('admin.requestAudit.banScope') }}</p>
         <p v-if="errors.bans" role="alert" class="p-4 text-sm text-red-500">{{ errors.bans }}</p>
@@ -156,11 +163,13 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import Select from '@/components/common/Select.vue'
 import RequestAuditRuntime from './RequestAuditRuntime.vue'
 import RequestAuditMetadata from './RequestAuditMetadata.vue'
 import RequestAuditPlatform from './RequestAuditPlatform.vue'
 import RequestAuditPayloads from './RequestAuditPayloads.vue'
 import RequestAuditUserFilter from './RequestAuditUserFilter.vue'
+import RequestAuditGroupFilter from './RequestAuditGroupFilter.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMetadata, extractI18nErrorMessage } from '@/utils/apiError'
 import api from './api'
@@ -174,11 +183,14 @@ type Tab = typeof tabs[number]
 const activeTab = ref<Tab>('requests')
 const kinds = REQUEST_AUDIT_KINDS
 const states = ['complete', 'capturing', 'partial']
+const kindOptions = computed(() => [{ value: '', label: t('admin.requestAudit.all') }, ...kinds.map(value => ({ value, label: t(`admin.requestAudit.kinds.${value}`) }))])
+const stateOptions = computed(() => [{ value: '', label: t('admin.requestAudit.all') }, ...states.map(value => ({ value, label: t(`admin.requestAudit.states.${value}`) }))])
+const banStateOptions = computed(() => [{ value: '', label: t('admin.requestAudit.all') }, ...['active', 'expired', 'revoked'].map(value => ({ value, label: t(`admin.requestAudit.banStates.${value}`) }))])
 const loading = reactive({ list: false, detail: false, config: false, status: false, save: false, bans: false, createBan: false, revoke: false })
 const errors = reactive({ list: '', detail: '', config: '', status: '', bans: '', createBan: '' })
-const emptyFilters = { from: '', to: '', apiKey: '', user: '', userLabel: '', session: '', kind: '', state: '', httpStatus: '' }
+const emptyFilters = { from: '', to: '', apiKey: '', user: '', userLabel: '', group: '', groupLabel: '', requestId: '', session: '', kind: '', state: '', httpStatus: '' }
 const filters = reactive({ ...emptyFilters })
-const userFilterRevision = ref(0)
+const filterRevision = ref(0)
 const appliedFilters = ref<RequestAuditFilters>({ limit: 50 })
 const banFilters = reactive({ apiKey: '', session: '', state: '' })
 const records = ref<RequestAuditPage>({ items: [], next_cursor: '', has_more: false })
@@ -220,7 +232,7 @@ function buildFilters(): RequestAuditFilters {
   const from = filters.from ? new Date(filters.from).toISOString() : undefined
   const to = filters.to ? new Date(filters.to).toISOString() : undefined
   if (from && to && from > to) throw new Error(t('admin.requestAudit.invalidTimeWindow'))
-  return { from, to, api_key_id: filters.apiKey ? Number(filters.apiKey) : undefined, user_id: filters.user ? Number(filters.user) : undefined, session_id: filters.session || undefined, kind: filters.kind || undefined, capture_state: filters.state || undefined, http_status: filters.httpStatus ? Number(filters.httpStatus) : undefined, limit: 50 }
+  return { from, to, api_key_id: filters.apiKey ? Number(filters.apiKey) : undefined, user_id: filters.user ? Number(filters.user) : undefined, group_id: filters.group ? Number(filters.group) : undefined, request_id: filters.requestId.trim() || undefined, session_id: filters.session || undefined, kind: filters.kind || undefined, capture_state: filters.state || undefined, http_status: filters.httpStatus ? Number(filters.httpStatus) : undefined, limit: 50 }
 }
 async function loadRecords() {
   const generation = ++recordsGeneration
@@ -230,7 +242,7 @@ async function loadRecords() {
 function search() {
   try { appliedFilters.value = buildFilters(); cursor.value = ''; cursorHistory.value = []; void loadRecords() } catch (error) { errors.list = errorText(error) }
 }
-function resetFilters() { userFilterRevision.value++; Object.assign(filters, emptyFilters); search() }
+function resetFilters() { filterRevision.value++; Object.assign(filters, emptyFilters); search() }
 function nextPage() { if (loading.list || !records.value.has_more) return; cursorHistory.value.push(cursor.value); cursor.value = records.value.next_cursor; void loadRecords() }
 function previousPage() { if (loading.list || !cursorHistory.value.length) return; cursor.value = cursorHistory.value.pop() || ''; void loadRecords() }
 async function loadConfig() {
@@ -336,3 +348,12 @@ async function revokeBan() {
 onMounted(() => { void loadConfig(); void loadStatus(); void loadRecords() })
 onUnmounted(() => { detailGeneration++; recordsGeneration++; bansGeneration++ })
 </script>
+
+<style scoped>
+.request-audit-filter-field {
+  @apply flex min-w-0 flex-col gap-2 text-xs font-medium leading-5 text-gray-500 dark:text-dark-300;
+}
+.request-audit-filters :deep(.select-trigger) {
+  height: 2.75rem;
+}
+</style>

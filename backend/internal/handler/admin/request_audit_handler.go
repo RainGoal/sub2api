@@ -128,8 +128,17 @@ func (h *RequestAuditHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
-	filter := requestaudit.ListFilter{Limit: limit, UserID: user, APIKeyID: key,
-		SessionID: c.Query("session_id"), Kind: c.Query("kind"), CaptureState: c.Query("capture_state"), Cursor: c.Query("cursor")}
+	group, ok := requestAuditPositive(c, "group_id", 0)
+	if !ok {
+		return
+	}
+	filter := requestaudit.ListFilter{Limit: limit, UserID: user, APIKeyID: key, GroupID: group,
+		RequestID: strings.TrimSpace(c.Query("request_id")), SessionID: c.Query("session_id"),
+		Kind: c.Query("kind"), CaptureState: c.Query("capture_state"), Cursor: c.Query("cursor")}
+	if filter.RequestID != "" && !requestaudit.ValidRequestID(filter.RequestID) {
+		requestAuditInvalid(c, "Invalid request_id")
+		return
+	}
 	for name, dst := range map[string]*time.Time{"from": &filter.From, "to": &filter.To} {
 		if raw := c.Query(name); raw != "" {
 			parsed, err := time.Parse(time.RFC3339Nano, raw)

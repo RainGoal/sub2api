@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-1 text-xs text-gray-500 dark:text-dark-300">
+  <div class="flex min-w-0 flex-col gap-2 text-xs font-medium leading-5 text-gray-500 dark:text-dark-300">
     <label for="request-audit-user">{{ t('admin.requestAudit.user') }}</label>
     <Select id="request-audit-user" :model-value="modelValue || null" :options="options" remote clearable
       :loading="loading" :error="!!error" :aria-label="t('admin.requestAudit.user')"

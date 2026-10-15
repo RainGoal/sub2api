@@ -94,6 +94,8 @@ type auditEvent struct {
 	manifests                          map[string]PartManifest
 	observedBodyBytes, storedBodyBytes int64
 	captureState                       string
+	usageRequestID                     string
+	usageAPIKeyID                      int64
 	queued                             int64
 	createdAt                          time.Time
 }
@@ -250,7 +252,7 @@ func (m *Manager) reserve(n int64, payload bool) bool {
 }
 
 func (m *Manager) enqueue(e auditEvent) bool {
-	e.queued = eventOverhead + int64(len(e.raw))
+	e.queued = eventOverhead + int64(len(e.raw)+len(e.usageRequestID))
 	if e.meta != nil {
 		e.queued += int64(len(e.meta.Method) + len(e.meta.RoutePattern) + len(e.meta.Protocol) + len(e.meta.ClientRequestID) + len(e.meta.ConnectionID) + len(e.meta.MessageType) + len(e.meta.Host) + len(e.meta.RequestURI))
 	}
