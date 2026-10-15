@@ -242,6 +242,10 @@ INSERT INTO groups VALUES(301,'composite','Engineering',NULL)`)
 		require.Zero(t, remaining)
 	})
 
+	t.Run("device policy spans keys and survives source retention", func(t *testing.T) {
+		testDevicePolicyIntegration(t, ctx, db, m)
+	})
+
 	t.Run("cleanup branches have ordered index paths", func(t *testing.T) {
 		_, err = db.ExecContext(ctx, `INSERT INTO request_audits(id,received_at,kind,instance_id,cleanup_state)
 SELECT md5('cleanup-plan-'||s::text)::uuid,NOW()-(s%5)*INTERVAL '1 day','http_request','test',
@@ -283,9 +287,5 @@ CASE WHEN s%100=0 THEN 'deleting' ELSE 'active' END FROM generate_series(1,20000
 
 	t.Run("request IDs have exact indexed lookup paths", func(t *testing.T) {
 		testRequestIDIndexPlans(t, ctx, db)
-	})
-
-	t.Run("device policy spans keys and survives source retention", func(t *testing.T) {
-		testDevicePolicyIntegration(t, ctx, db, m)
 	})
 }
