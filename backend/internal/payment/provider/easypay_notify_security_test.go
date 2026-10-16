@@ -110,6 +110,37 @@ func TestEasyPayNotifyRejectsInvalidParameters(t *testing.T) {
 	}
 }
 
+func TestEasyPayNotifyRejectsSignedFieldsInsideOpaqueParam(t *testing.T) {
+	t.Parallel()
+	e := easyPayNotifyTestProvider(t)
+	for field := range easyPayNotifyAllowedParams {
+		t.Run(field, func(t *testing.T) {
+			params := easyPayNotifyTestParams()
+			params["param"] = "reference=a&" + field + "=injected"
+			n, err := e.VerifyNotification(context.Background(), easyPayNotifyTestBody(e, params).Encode(), nil)
+			require.Error(t, err)
+			require.Nil(t, n)
+		})
+	}
+}
+
+func TestEasyPayNotifyRejectsOrderIDFoldedIntoOpaqueParam(t *testing.T) {
+	t.Parallel()
+	e := easyPayNotifyTestProvider(t)
+	original := easyPayNotifyTestParams()
+	original["name"] = "P&out_trade_no=B&param=x"
+	original["out_trade_no"], original["param"] = "A", "y"
+	forged := easyPayNotifyTestParams()
+	forged["name"] = "P"
+	forged["out_trade_no"], forged["param"] = "B", "x&out_trade_no=A&param=y"
+	require.Equal(t, easyPaySign(original, e.config["pkey"]), easyPaySign(forged, e.config["pkey"]))
+	_, err := e.VerifyNotification(context.Background(), easyPayNotifyTestBody(e, original).Encode(), nil)
+	require.NoError(t, err)
+	n, err := e.VerifyNotification(context.Background(), easyPayNotifyTestBody(e, forged).Encode(), nil)
+	require.Error(t, err)
+	require.Nil(t, n)
+}
+
 func TestEasyPayNotifyRejectsDuplicateParameters(t *testing.T) {
 	t.Parallel()
 	for _, key := range []string{"pid", "out_trade_no", "trade_no", "money", "trade_status", "sign", "sign_type", "param"} {

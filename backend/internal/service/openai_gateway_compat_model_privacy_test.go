@@ -392,7 +392,7 @@ func TestOpenAICompatClientModelPrivacyRejectsInvalidPublicModelBeforeUpstream(t
 			case "messages_chat_fallback":
 				_, err = svc.forwardAnthropicViaRawChatCompletions(context.Background(), c, account, body, "")
 			case "responses_chat_fallback":
-				_, err = svc.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body)
+				_, err = svc.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body, time.Now())
 			default:
 				_, err = svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
 			}
@@ -428,7 +428,7 @@ func TestOpenAICompatClientModelPrivacyLocalPolicyKeepsOriginalCause(t *testing.
 			case "messages":
 				_, err = svc.ForwardAsAnthropic(ctx, c, account, body, "", "")
 			case "responses_chat_fallback":
-				_, err = svc.forwardResponsesViaRawChatCompletions(ctx, c, account, []byte(`{"model":"public-model-A","input":"hello"}`))
+				_, err = svc.forwardResponsesViaRawChatCompletions(ctx, c, account, []byte(`{"model":"public-model-A","input":"hello"}`), time.Now())
 			default:
 				_, err = svc.forwardAsRawChatCompletions(ctx, c, account, body, "")
 			}

@@ -86,8 +86,12 @@ func (s *OpenAIGatewayService) validateOpenAIClientSSEBody(body string) error {
 	return nil
 }
 
-func buildOpenAIClientResponseFailedSSE(responseID, publicModel string, source []byte, fallback string) string {
-	body := buildOpenAIResponseFailedSSE(responseID, publicModel, source, fallback)
+func buildOpenAIClientResponseFailedSSE(responseID, publicModel string, source []byte, fallback string, streamCreatedAt ...int64) string {
+	var createdAt int64
+	if len(streamCreatedAt) > 0 {
+		createdAt = streamCreatedAt[0]
+	}
+	body := buildOpenAIResponseFailedSSE(responseID, publicModel, createdAt, source, fallback)
 	// The legacy builder intentionally copies only code/type/message. Keep all
 	// verified recovery metadata when adapting a bare upstream error to a
 	// response.failed event, including top-level error-event codes.
@@ -114,5 +118,5 @@ func buildOpenAIClientResponseFailedSSE(responseID, publicModel string, source [
 	if updated, err := rewriteOpenAIClientSSEBody(body, publicModel, defaultMaxLineSize); err == nil {
 		return string(updated)
 	}
-	return buildOpenAIResponseFailedSSE(responseID, "", nil, "The upstream response could not be processed. Please try again.")
+	return buildOpenAIResponseFailedSSE(responseID, "", createdAt, nil, "The upstream response could not be processed. Please try again.")
 }

@@ -7,12 +7,14 @@ import (
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,16 +36,17 @@ func TestEasyPayWebhookAcceptsSignedCompletedOrder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		t.Run(method, func(t *testing.T) {
-			client, handler, order := newEasyPayWebhookSecurityFixture(t, service.OrderStatusCompleted)
+			client, handler, order, queryCalls := newEasyPayWebhookSecurityFixture(t, service.OrderStatusCompleted)
 			params := easyPayWebhookTestParams(order.OutTradeNo)
 			// EasyPay's optional passthrough field can contain URL delimiters.
 			params.Set("param", "state=paid&source=checkout")
 			signEasyPayWebhookTestParams(params)
 
-			for range 2 {
+			for attempt := range 2 {
 				recorder := serveEasyPayWebhookTest(handler, method, params.Encode())
 				require.Equal(t, http.StatusOK, recorder.Code)
 				require.Equal(t, "success", recorder.Body.String())
+				require.EqualValues(t, attempt+1, queryCalls.Load(), "each verified success must query the upstream order")
 			}
 			current, err := client.PaymentOrder.Get(context.Background(), order.ID)
 			require.NoError(t, err)
@@ -77,7 +80,7 @@ func TestEasyPayWebhookRejectsAmbiguousSignedPayloadBeforePaymentMutation(t *tes
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		for _, tc := range cases {
 			t.Run(method+"/"+tc.name, func(t *testing.T) {
-				client, handler, order := newEasyPayWebhookSecurityFixture(t, service.OrderStatusPending)
+				client, handler, order, queryCalls := newEasyPayWebhookSecurityFixture(t, service.OrderStatusPending)
 				// The legacy order deliberately has no provider snapshot. Rejection
 				// must come from the real provider before accounting can begin.
 				require.Empty(t, order.ProviderSnapshot)
@@ -100,6 +103,7 @@ func TestEasyPayWebhookRejectsAmbiguousSignedPayloadBeforePaymentMutation(t *tes
 				recorder := serveEasyPayWebhookTest(handler, method, params.Encode())
 				require.Equal(t, http.StatusBadRequest, recorder.Code)
 				require.Equal(t, "verify failed", recorder.Body.String())
+				require.Zero(t, queryCalls.Load(), "rejected signatures must not trigger upstream confirmation")
 				require.Zero(t, mutationAttempts)
 				current, err := client.PaymentOrder.Get(context.Background(), order.ID)
 				require.NoError(t, err)
@@ -112,7 +116,7 @@ func TestEasyPayWebhookRejectsAmbiguousSignedPayloadBeforePaymentMutation(t *tes
 	}
 }
 
-func newEasyPayWebhookSecurityFixture(t *testing.T, status string) (*dbent.Client, *PaymentWebhookHandler, *dbent.PaymentOrder) {
+func newEasyPayWebhookSecurityFixture(t *testing.T, status string) (*dbent.Client, *PaymentWebhookHandler, *dbent.PaymentOrder, *atomic.Int32) {
 	t.Helper()
 	db, err := sql.Open("sqlite", "file:easypay_webhook_security?mode=memory&cache=shared")
 	require.NoError(t, err)
@@ -138,16 +142,47 @@ func newEasyPayWebhookSecurityFixture(t *testing.T, status string) (*dbent.Clien
 		order, err = order.Update().SetPaymentTradeNo("gateway-trade-123").SetPaidAt(time.Now()).Save(ctx)
 		require.NoError(t, err)
 	}
+	var queryCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queryCalls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/api.php" {
+			t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected query request", http.StatusBadRequest)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse upstream query form: %v", err)
+			http.Error(w, "invalid query request", http.StatusBadRequest)
+			return
+		}
+		for field, expected := range map[string]string{
+			"act": "order", "pid": "1001", "key": easyPayWebhookTestKey, "out_trade_no": order.OutTradeNo,
+		} {
+			if r.URL.Query().Get(field) != expected || r.PostForm.Get(field) != expected {
+				t.Errorf("unexpected upstream query field: %s", field)
+				http.Error(w, "incorrect order query", http.StatusBadRequest)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"code": 1, "pid": "1001", "out_trade_no": order.OutTradeNo,
+			"trade_no": "gateway-trade-123", "money": "10.00", "status": 1,
+		}); err != nil {
+			t.Errorf("write upstream query response: %v", err)
+		}
+	}))
+	t.Cleanup(upstream.Close)
 	easyPay, err := provider.NewEasyPay("webhook-test", map[string]string{
 		"pid": "1001", "pkey": easyPayWebhookTestKey,
-		"apiBase": "https://gateway.invalid", "notifyUrl": "https://merchant.invalid/webhook",
+		"apiBase": upstream.URL, "notifyUrl": "https://merchant.invalid/webhook",
 		"returnUrl": "https://merchant.invalid/result",
 	})
 	require.NoError(t, err)
 	registry := payment.NewRegistry()
 	registry.Register(easyPay)
 	paymentSvc := service.NewPaymentService(client, registry, nil, nil, nil, nil, nil, nil, nil)
-	return client, NewPaymentWebhookHandler(paymentSvc, registry), order
+	return client, NewPaymentWebhookHandler(paymentSvc, registry), order, &queryCalls
 }
 
 func easyPayWebhookTestParams(orderID string) url.Values {

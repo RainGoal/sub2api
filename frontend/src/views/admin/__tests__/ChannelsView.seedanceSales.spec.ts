@@ -6,12 +6,13 @@ import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
 import { accountModelCostPricingToAPI, createAccountModelCostEntry } from '@/components/account/accountModelCostPricing'
 import type { Channel } from '@/api/admin/channels'
 
-const { listChannels, createChannel, updateChannel, previewImport, showError, showSuccess } = vi.hoisted(() => ({
+const { listChannels, createChannel, updateChannel, previewImport, listGroups, showError, showSuccess } = vi.hoisted(() => ({
   listChannels: vi.fn(), createChannel: vi.fn(), updateChannel: vi.fn(), previewImport: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(),
+  listGroups: vi.fn(),
 }))
 vi.mock('@/api/admin', () => ({ adminAPI: {
   channels: { list: listChannels, create: createChannel, update: updateChannel, previewSeedanceSalesImport: previewImport },
-  groups: { getAll: vi.fn().mockResolvedValue([{ id: 9, name: 'Video group', platform: 'seedance', rate_multiplier: 1 }]) },
+  groups: { getAll: listGroups },
   settings: { getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false }) },
 } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError, showSuccess }) }))
@@ -80,10 +81,21 @@ beforeEach(() => {
   createChannel.mockResolvedValue({})
   updateChannel.mockResolvedValue({})
   previewImport.mockResolvedValue(importedPrice())
+  listGroups.mockResolvedValue([{ id: 9, name: 'Video group', platform: 'seedance', rate_multiplier: 1 }])
 })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
 describe('Seedance channel sales pricing', () => {
+  it('keeps Composite groups out of the video platform group selector', async () => {
+    listGroups.mockResolvedValue([
+      { id: 9, name: 'Video group', platform: 'seedance', rate_multiplier: 1 },
+      { id: 10, name: 'Composite text group', platform: 'composite', rate_multiplier: 1 },
+    ])
+    const wrapper = mountView()
+    await openSeedance(wrapper)
+    expect(wrapper.findAll('label').some(node => node.text().includes('Composite text group'))).toBe(false)
+  })
+
   it.each(['token', 'per_request'] as const)('preserves untouched legacy %s prices and hidden statistics rules exactly', async mode => {
     const channel = legacyChannel(mode)
     const wrapper = await openLegacyChannel(channel)
