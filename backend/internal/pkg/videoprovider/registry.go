@@ -38,7 +38,7 @@ func NewRegistry(registrations ...Registration) (*Registry, error) {
 		if _, exists := registry.drivers[id]; exists {
 			return nil, fmt.Errorf("video provider %q is already registered", id)
 		}
-		if _, err := buildProviderURL(driver.DefaultBaseURL(), ""); err != nil && !(driver.ID() == ProviderVideoTasksJSONV1 && driver.DefaultBaseURL() == "") {
+		if _, err := buildProviderURL(driver.DefaultBaseURL(), ""); err != nil && (driver.ID() != ProviderVideoTasksJSONV1 || driver.DefaultBaseURL() != "") {
 			return nil, fmt.Errorf("video provider %q has an invalid default base URL: %w", id, err)
 		}
 		registry.drivers[id] = driver

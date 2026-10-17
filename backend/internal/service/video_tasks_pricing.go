@@ -46,7 +46,7 @@ func validateVideoQuantityConfig(unit VideoBillingUnit, policy VideoQuantityPoli
 	if unit != VideoBillingPerSecond && unit != VideoBillingPerVideo {
 		return fmt.Errorf("invalid video billing unit")
 	}
-	if !(unit == VideoBillingPerVideo && policy == "") && policy != VideoQuantityOutputSeconds && policy != VideoQuantityOutputAndReferenceSeconds && policy != VideoQuantityRequestedSeconds {
+	if (unit != VideoBillingPerVideo || policy != "") && policy != VideoQuantityOutputSeconds && policy != VideoQuantityOutputAndReferenceSeconds && policy != VideoQuantityRequestedSeconds {
 		return fmt.Errorf("invalid video quantity policy")
 	}
 	if !validSeedanceAccountCost(maximum) {
