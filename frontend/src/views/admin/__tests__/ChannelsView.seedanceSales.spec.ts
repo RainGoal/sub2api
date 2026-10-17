@@ -3,8 +3,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ChannelsView from '../ChannelsView.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
+import IntervalRow from '@/components/admin/channel/IntervalRow.vue'
+import ModelTagInput from '@/components/admin/channel/ModelTagInput.vue'
 import { accountModelCostPricingToAPI, createAccountModelCostEntry } from '@/components/account/accountModelCostPricing'
-import type { Channel } from '@/api/admin/channels'
+import type { Channel, CreateChannelRequest } from '@/api/admin/channels'
 
 const { listChannels, createChannel, updateChannel, previewImport, listGroups, showError, showSuccess } = vi.hoisted(() => ({
   listChannels: vi.fn(), createChannel: vi.fn(), updateChannel: vi.fn(), previewImport: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(),
@@ -160,6 +162,65 @@ describe('Seedance channel sales pricing', () => {
     expect(showError).toHaveBeenCalledWith('Groups 9 and 10 have conflicting prices')
     expect(wrapper.findComponent(PricingEntryCard).exists()).toBe(false)
     expect(createChannel).not.toHaveBeenCalled()
+  })
+
+  it('saves per-video resolution prices and preserves them after reopening and switching to per-second', async () => {
+    createChannel.mockImplementationOnce(async (request: CreateChannelRequest) => {
+      const saved: Channel = { ...legacyChannel(), name: request.name,
+        model_pricing: request.model_pricing || [], account_stats_pricing_rules: [] }
+      listChannels.mockResolvedValue({ items: [saved], total: 1 })
+      return saved
+    })
+    const wrapper = mountView(true)
+    await openSeedance(wrapper)
+    await button(wrapper, 'common.add').trigger('click')
+    let card = wrapper.getComponent(PricingEntryCard)
+    let unit = card.findComponent({ name: 'Select' })
+    expect(unit.props('modelValue')).toBe('per_second')
+    expect(unit.props('options').map((option: { value: string }) => option.value)).toEqual(['per_second', 'per_video'])
+    const model = card.getComponent(ModelTagInput).get('input[type="text"]')
+    await model.setValue('seedance-2.0')
+    await model.trigger('keydown', { key: 'Enter' })
+    unit.vm.$emit('update:modelValue', 'per_video')
+    await flushPromises()
+    await card.get('input[placeholder="admin.channels.form.pricePlaceholder"]').setValue('0.7')
+    for (const [resolution, price] of [['480p', '0.3'], ['720p', '0.5']]) {
+      const addTier = card.findAll('button').find(node => node.text().includes('admin.channels.form.addTier'))!
+      await addTier.trigger('click')
+      const tier = card.findAllComponents(IntervalRow).at(-1)!
+      await tier.get('input[type="text"]').setValue(resolution)
+      await tier.get('input[type="number"]').setValue(price)
+      expect(tier.props('videoBillingUnit')).toBe('per_video')
+    }
+    expect(card.text()).toContain('$/video')
+    await wrapper.get('#channel-form').trigger('submit')
+    await flushPromises()
+    expect(showError).not.toHaveBeenCalled()
+    const savedPrice = createChannel.mock.calls[0][0].model_pricing[0]
+    expect(savedPrice).toMatchObject({ platform: 'seedance', models: ['seedance-2.0'], billing_mode: 'video',
+      video_pricing_version: 1, video_billing_unit: 'per_video', per_request_price: 0.7 })
+    expect(savedPrice.intervals.map((tier: { tier_label: string, per_request_price: number }) => [tier.tier_label, tier.per_request_price]))
+      .toEqual([['480p', 0.3], ['720p', 0.5]])
+
+    await button(wrapper, 'common.edit').trigger('click')
+    await flushPromises()
+    card = wrapper.getComponent(PricingEntryCard)
+    unit = card.findComponent({ name: 'Select' })
+    expect(unit.props('modelValue')).toBe('per_video')
+    expect(card.props('entry').per_request_price).toBe(0.7)
+    expect(card.findAllComponents(IntervalRow).map(tier => [tier.props('interval').tier_label, tier.props('interval').per_request_price]))
+      .toEqual([['480p', 0.3], ['720p', 0.5]])
+    unit.vm.$emit('update:modelValue', 'per_second')
+    await flushPromises()
+    expect(card.findComponent({ name: 'Select' }).props('modelValue')).toBe('per_second')
+    expect(card.text()).toContain('$/s')
+    await wrapper.get('#channel-form').trigger('submit')
+    await flushPromises()
+    expect(showError).not.toHaveBeenCalled()
+    const switchedPrice = updateChannel.mock.calls[0][1].model_pricing[0]
+    expect(switchedPrice).toMatchObject({ billing_mode: 'video', video_pricing_version: 1,
+      video_billing_unit: 'per_second', per_request_price: 0.7 })
+    expect(switchedPrice.intervals).toEqual(savedPrice.intervals)
   })
 
   it('blocks saving during import and ignores the result after closing and reopening', async () => {

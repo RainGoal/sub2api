@@ -86,17 +86,8 @@
               {{ t('admin.channels.form.billingMode') }}
             </label>
             <Select
-              :modelValue="entry.billing_mode"
-              @update:modelValue="emit('update', {
-                ...entry,
-                billing_mode: $event as BillingMode,
-                video_pricing_version: $event === 'video' ? entry.video_pricing_version : undefined,
-                video_billing_unit: $event === 'video' ? entry.video_billing_unit : undefined,
-                video_quantity_policy: $event === 'video' ? entry.video_quantity_policy : undefined,
-                video_max_billable_seconds: $event === 'video' ? entry.video_max_billable_seconds : undefined,
-                intervals: [],
-                time_pricing: { ...entry.time_pricing, periods: [] },
-              })"
+              :modelValue="selectedBillingMode"
+              @update:modelValue="updateBillingMode($event as BillingMode | VideoBillingUnit)"
               :options="billingModeOptions"
               class="mt-1"
             />
@@ -104,16 +95,12 @@
         </div>
 
         <!-- Token mode -->
-        <div v-if="platform === 'seedance' && entry.billing_mode === 'video'" class="mt-3 space-y-3" data-testid="video-pricing-settings">
+        <div v-if="platform === 'seedance' && entry.billing_mode === 'video' && !isPerVideo" class="mt-3 space-y-3" data-testid="video-pricing-settings">
           <label class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <input type="checkbox" :checked="entry.video_pricing_version === 1" @change="setExplicitVideoPricing(($event.target as HTMLInputElement).checked)" />
             {{ t('admin.channels.form.explicitVideoPricing') }}
           </label>
-          <div v-if="entry.video_pricing_version === 1" class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <label class="text-xs text-gray-400">
-              {{ t('admin.channels.form.videoBillingUnit') }}
-              <Select :model-value="entry.video_billing_unit" :options="videoUnitOptions" @update:model-value="emit('update', { ...entry, video_billing_unit: $event as VideoBillingUnit })" class="mt-1" />
-            </label>
+          <div v-if="entry.video_pricing_version === 1" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label v-if="entry.video_billing_unit === 'per_second'" class="text-xs text-gray-400">
               {{ t('admin.channels.form.videoQuantityPolicy') }}
               <Select :model-value="entry.video_quantity_policy" :options="videoQuantityOptions" @update:model-value="emit('update', { ...entry, video_quantity_policy: $event as VideoQuantityPolicy })" class="mt-1" />
@@ -213,7 +200,7 @@
         </div>
 
         <!-- Per-request mode -->
-        <div v-else-if="entry.billing_mode === 'per_request'">
+        <div v-else-if="entry.billing_mode === 'per_request' && platform !== 'seedance'">
           <!-- Default per-request price -->
           <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
             {{ t('admin.channels.form.defaultPerRequestPrice') }}
@@ -249,11 +236,11 @@
         </div>
 
         <!-- Image/video mode -->
-        <div v-else-if="entry.billing_mode === 'image' || entry.billing_mode === 'video'">
+        <div v-else-if="entry.billing_mode === 'image' || isVideoPricing">
           <!-- Default image price (per-request, same as per_request mode) -->
           <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
-            {{ entry.billing_mode === 'video' ? t(isPerVideo ? 'admin.channels.form.defaultVideoPricePerVideo' : 'admin.channels.form.defaultVideoPrice') : t('admin.channels.form.defaultImagePrice') }}
-            <span class="ml-1 font-normal text-gray-400">{{ entry.billing_mode === 'video' ? isPerVideo ? '$/video' : '$/s' : '$' }}</span>
+            {{ isVideoPricing ? t(isPerVideo ? 'admin.channels.form.defaultVideoPricePerVideo' : 'admin.channels.form.defaultVideoPrice') : t('admin.channels.form.defaultImagePrice') }}
+            <span class="ml-1 font-normal text-gray-400">{{ isVideoPricing ? isPerVideo ? '$/video' : '$/s' : '$' }}</span>
           </label>
           <div class="mt-1 w-48">
             <input :value="entry.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
@@ -263,7 +250,7 @@
           <!-- Image tiers -->
           <div class="mt-3 flex items-center justify-between">
             <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
-              {{ entry.billing_mode === 'video' ? t(isPerVideo ? 'admin.channels.form.videoTiersPerVideo' : 'admin.channels.form.videoTiers') : t('admin.channels.form.imageTiers') }}
+              {{ isVideoPricing ? t(isPerVideo ? 'admin.channels.form.videoTiersPerVideo' : 'admin.channels.form.videoTiers') : t('admin.channels.form.imageTiers') }}
             </label>
             <button type="button" @click="addMediaTier" :disabled="platform === 'seedance' && availableSeedanceTiers.length === 0" class="text-xs text-primary-600 hover:text-primary-700 disabled:opacity-40">
               + {{ t('admin.channels.form.addTier') }}
@@ -274,7 +261,7 @@
               v-for="(iv, idx) in entry.intervals"
               :key="idx"
               :interval="iv"
-              :mode="entry.billing_mode"
+              :mode="isVideoPricing ? 'video' : entry.billing_mode"
               :video-billing-unit="isPerVideo ? 'per_video' : undefined"
               @update="updateInterval(idx, $event)"
               @remove="removeInterval(idx)"
@@ -337,6 +324,7 @@ import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from '@/constants/
 import type { BillingMode, VideoBillingUnit, VideoQuantityPolicy } from '@/api/admin/channels'
 import channelsAPI from '@/api/admin/channels'
 import { seedanceCostResolutions } from './seedanceCostPricing'
+import { normalizeSeedanceModelID, SEEDANCE_MODEL_OPTIONS } from '@/constants/videoProviders'
 
 const { t } = useI18n()
 
@@ -362,11 +350,13 @@ const emit = defineEmits<{
 
 // Collapse state: entries with existing models default to collapsed
 const collapsed = ref(props.entry.models.length > 0)
-const isPerVideo = computed(() => props.entry.video_pricing_version === 1 && props.entry.video_billing_unit === 'per_video')
-const videoUnitOptions = computed(() => [
-  { value: 'per_second', label: t('admin.channels.form.videoPerSecond') },
-  { value: 'per_video', label: t('admin.channels.form.videoPerVideo') },
-])
+const isVideoPricing = computed(() => props.entry.billing_mode === 'video' ||
+  (props.platform === 'seedance' && props.entry.billing_mode === 'per_request'))
+const isPerVideo = computed(() => (props.entry.video_pricing_version === 1 && props.entry.video_billing_unit === 'per_video') ||
+  (props.platform === 'seedance' && props.entry.billing_mode === 'per_request'))
+const selectedBillingMode = computed(() => props.platform === 'seedance'
+  ? isPerVideo.value ? 'per_video' : 'per_second'
+  : props.entry.billing_mode)
 const videoQuantityOptions = computed(() => [
   { value: 'requested_seconds', label: t('admin.channels.form.videoQuantityRequested') },
   { value: 'output_seconds', label: t('admin.channels.form.videoQuantityOutput') },
@@ -374,29 +364,54 @@ const videoQuantityOptions = computed(() => [
 ])
 
 function setExplicitVideoPricing(enabled: boolean) {
-  emit('update', { ...props.entry,
-    video_pricing_version: enabled ? 1 : undefined,
-    video_billing_unit: enabled ? props.entry.video_billing_unit || 'per_second' : undefined,
-    video_quantity_policy: enabled ? props.entry.video_quantity_policy || 'output_seconds' : undefined,
-    video_max_billable_seconds: enabled ? props.entry.video_max_billable_seconds || 0 : undefined,
+  emit('update', enabled ? explicitVideoEntry('per_second') : { ...props.entry,
+    video_pricing_version: undefined,
+    video_billing_unit: undefined,
+    video_quantity_policy: undefined,
+    video_max_billable_seconds: undefined,
   })
 }
 
-const billingModeOptions = computed(() => [
+function explicitVideoEntry(unit: VideoBillingUnit): PricingFormEntry {
+  return { ...props.entry,
+    models: props.entry.models.map(model => {
+      const normalized = normalizeSeedanceModelID(model)
+      return !props.entry.video_pricing_version && SEEDANCE_MODEL_OPTIONS.some(option => option.id === normalized)
+        ? normalized : model.trim()
+    }),
+    billing_mode: 'video', video_pricing_version: 1, video_billing_unit: unit,
+    video_quantity_policy: props.entry.video_quantity_policy || 'output_seconds',
+    video_max_billable_seconds: props.entry.video_max_billable_seconds || 0,
+  }
+}
+
+function updateBillingMode(mode: BillingMode | VideoBillingUnit) {
+  if (mode === 'per_second' || mode === 'per_video') {
+    emit('update', explicitVideoEntry(mode))
+    return
+  }
+  emit('update', { ...props.entry, billing_mode: mode,
+    video_pricing_version: mode === 'video' ? props.entry.video_pricing_version : undefined,
+    video_billing_unit: mode === 'video' ? props.entry.video_billing_unit : undefined,
+    video_quantity_policy: mode === 'video' ? props.entry.video_quantity_policy : undefined,
+    video_max_billable_seconds: mode === 'video' ? props.entry.video_max_billable_seconds : undefined,
+    intervals: [], time_pricing: { ...props.entry.time_pricing, periods: [] },
+  })
+}
+
+const billingModeOptions = computed(() => props.platform === 'seedance' ? [
+  { value: 'per_second', label: t('admin.channels.form.videoPerSecond') },
+  { value: 'per_video', label: t('admin.channels.form.videoPerVideo') },
+].filter(option => !props.allowedBillingModes || props.allowedBillingModes.includes('video') ||
+  (option.value === 'per_video' && props.allowedBillingModes.includes('per_request'))) : [
   { value: 'token', label: t('admin.channels.billingMode.token') },
   { value: 'per_request', label: t('admin.channels.billingMode.perRequest') },
   { value: 'image', label: t('admin.channels.billingMode.image') },
-  { value: 'video', label: props.platform === 'seedance' && props.entry.video_pricing_version === 1
-    ? t(isPerVideo.value ? 'admin.channels.form.videoPerVideo' : 'admin.channels.form.videoPerSecond')
-    : t('admin.channels.billingMode.video') }
-].filter(option => (!props.allowedBillingModes || props.allowedBillingModes.includes(option.value as BillingMode)) &&
-  (props.platform !== 'seedance' || ['video', 'per_request'].includes(option.value))))
+  { value: 'video', label: t('admin.channels.billingMode.video') },
+].filter(option => !props.allowedBillingModes || props.allowedBillingModes.includes(option.value as BillingMode)))
 
 const billingModeLabel = computed(() => {
-  if (props.platform === 'seedance' && props.entry.video_pricing_version === 1) {
-    return t(isPerVideo.value ? 'admin.channels.form.videoPerVideo' : 'admin.channels.form.videoPerSecond')
-  }
-  const opt = billingModeOptions.value.find(o => o.value === props.entry.billing_mode)
+  const opt = billingModeOptions.value.find(o => o.value === selectedBillingMode.value)
   return opt ? opt.label : props.entry.billing_mode
 })
 
@@ -434,7 +449,7 @@ function addInterval() {
 
 function addMediaTier() {
   const intervals = [...(props.entry.intervals || [])]
-  const labels = props.entry.billing_mode === 'video'
+  const labels = isVideoPricing.value
     ? props.platform === 'seedance' ? availableSeedanceTiers.value : ['480p', '720p', '1080p']
     : ['1K', '2K', '4K', 'HD']
   if (props.platform === 'seedance' && labels.length === 0) return
@@ -447,7 +462,9 @@ function addMediaTier() {
     cache_write_multiplier: null, cache_read_multiplier: null,
     sort_order: intervals.length
   })
-  emit('update', { ...props.entry, intervals })
+  const entry = props.platform === 'seedance' && props.entry.billing_mode === 'per_request'
+    ? explicitVideoEntry('per_video') : props.entry
+  emit('update', { ...entry, intervals })
 }
 
 const availableSeedanceTiers = computed(() => (props.entry.video_pricing_version === 1

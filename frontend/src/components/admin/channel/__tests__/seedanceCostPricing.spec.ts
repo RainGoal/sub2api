@@ -32,16 +32,17 @@ describe('Seedance account cost pricing', () => {
   it('updates the billing mode label when switching independent video units', async () => {
     const price = { ...entry(), models: [], video_pricing_version: 1, video_billing_unit: 'per_second' as const }
     const wrapper = shallowMount(PricingEntryCard, { props: { platform: 'seedance', entry: price } })
-    const billingLabel = () => wrapper.findComponent({ name: 'Select' }).props('options')
-      .find((option: { value: string }) => option.value === 'video').label
+    const billingLabel = () => {
+      const select = wrapper.findComponent({ name: 'Select' })
+      return select.props('options').find((option: { value: string }) => option.value === select.props('modelValue')).label
+    }
     expect(billingLabel()).toBe('admin.channels.form.videoPerSecond')
-    wrapper.findAllComponents({ name: 'Select' })[1].vm.$emit('update:modelValue', 'per_video')
+    wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', 'per_video')
     const updated = wrapper.emitted('update')!.at(-1)![0] as PricingFormEntry
     await wrapper.setProps({ entry: updated })
     expect(billingLabel()).toBe('admin.channels.form.videoPerVideo')
     expect(wrapper.text()).toContain('$/video')
-    expect(wrapper.find('[data-testid="video-pricing-settings"]').text())
-      .not.toContain('admin.channels.form.videoQuantityPolicy')
+    expect(wrapper.find('[data-testid="video-pricing-settings"]').exists()).toBe(false)
   })
 
   it('keeps per-video resolution tiers and exposes the configured unit throughout the price card', async () => {
@@ -70,10 +71,10 @@ describe('Seedance account cost pricing', () => {
     expect(isValidSeedanceCostEntry({ ...price, video_max_billable_seconds: -1 })).toBe(false)
   })
 
-  it('offers video and fixed task pricing, with model-specific resolution tiers', async () => {
+  it('offers per-second and per-video pricing directly, with model-specific legacy resolution tiers', async () => {
     const wrapper = shallowMount(PricingEntryCard, { props: { platform: 'seedance', entry: entry('seedance-2.5') } })
     expect(wrapper.findComponent({ name: 'Select' }).props('options').map((option: { value: string }) => option.value))
-      .toEqual(['per_request', 'video'])
+      .toEqual(['per_second', 'per_video'])
     const addTier = wrapper.findAll('button').find(button => button.text().includes('admin.channels.form.addTier'))!
     await addTier.trigger('click')
     let updated = wrapper.emitted('update')!.at(-1)![0] as PricingFormEntry
@@ -91,8 +92,8 @@ describe('Seedance account cost pricing', () => {
     expect(wrapper.text()).toContain('$/s')
   })
 
-  it('shows resolution and USD/second instead of token bounds for video tiers', () => {
-    const wrapper = mount(IntervalRow, { props: { mode: 'video', interval: {
+  it.each(['per_second', 'per_video'] as const)('shows resolution and the %s unit instead of token bounds', videoBillingUnit => {
+    const wrapper = mount(IntervalRow, { props: { mode: 'video', videoBillingUnit, interval: {
       min_tokens: 0, max_tokens: null, tier_label: '720p', per_request_price: '0.05',
       input_price: null, output_price: null, cache_write_price: null, cache_read_price: null,
       input_multiplier: null, output_multiplier: null, cache_write_multiplier: null,
@@ -100,7 +101,7 @@ describe('Seedance account cost pricing', () => {
     } } })
     expect(wrapper.findAll('input')).toHaveLength(2)
     expect(wrapper.text()).toContain('admin.channels.form.resolution')
-    expect(wrapper.text()).toContain('$/s')
+    expect(wrapper.text()).toContain(videoBillingUnit === 'per_video' ? '$/video' : '$/s')
     expect(wrapper.text()).not.toContain('admin.channels.form.minTokens')
   })
 

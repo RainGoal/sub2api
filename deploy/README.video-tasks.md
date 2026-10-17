@@ -108,3 +108,14 @@ Nginx 检查以上路径、下载 Range 与超时、管理端新资源，不需�
 再创建 annotated Tag `v0.1.57`，信息为 `Release v0.1.57`，单独推送并核对远端 peeled commit。
 Tag 会触发现有 Release 流水线发布构建产物及镜像；生产部署和视频功能启用需另行完成验收。
 真实生成、计量与账单核对完成前，保持 `gateway.video_tasks_json_v1_enabled: false`。
+
+## v0.1.58 按条分辨率定价修复（2026-10-18）
+
+- 账号采购成本与渠道售价直接选择按秒或按条（按次），两种方式均支持分辨率价格档位。
+- 切换单位保留默认价和分辨率价格；已有旧格式配置在未主动切换或添加档位时保持原计费语义。
+- 复用已有 v1 视频计价协议。渠道按条及独立时长售价需服务端启用
+  `gateway.video_tasks_json_v1_enabled`；本次不改变开关默认值，不增加数据库迁移。
+- 本地 `typecheck`、本次文件 ESLint、全量前端测试（389 文件、3180 项）、
+  `build`、构建完成后的 `go test -tags embed ./internal/web` 及 `git diff --check` 通过。
+- 发布仍须等待待发布提交的 CI 与 Security Scan 全部成功，再推送 annotated Tag；
+  生产部署、真实供应商生成及账单验收另行执行。

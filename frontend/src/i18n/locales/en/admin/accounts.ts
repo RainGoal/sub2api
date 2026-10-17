@@ -1117,7 +1117,7 @@ export default {
         title: 'Custom Model Purchase Costs',
         add: 'Add Model Cost',
         hint: 'Enter actual USD purchase rates for this supplier account, matched by the final upstream model. Matching prices are used directly for cost and profit statistics without the account multiplier. Unmatched models retain the previous cost estimate. Customer sale prices are managed in Channel Pricing.',
-        videoHint: 'For Seedance, enter USD/second by model and resolution, or a fixed cost per completed task. New tasks freeze purchase rates; edits do not affect tasks in progress.',
+        videoHint: 'For Seedance, choose per-second or per-video (per-task) purchase costs. Both support prices by model and resolution. Per-video costs apply once per successful video. New tasks freeze purchase rates; edits do not affect tasks in progress.',
         defaultPriceHint: 'Each model cost requires a default price. Context or size tiers may override it, so requests outside those tiers still have a purchase cost.',
         defaultPriceRequired: 'Model cost entry #{index} requires a default price: at least one default token rate, or a default unit price for other billing modes.',
         empty: 'No model purchase costs configured. The previous cost estimate applies.',
