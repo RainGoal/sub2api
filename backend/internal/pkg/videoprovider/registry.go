@@ -38,7 +38,7 @@ func NewRegistry(registrations ...Registration) (*Registry, error) {
 		if _, exists := registry.drivers[id]; exists {
 			return nil, fmt.Errorf("video provider %q is already registered", id)
 		}
-		if _, err := buildProviderURL(driver.DefaultBaseURL(), ""); err != nil {
+		if _, err := buildProviderURL(driver.DefaultBaseURL(), ""); err != nil && !(driver.ID() == ProviderVideoTasksJSONV1 && driver.DefaultBaseURL() == "") {
 			return nil, fmt.Errorf("video provider %q has an invalid default base URL: %w", id, err)
 		}
 		registry.drivers[id] = driver
@@ -119,6 +119,7 @@ func (r *Registry) Descriptors() []Descriptor {
 var defaultRegistry = MustNewRegistry(
 	Registration{Driver: bblabuDriver{}, Aliases: []string{"bblabu"}},
 	Registration{Driver: fflinkDriver{}, Aliases: []string{"fflink"}},
+	Registration{Driver: videoTasksJSONDriver{}, Aliases: []string{"video-tasks-json-v1"}},
 )
 
 func NormalizeID(value string) (ID, error) {
@@ -141,6 +142,10 @@ func DefaultModelIDs() []string {
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
 	for _, descriptor := range Descriptors() {
+		// The protocol's presets are account opt-in; preserve legacy defaults.
+		if descriptor.ID == ProviderVideoTasksJSONV1 {
+			continue
+		}
 		for _, model := range descriptor.ModelIDs {
 			dedupeKey := strings.ToLower(strings.TrimSpace(model))
 			if canonical, ok := CanonicalModel(model); ok {

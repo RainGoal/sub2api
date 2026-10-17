@@ -9,6 +9,8 @@ import promptAudit from './promptAudit'
 import plugins from './plugins'
 import upstreamBalances from './upstreamBalances'
 import requestAudit from './requestAudit'
+import videoTasks from './videoTasks'
+import videoTaskReviews from './videoTaskReviews'
 
 export default {
   ...overview,
@@ -22,4 +24,6 @@ export default {
   ...plugins,
   ...upstreamBalances,
   ...requestAudit,
+  ...videoTasks,
+  ...videoTaskReviews,
 }

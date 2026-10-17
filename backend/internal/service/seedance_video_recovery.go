@@ -13,11 +13,14 @@ import (
 )
 
 const (
-	seedanceRecoveryPollInterval = 3 * time.Second
-	seedanceRecoveryTaskLease    = 30 * time.Second
-	seedanceRecoveryRetryDelay   = 5 * time.Second
-	seedanceRecoveryBatchSize    = 20
-	seedanceRecoveryMaxAge       = 6 * 24 * time.Hour
+	seedanceRecoveryPollInterval      = 3 * time.Second
+	seedanceRecoveryTaskLease         = 30 * time.Second
+	seedanceRecoveryRetryDelay        = 5 * time.Second
+	seedanceRecoveryBatchSize         = 20
+	seedanceRecoveryMaxAge            = 6 * 24 * time.Hour
+	seedanceRecoveryMeteringGrace     = time.Hour
+	seedanceRecoveryReviewWindow      = 24 * time.Hour
+	seedanceRecoveryReviewRetryWindow = time.Hour
 )
 
 // SeedanceVideoRecoveryService settles tasks even when the client never polls.
@@ -142,6 +145,9 @@ func (s *SeedanceVideoRecoveryService) processTask(ctx context.Context, pending 
 	if pending == nil {
 		return errors.New("seedance recovery task is invalid")
 	}
+	if pending.SettlementStatus == SeedanceVideoSettlementNeedsReview {
+		return nil
+	}
 	// The terminal status is durable intent, not a fresh provider observation.
 	// Retry release directly before looking up an account or making any upstream
 	// request; this is the critical guard after a balance release whose final
@@ -154,18 +160,29 @@ func (s *SeedanceVideoRecoveryService) processTask(ctx context.Context, pending 
 		if createdAtErr == nil && time.Since(createdAt) < seedanceVideoCreatingTTL {
 			return s.gateway.RescheduleSeedanceVideoTask(ctx, pending, createdAt.Add(seedanceVideoCreatingTTL))
 		}
-		logger.L().Error("seedance_video.recovery_creating_task_expired_releasing_hold",
+		logger.L().Error("seedance_video.recovery_creating_task_expired",
 			zap.String("state_id", pending.StateID), zap.String("created_at", pending.CreatedAt))
+		if pending.IDVersion == SeedanceVideoTaskIdentityVersion {
+			return s.gateway.MarkSeedanceVideoTaskNeedsReview(ctx, pending, "submission_outcome_unknown", time.Now().Add(seedanceRecoveryReviewWindow))
+		}
 		return s.releaseFailed(ctx, pending, SeedanceVideoResponseStatusFailed)
 	}
-	if createdAtErr == nil && time.Since(createdAt) >= seedanceRecoveryMaxAge {
-		logger.L().Error("seedance_video.recovery_task_expired_releasing_hold",
+	if createdAtErr == nil && time.Since(createdAt) >= seedanceRecoveryMaxAge &&
+		!seedanceVideoReviewPollingWindowActive(pending, time.Now()) {
+		logger.L().Error("seedance_video.recovery_task_expired",
 			zap.String("task_id", pending.TaskID), zap.String("created_at", pending.CreatedAt))
+		if pending.IDVersion == SeedanceVideoTaskIdentityVersion {
+			return s.gateway.MarkSeedanceVideoTaskNeedsReview(ctx, pending, "provider_outcome_overdue", time.Now().Add(seedanceRecoveryReviewWindow))
+		}
 		return s.releaseFailed(ctx, pending, SeedanceVideoResponseStatusFailed)
 	}
 	account, err := s.accountRepo.GetByID(ctx, pending.AccountID)
 	if err != nil || account == nil || !account.IsSeedance() {
 		return errors.New("seedance recovery account is unavailable")
+	}
+	account, err = AccountForSeedanceVideoTask(pending, account)
+	if err != nil {
+		return err
 	}
 	// A cancellation claim is durable intent. If the request process died after
 	// claiming but before finalizing, retry the provider cancellation rather than
@@ -233,12 +250,27 @@ func (s *SeedanceVideoRecoveryService) processTask(ctx context.Context, pending 
 	return s.settleCompleted(ctx, pending, account, forward.OpenAIForwardResult)
 }
 
+// An administrator can explicitly reopen status polling for an overdue task.
+// Bound that retry by the persisted decision time without changing CreatedAt,
+// which remains the original task and billing timestamp.
+func seedanceVideoReviewPollingWindowActive(pending *SeedanceVideoPendingBilling, now time.Time) bool {
+	if pending.IDVersion != SeedanceVideoTaskIdentityVersion || len(pending.ReviewDecisions) == 0 {
+		return false
+	}
+	decision := pending.ReviewDecisions[len(pending.ReviewDecisions)-1]
+	return decision.Action == "retry_poll" && !decision.DecidedAt.IsZero() &&
+		!decision.DecidedAt.After(now) && now.Before(decision.DecidedAt.Add(seedanceRecoveryReviewRetryWindow))
+}
+
 func (s *SeedanceVideoRecoveryService) releaseFailed(ctx context.Context, pending *SeedanceVideoPendingBilling, terminalStatus string) error {
 	terminalStatus = NormalizeSeedanceVideoReleaseStatus(terminalStatus)
 	if err := s.gateway.PersistSeedanceVideoReleaseIntent(ctx, pending, terminalStatus); err != nil {
 		return err
 	}
 	if err := s.gateway.ReleaseSeedanceVideoBalance(ctx, pending); err != nil {
+		if errors.Is(err, ErrVideoTaskAlreadyCaptured) {
+			return nil
+		}
 		return err
 	}
 	// A recovery release is terminal even when the last provider observation was
@@ -250,8 +282,15 @@ func (s *SeedanceVideoRecoveryService) releaseFailed(ctx context.Context, pendin
 }
 
 func (s *SeedanceVideoRecoveryService) settleCompleted(ctx context.Context, pending *SeedanceVideoPendingBilling, account *Account, status *OpenAIForwardResult) error {
-	result, cost, err := BuildSeedanceVideoCompletionBilling(pending, status)
+	result, cost, err := s.gateway.BuildSeedanceVideoCompletionBillingWithMetering(ctx, pending, status)
 	if err != nil {
+		if errors.Is(err, ErrVideoTaskMeteringUnavailable) {
+			return err
+		}
+		createdAt, parseErr := time.Parse(time.RFC3339Nano, pending.CreatedAt)
+		if pending.IDVersion == SeedanceVideoTaskIdentityVersion && (parseErr != nil || time.Since(createdAt) >= seedanceRecoveryMeteringGrace) {
+			return s.gateway.MarkSeedanceVideoTaskNeedsReview(ctx, pending, "completion_metering_unavailable", time.Now().Add(seedanceRecoveryReviewWindow))
+		}
 		return err
 	}
 	apiKey, err := s.apiKeyRepo.GetByID(ctx, pending.APIKeyID)

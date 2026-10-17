@@ -118,11 +118,10 @@ func (s *OpenAIGatewayService) SelectSeedanceVideoTaskAccount(
 	if s == nil || accountID <= 0 {
 		return nil, decision, ErrNoAvailableAccounts
 	}
-	account, err := s.getSchedulableAccount(ctx, accountID)
+	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return nil, decision, err
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, PlatformSeedance, "", false, "")
 	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) ||
 		!account.IsSeedance() || account.Type != AccountTypeAPIKey {
 		return nil, decision, ErrNoAvailableAccounts
@@ -154,35 +153,42 @@ func (s *OpenAIGatewayService) SelectSeedanceVideoTaskAccount(
 }
 
 type SeedanceVideoPendingBilling struct {
-	StateID               string     `json:"state_id"`
-	TaskID                string     `json:"task_id"`
-	UserID                int64      `json:"user_id"`
-	APIKeyID              int64      `json:"api_key_id"`
-	GroupID               *int64     `json:"group_id,omitempty"`
-	AccountID             int64      `json:"account_id"`
-	ProviderID            string     `json:"provider_id"`
-	Model                 string     `json:"model"`
-	Resolution            string     `json:"resolution"`
-	DurationSeconds       int        `json:"duration_seconds"`
-	ReferenceVideoCount   int        `json:"reference_video_count,omitempty"`
-	OriginalModel         string     `json:"original_model,omitempty"`
-	CreatedAt             string     `json:"created_at"`
-	RequestPayloadHash    string     `json:"request_payload_hash,omitempty"`
-	HoldID                string     `json:"hold_id,omitempty"`
-	HoldAmount            float64    `json:"hold_amount,omitempty"`
-	TotalCostPerSecond    float64    `json:"total_cost_per_second"`
-	ActualCostPerSecond   float64    `json:"actual_cost_per_second"`
-	RateMultiplier        float64    `json:"rate_multiplier"`
-	IsSubscriptionBilling bool       `json:"is_subscription_billing,omitempty"`
-	SubscriptionID        *int64     `json:"subscription_id,omitempty"`
-	UpstreamStatus        string     `json:"upstream_status,omitempty"`
-	SettlementStatus      string     `json:"settlement_status,omitempty"`
-	RetryCount            int        `json:"retry_count,omitempty"`
-	NextPollAt            time.Time  `json:"next_poll_at,omitempty"`
-	LeaseUntil            *time.Time `json:"lease_until,omitempty"`
-	LastError             string     `json:"last_error,omitempty"`
+	IDVersion             int                       `json:"id_version,omitempty"`
+	StateID               string                    `json:"state_id"`
+	TaskID                string                    `json:"task_id"`
+	UserID                int64                     `json:"user_id"`
+	APIKeyID              int64                     `json:"api_key_id"`
+	GroupID               *int64                    `json:"group_id,omitempty"`
+	AccountID             int64                     `json:"account_id"`
+	ProviderID            string                    `json:"provider_id"`
+	Model                 string                    `json:"model"`
+	Resolution            string                    `json:"resolution"`
+	DurationSeconds       int                       `json:"duration_seconds"`
+	ReferenceVideoCount   int                       `json:"reference_video_count,omitempty"`
+	OriginalModel         string                    `json:"original_model,omitempty"`
+	CreatedAt             string                    `json:"created_at"`
+	RequestPayloadHash    string                    `json:"request_payload_hash,omitempty"`
+	HoldID                string                    `json:"hold_id,omitempty"`
+	HoldAmount            float64                   `json:"hold_amount,omitempty"`
+	TotalCostPerSecond    float64                   `json:"total_cost_per_second"`
+	ActualCostPerSecond   float64                   `json:"actual_cost_per_second"`
+	RateMultiplier        float64                   `json:"rate_multiplier"`
+	IsSubscriptionBilling bool                      `json:"is_subscription_billing,omitempty"`
+	SubscriptionID        *int64                    `json:"subscription_id,omitempty"`
+	UpstreamStatus        string                    `json:"upstream_status,omitempty"`
+	SettlementStatus      string                    `json:"settlement_status,omitempty"`
+	RetryCount            int                       `json:"retry_count,omitempty"`
+	NextPollAt            time.Time                 `json:"next_poll_at,omitempty"`
+	LeaseUntil            *time.Time                `json:"lease_until,omitempty"`
+	LastError             string                    `json:"last_error,omitempty"`
+	ReviewReason          string                    `json:"review_reason,omitempty"`
+	ReviewRequestedAt     *time.Time                `json:"review_requested_at,omitempty"`
+	ReviewDeadline        *time.Time                `json:"review_deadline,omitempty"`
+	ReviewDecisions       []VideoTaskReviewDecision `json:"review_decisions,omitempty"`
 
-	AccountCost *SeedanceAccountCostSnapshot `json:"account_cost,omitempty"`
+	AccountCost       *SeedanceAccountCostSnapshot `json:"account_cost,omitempty"`
+	SalesSnapshot     *VideoTaskSalesSnapshot      `json:"sales_snapshot,omitempty"`
+	ExecutionSnapshot *VideoTasksExecutionSnapshot `json:"execution_snapshot,omitempty"`
 }
 
 const (
@@ -204,14 +210,24 @@ func normalizeSeedancePendingBilling(pending *SeedanceVideoPendingBilling) error
 		return err
 	}
 	pending.ProviderID = string(providerID)
-	resolution, ok := LookupVideoBillingResolution(pending.Resolution)
-	if !ok {
-		return fmt.Errorf("seedance video billing resolution is invalid")
+	if pending.IDVersion != 0 {
+		if err := ValidateSeedanceVideoTaskIdentity(pending); err != nil {
+			return err
+		}
 	}
-	pending.Resolution = resolution
-	pending.DurationSeconds = NormalizeVideoBillingDurationForProvider(PlatformSeedance, pending.Model, pending.DurationSeconds)
-	if pending.DurationSeconds <= 0 {
-		return fmt.Errorf("seedance video billing duration is invalid")
+	if pending.IDVersion == 0 || pending.SalesSnapshot == nil {
+		if !validSeedanceAccountCost(pending.TotalCostPerSecond) || !validSeedanceAccountCost(pending.ActualCostPerSecond) {
+			return fmt.Errorf("seedance video legacy sales price is invalid")
+		}
+		resolution, ok := LookupVideoBillingResolution(pending.Resolution)
+		if !ok {
+			return fmt.Errorf("seedance video billing resolution is invalid")
+		}
+		pending.Resolution = resolution
+		pending.DurationSeconds = NormalizeVideoBillingDurationForProvider(PlatformSeedance, pending.Model, pending.DurationSeconds)
+		if pending.DurationSeconds <= 0 {
+			return fmt.Errorf("seedance video billing duration is invalid")
+		}
 	}
 	if strings.TrimSpace(pending.HoldID) == "" {
 		return fmt.Errorf("seedance video hold identity is invalid")
@@ -243,11 +259,74 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	accountCost, err := s.resolveSeedanceAccountCost(ctx, pending, account)
+	if normalizedProviderID == videoprovider.ProviderVideoTasksJSONV1 && pending.SalesSnapshot == nil {
+		return fmt.Errorf("video tasks JSON v1 requires a sales snapshot")
+	}
+	if capability, ok := account.VideoModelCapability(pending.Model); ok && pending.SalesSnapshot != nil {
+		requiredHold, err := videoTaskSalesHoldForCapability(pending.SalesSnapshot, capability, pending.DurationSeconds, pending.ReferenceVideoCount)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrVideoTaskSalesCapabilityMismatch, err)
+		}
+		balanceBilling := !pending.IsSubscriptionBilling && (s.cfg == nil || s.cfg.RunMode != config.RunModeSimple)
+		if balanceBilling && requiredHold > pending.HoldAmount {
+			return fmt.Errorf("%w: account duration bounds exceed the reserved amount", ErrVideoTaskSalesCapabilityMismatch)
+		}
+	}
+	var accountCost *SeedanceAccountCostSnapshot
+	if pending.IDVersion != 0 && pending.SalesSnapshot != nil {
+		policy := VideoQuantityOutputSeconds
+		maximum := float64(0)
+		if capability, ok := account.VideoModelCapability(pending.Model); ok {
+			policy = VideoQuantityRequestedSeconds
+			if capability.MeteringPolicy != videoprovider.VideoMeteringPerVideo {
+				policy = VideoQuantityPolicy(capability.MeteringPolicy)
+			}
+			maximum = float64(capability.MaxDuration + capability.MaxReferenceVideoSeconds)
+		} else if driver, resolveErr := videoprovider.Resolve(string(normalizedProviderID)); resolveErr == nil && driver.BillingPolicy() == videoprovider.BillingOutputAndReference {
+			policy = VideoQuantityOutputAndReferenceSeconds
+		}
+		accountCost, err = ResolveVideoTaskAccountCost(account, pending.Model, pending.Resolution,
+			normalizedProviderID == videoprovider.ProviderVideoTasksJSONV1, policy, maximum)
+		if err == nil && accountCost == nil {
+			accountCost = &SeedanceAccountCostSnapshot{Version: VideoPricingVersion, BillingMode: BillingModeVideo,
+				BillingUnit: pending.SalesSnapshot.BillingUnit, UnitPrice: pending.SalesSnapshot.UnitPrice,
+				RateMultiplier: account.BillingRateMultiplier(), QuantityPolicy: pending.SalesSnapshot.QuantityPolicy,
+				MaxBillableSeconds: pending.SalesSnapshot.MaxBillableSeconds}
+			err = accountCost.Validate()
+		}
+	} else {
+		accountCost, err = s.resolveSeedanceAccountCost(ctx, pending, account)
+	}
 	if err != nil {
 		return err
 	}
-	if err := s.seedanceVideoTaskRepo.AssignAccount(ctx, pending.StateID, account.ID, string(normalizedProviderID), accountCost); err != nil {
+	if capability, ok := account.VideoModelCapability(pending.Model); ok {
+		if err := validateVideoTaskPurchaseCapability(capability, pending.DurationSeconds, accountCost); err != nil {
+			return err
+		}
+	}
+	if pending.IDVersion != 0 {
+		execution := &VideoTasksExecutionSnapshot{Version: 1, Protocol: string(normalizedProviderID),
+			BaseURL: account.GetVideoProviderBaseURL(string(normalizedProviderID)), UpstreamModel: pending.Model,
+			SupportsContent: true, SupportsCancel: normalizedProviderID == videoprovider.ProviderFFLinkV1}
+		if capability, ok := account.VideoModelCapability(pending.Model); ok {
+			execution.Capability = &capability
+			execution.FieldProfile = string(capability.Profile)
+			execution.SupportsCancel = capability.SupportsCancel
+			execution.CapabilityVersion = "1"
+		}
+		if err := execution.Validate(); err != nil {
+			return err
+		}
+		repo, ok := s.seedanceVideoTaskRepo.(SeedanceVideoTaskExecutionRepository)
+		if !ok {
+			return fmt.Errorf("video execution snapshot repository is unavailable")
+		}
+		if err := repo.AssignAccountWithExecution(ctx, pending.StateID, account.ID, string(normalizedProviderID), accountCost, execution, account.GetSeedanceAPIKey()); err != nil {
+			return err
+		}
+		pending.ExecutionSnapshot = execution
+	} else if err := s.seedanceVideoTaskRepo.AssignAccount(ctx, pending.StateID, account.ID, string(normalizedProviderID), accountCost); err != nil {
 		return err
 	}
 	pending.AccountID = account.ID
@@ -469,6 +548,7 @@ func StableSeedanceVideoBillingRequestID(taskID string) string {
 }
 
 type SeedanceVideoPricingSnapshot struct {
+	SalesSnapshot       *VideoTaskSalesSnapshot
 	TotalCostPerSecond  float64
 	ActualCostPerSecond float64
 	RateMultiplier      float64
@@ -486,7 +566,7 @@ func seedanceVideoPricingBillingSeconds(info SeedanceVideoRequestInfo) int {
 }
 
 func (s *OpenAIGatewayService) ResolveSeedanceVideoPricingSnapshot(ctx context.Context, apiKey *APIKey, info SeedanceVideoRequestInfo) (*SeedanceVideoPricingSnapshot, error) {
-	if s == nil || s.billingService == nil || apiKey == nil || apiKey.User == nil || apiKey.Group == nil || info.DurationSeconds <= 0 {
+	if s == nil || s.billingService == nil || apiKey == nil || apiKey.User == nil || apiKey.Group == nil {
 		return nil, fmt.Errorf("seedance video pricing dependencies are unavailable")
 	}
 	baseMultiplier := 1.0
@@ -497,6 +577,12 @@ func (s *OpenAIGatewayService) ResolveSeedanceVideoPricingSnapshot(ctx context.C
 		baseMultiplier = s.ResolveUserGroupRateMultiplier(ctx, apiKey.User.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
 	rateMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
+	if s.VideoTasksEnabled() {
+		return s.resolveVideoTasksPricingSnapshot(ctx, apiKey, info, rateMultiplier)
+	}
+	if info.DurationSeconds <= 0 {
+		return nil, fmt.Errorf("video billing duration is invalid")
+	}
 	billingSeconds := seedanceVideoPricingBillingSeconds(info)
 	unitPrice, err := s.GetSeedanceVideoSalesPrice(ctx, apiKey, info)
 	if err != nil {
@@ -526,14 +612,14 @@ func (s *OpenAIGatewayService) GetSeedanceVideoSalesPrice(ctx context.Context, a
 	if s == nil || apiKey == nil {
 		return nil, fmt.Errorf("seedance sales pricing dependencies are unavailable")
 	}
-	price, _, err := ResolveSeedanceSalesPrice(ctx, s.channelService, apiKey.Group, info.Model, info.Resolution)
+	price, err := ResolveVideoSalesPrice(ctx, s.channelService, apiKey.Group, info.Model, info.Resolution)
 	if err != nil {
 		return nil, err
 	}
-	if price == nil || !validSeedanceAccountCost(*price) {
+	if price == nil || !validSeedanceAccountCost(price.UnitPrice) || (!s.VideoTasksEnabled() && price.Version != 0) {
 		return nil, fmt.Errorf("seedance sales price is not configured for this model and resolution")
 	}
-	return price, nil
+	return &price.UnitPrice, nil
 }
 
 func NewSeedanceVideoHoldID() string {
@@ -563,18 +649,23 @@ func (s *OpenAIGatewayService) ReserveSeedanceVideoBalance(ctx context.Context, 
 }
 
 func (s *OpenAIGatewayService) ReleaseSeedanceVideoBalance(ctx context.Context, pending *SeedanceVideoPendingBilling) error {
-	if pending == nil || pending.HoldAmount <= 0 || strings.TrimSpace(pending.HoldID) == "" {
+	if pending == nil || strings.TrimSpace(pending.HoldID) == "" ||
+		(pending.IDVersion != SeedanceVideoTaskIdentityVersion && pending.HoldAmount <= 0) {
 		return nil
 	}
 	if s == nil || s.usageBillingRepo == nil {
 		return errors.New("seedance video balance hold is unavailable")
 	}
-	_, err := s.usageBillingRepo.ReleaseBatchImageBalance(ctx, &BatchImageBalanceHoldCommand{
+	cmd := &BatchImageBalanceHoldCommand{
 		RequestID: BatchImageReleaseRequestID(pending.HoldID), APIKeyID: pending.APIKeyID,
 		UserID: pending.UserID, BatchID: pending.HoldID, HoldAmount: pending.HoldAmount,
 		RequestPayloadHash: pending.RequestPayloadHash,
-	})
-	if errors.Is(err, ErrUsageBillingRequestConflict) {
+	}
+	if pending.IDVersion == SeedanceVideoTaskIdentityVersion {
+		cmd.VideoTaskStateID, cmd.VideoTaskLeaseUntil = pending.StateID, pending.LeaseUntil
+	}
+	_, err := s.usageBillingRepo.ReleaseBatchImageBalance(ctx, cmd)
+	if pending.IDVersion != SeedanceVideoTaskIdentityVersion && errors.Is(err, ErrUsageBillingRequestConflict) {
 		err = nil
 	}
 	if err == nil && s.billingCacheService != nil {
@@ -597,8 +688,8 @@ func BuildSeedanceVideoCompletionBilling(pending *SeedanceVideoPendingBilling, s
 	}
 	merged := *status
 	merged.VideoProvider = PlatformSeedance
-	merged.ResponseID = pending.TaskID
-	merged.RequestID = StableSeedanceVideoBillingRequestID(pending.TaskID)
+	merged.ResponseID = pending.PublicID()
+	merged.RequestID = StableSeedanceVideoBillingRequestID(pending.PublicID())
 	merged.VideoCount = 1
 	merged.ImageCount = 0
 	if strings.TrimSpace(merged.Model) == "" {
@@ -606,6 +697,9 @@ func BuildSeedanceVideoCompletionBilling(pending *SeedanceVideoPendingBilling, s
 	}
 	if strings.TrimSpace(merged.BillingModel) == "" {
 		merged.BillingModel = pending.Model
+	}
+	if pending.SalesSnapshot != nil {
+		return buildVideoTasksCompletionBilling(pending, &merged)
 	}
 	driver, err := videoprovider.Resolve(pending.ProviderID)
 	if err != nil {
@@ -665,16 +759,37 @@ func (s *OpenAIGatewayService) ForwardSeedanceVideo(ctx context.Context, c *gin.
 	}
 	upstreamCtx, release := detachUpstreamContext(ctx)
 	defer release()
+	var capability *videoprovider.VideoModelCapability
+	if createRequest != nil {
+		capability = createRequest.Capability
+	}
+	if capability == nil {
+		if caps, capErr := account.VideoModelCapabilities(); capErr == nil && len(caps) == 1 {
+			capability = &caps[0]
+		}
+	}
 	req, err := driver.BuildRequest(WithHTTPUpstreamRedirectsDisabled(upstreamCtx), videoprovider.RequestParams{
 		BaseURL: account.GetVideoProviderBaseURL(string(driver.ID())), APIKey: apiKey,
 		Operation: operation, TaskID: taskID, CreateRequest: createRequest,
+		Capability: capability,
 	})
 	if err != nil {
 		return nil, err
 	}
 	account.ApplyHeaderOverrides(req.Header)
-	resp, respBody, err := s.doSeedanceJSON(ctx, c, account, req)
+	forwardContext := c
+	if endpoint == SeedanceVideoEndpointCreate && s.VideoTasksEnabled() {
+		forwardContext = nil
+	}
+	resp, respBody, err := s.doSeedanceJSON(ctx, forwardContext, account, req)
 	if err != nil {
+		if endpoint == SeedanceVideoEndpointCreate && s.VideoTasksEnabled() {
+			var rejected *UpstreamFailoverError
+			if !errors.As(err, &rejected) || rejected.StatusCode < 400 || rejected.StatusCode >= 500 || rejected.StatusCode == http.StatusRequestTimeout {
+				return nil, &VideoSubmissionUnknownError{Cause: err}
+			}
+			rejected.NextAccountAction = NextAccountStop
+		}
 		return nil, err
 	}
 	task, parseErr := driver.ParseTask(respBody, taskID)
@@ -682,6 +797,9 @@ func (s *OpenAIGatewayService) ForwardSeedanceVideo(ctx context.Context, c *gin.
 		if endpoint == SeedanceVideoEndpointCancel && len(bytes.TrimSpace(respBody)) == 0 {
 			task = videoprovider.Task{ID: taskID, Status: videoprovider.StatusCanceled}
 		} else {
+			if endpoint == SeedanceVideoEndpointCreate && s.VideoTasksEnabled() {
+				return nil, &VideoSubmissionUnknownError{Cause: parseErr}
+			}
 			return nil, &UpstreamFailoverError{
 				StatusCode: http.StatusBadGateway, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(),
 				NextAccountAction: NextAccountRetry,
@@ -709,6 +827,9 @@ func (s *OpenAIGatewayService) ForwardSeedanceVideo(ctx context.Context, c *gin.
 	result := seedanceForwardResultFromTask(task)
 	taskStatus := string(task.Status)
 	if endpoint == SeedanceVideoEndpointCreate && strings.TrimSpace(result.ResponseID) == "" {
+		if s.VideoTasksEnabled() {
+			return nil, &VideoSubmissionUnknownError{Cause: fmt.Errorf("upstream task identity is missing")}
+		}
 		return nil, &UpstreamFailoverError{
 			StatusCode: http.StatusBadGateway, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(),
 			NextAccountAction: NextAccountRetry,
@@ -982,7 +1103,9 @@ func seedanceForwardResultFromTask(task videoprovider.Task) *OpenAIForwardResult
 	result := &OpenAIForwardResult{
 		ResponseID: task.ID, Model: task.Model, BillingModel: task.Model,
 		VideoResolution: task.Resolution, VideoDurationSeconds: task.DurationSeconds,
-		VideoReferenceInputSeconds: task.ReferenceInputSeconds,
+		VideoReferenceInputSeconds:      task.ReferenceInputSeconds,
+		VideoDurationSecondsExact:       task.DurationSecondsExact,
+		VideoReferenceInputSecondsExact: task.ReferenceInputSecondsExact,
 	}
 	if task.Status == videoprovider.StatusCompleted {
 		result.VideoCount = 1

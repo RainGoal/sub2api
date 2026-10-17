@@ -42,6 +42,11 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		}
 	}()
 
+	if cmd.VideoTaskStateID != "" {
+		if err := lockVideoTaskCapture(ctx, tx, cmd); err != nil {
+			return nil, err
+		}
+	}
 	applied, err := r.claimUsageBillingKey(ctx, tx, cmd)
 	if err != nil {
 		return nil, err
@@ -53,6 +58,15 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	result := &service.UsageBillingApplyResult{Applied: true}
 	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
 		return nil, err
+	}
+	if cmd.VideoTaskStateID != "" {
+		// Commit the paid amount with its dedup key so a later release can
+		// reconcile a lost task-state write without consuming another hold.
+		if _, err := tx.ExecContext(ctx, `UPDATE custom_seedance_video_tasks
+SET actual_cost = $2, updated_at = NOW() WHERE state_id = $1`,
+			cmd.VideoTaskStateID, service.QuantizeUsageBillingAmount(cmd.BalanceCost+cmd.SubscriptionCost)); err != nil {
+			return nil, err
+		}
 	}
 
 	if !cmd.SalesConsumedAt.IsZero() {
@@ -124,6 +138,9 @@ func (r *usageBillingRepository) CaptureBatchImageBalance(ctx context.Context, c
 }
 
 func (r *usageBillingRepository) ReleaseBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+	if cmd != nil && cmd.VideoTaskStateID != "" {
+		return r.releaseVideoTaskBalance(ctx, cmd)
+	}
 	return r.applyBatchImageBalanceHold(ctx, cmd, releaseUsageBillingBatchImageBalance)
 }
 

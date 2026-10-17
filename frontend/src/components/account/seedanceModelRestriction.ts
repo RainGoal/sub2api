@@ -7,6 +7,7 @@ export function filterSeedanceModelSelection(
   selection: SeedanceModelSelection,
   provider: VideoProviderID
 ): SeedanceModelSelection {
+  if (provider === 'video_tasks_json_v1') return selection === null ? null : [...new Set(selection.map((model) => model.trim()).filter(Boolean))]
   if (selection === null) return null
   const selected = new Set(selection.map(normalizeSeedanceModelID))
   return videoProviderModelOptions(provider).filter(({ id }) => selected.has(id)).map(({ id }) => id)

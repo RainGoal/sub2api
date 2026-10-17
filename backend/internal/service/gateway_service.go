@@ -1441,6 +1441,18 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 
 	for _, acc := range accounts {
 		if platform == PlatformSeedance {
+			if acc.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+				if s.cfg == nil || !s.cfg.Gateway.VideoTasksJSONV1Enabled {
+					continue
+				}
+				for model := range acc.GetModelMapping() {
+					if acc.isSeedanceModelSupported(model) {
+						modelSet[model] = struct{}{}
+					}
+				}
+				hasAnyMapping = len(modelSet) > 0
+				continue
+			}
 			driver, resolveErr := videoprovider.Resolve(string(acc.GetVideoProviderID()))
 			if resolveErr != nil {
 				continue

@@ -77,7 +77,11 @@ func normalizeAccountModelCostEntry(platform string, p *ChannelModelPricing) err
 		return fmt.Errorf("models are required")
 	}
 	for i, model := range p.Models {
-		model = normalizeAccountCostModel(platform, model)
+		if p.VideoPricingVersion != 0 {
+			model = strings.TrimSpace(model)
+		} else {
+			model = normalizeAccountCostModel(platform, model)
+		}
 		if model == "" || strings.ContainsAny(model, " \t\r\n") ||
 			(strings.Contains(model, "*") && (!strings.HasSuffix(model, "*") || strings.Count(model, "*") != 1)) {
 			return fmt.Errorf("invalid model pattern")
@@ -99,6 +103,12 @@ func normalizeAccountModelCostEntry(platform string, p *ChannelModelPricing) err
 		return fmt.Errorf("account purchase prices do not support time pricing")
 	}
 	p.TimePricing = nil
+	if p.VideoPricingVersion != 0 {
+		return normalizeExplicitVideoPricing(p)
+	}
+	if p.VideoBillingUnit != "" || p.VideoQuantityPolicy != "" || p.VideoMaxBillableSeconds != 0 {
+		return fmt.Errorf("explicit video units require video_pricing_version 1")
+	}
 	// Ordinary gateways settle after the provider succeeds. Require a default
 	// so an uncovered context/size cannot turn into a late billing failure.
 	// Seedance checks the selected resolution before submitting an async task.
@@ -170,6 +180,12 @@ func LookupAccountModelCostPricing(account *Account, model string) (*ChannelMode
 	if !ok {
 		return nil, invalidAccountModelCost("invalid normalized model cost price list")
 	}
+	if account.Platform == PlatformSeedance {
+		if pricing := seedanceStatsPricingForModel(prices, model); pricing != nil {
+			return pricing, nil
+		}
+		prices = legacyVideoPricingRows(prices)
+	}
 	return findPricingForModel(prices, account.Platform, normalizeAccountCostModel(account.Platform, model)), nil
 }
 
@@ -218,7 +234,7 @@ func ResolveAccountModelCost(ctx context.Context, billing *BillingService, accou
 			return nil, invalidAccountModelCost("matched model has no purchase price for the requested tier")
 		}
 		units := float64(max(1, input.RequestCount))
-		if pricing.BillingMode == BillingModeVideo {
+		if pricing.BillingMode == BillingModeVideo && (pricing.VideoPricingVersion == 0 || pricing.VideoBillingUnit == VideoBillingPerSecond) {
 			units = input.UsageUnits
 			if units <= 0 {
 				return nil, invalidAccountModelCost("video purchase cost requires positive billing seconds")

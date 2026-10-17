@@ -116,7 +116,26 @@ type StudioImageReader interface {
 	Get(context.Context, ImageTaskOwner, string) (*ImageTask, error)
 }
 type StudioVideoReader interface {
+	// The legacy method name accepts public IDs and legacy upstream IDs only.
 	GetByProviderTask(context.Context, string, int64, int64) (*SeedanceVideoPendingBilling, error)
+}
+
+type studioVideoPublicReader interface {
+	GetByPublicID(context.Context, string, int64, int64) (*SeedanceVideoPendingBilling, error)
+}
+
+func readStudioVideo(ctx context.Context, reader StudioVideoReader, publicID string, userID, keyID int64) (*SeedanceVideoPendingBilling, error) {
+	var actual *SeedanceVideoPendingBilling
+	var err error
+	if publicReader, ok := reader.(studioVideoPublicReader); ok {
+		actual, err = publicReader.GetByPublicID(ctx, publicID, userID, keyID)
+	} else {
+		actual, err = reader.GetByProviderTask(ctx, publicID, userID, keyID)
+	}
+	if err == nil && actual != nil && actual.IDVersion != 0 && actual.PublicID() != publicID {
+		return nil, ErrSeedanceVideoTaskNotFound
+	}
+	return actual, err
 }
 
 type StudioService struct {
@@ -193,7 +212,7 @@ func (s *StudioService) Save(ctx context.Context, userID int64, task StudioTask)
 			}
 		}
 	} else if previous == nil {
-		actual, readErr := s.videos.GetByProviderTask(ctx, task.ID, userID, task.KeyID)
+		actual, readErr := readStudioVideo(ctx, s.videos, task.ID, userID, task.KeyID)
 		if readErr != nil {
 			if errors.Is(readErr, ErrSeedanceVideoTaskNotFound) {
 				return nil, ErrStudioTaskNotFound

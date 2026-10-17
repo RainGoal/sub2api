@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -67,7 +68,11 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, rule_id, platform, models, billing_mode, input_price, output_price,
-		        cache_write_price, cache_write_1h_price, cache_read_price, reasoning_effort_multipliers, image_output_price, per_request_price, created_at, updated_at
+		        cache_write_price, cache_write_1h_price, cache_read_price, reasoning_effort_multipliers, image_output_price, per_request_price, created_at, updated_at, video_pricing_config,
+		 CASE WHEN platform = 'seedance' AND video_pricing_config->>'version' = '1' THEN
+		   (SELECT COALESCE(json_agg(row_to_json(iv) ORDER BY iv.sort_order, iv.id), '[]'::json)
+		    FROM channel_account_stats_pricing_intervals iv WHERE iv.pricing_id = channel_account_stats_model_pricing.id)
+		 END AS video_pricing_intervals
 		 FROM channel_account_stats_model_pricing WHERE rule_id = ANY($1) ORDER BY rule_id, id`,
 		pq.Array(ruleIDs),
 	)
@@ -82,10 +87,12 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 		var ruleID int64
 		var modelsJSON []byte
 		var reasoningEffortMultipliersJSON []byte
+		var videoPricingJSON []byte
+		var videoIntervalsJSON []byte
 		if err := rows.Scan(
 			&p.ID, &ruleID, &p.Platform, &modelsJSON, &p.BillingMode,
 			&p.InputPrice, &p.OutputPrice, &p.CacheWritePrice, &p.CacheWrite1hPrice, &p.CacheReadPrice,
-			&reasoningEffortMultipliersJSON, &p.ImageOutputPrice, &p.PerRequestPrice, &p.CreatedAt, &p.UpdatedAt,
+			&reasoningEffortMultipliersJSON, &p.ImageOutputPrice, &p.PerRequestPrice, &p.CreatedAt, &p.UpdatedAt, &videoPricingJSON, &videoIntervalsJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan account stats model pricing: %w", err)
 		}
@@ -97,17 +104,30 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 			return nil, err
 		}
 		p.ReasoningEffortMultipliers = multipliers
+		if err := unmarshalVideoPricingConfig(&p, videoPricingJSON); err != nil {
+			return nil, err
+		}
+		if p.VideoPricingVersion == service.VideoPricingVersion {
+			if err := unmarshalVideoPricingIntervals(&p, videoIntervalsJSON); err != nil {
+				return nil, err
+			}
+		}
 		pricingMap[ruleID] = append(pricingMap[ruleID], p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate account stats model pricing: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 
 	// Load intervals for all pricing entries.
 	var allPricingIDs []int64
 	for _, pricings := range pricingMap {
 		for _, p := range pricings {
-			allPricingIDs = append(allPricingIDs, p.ID)
+			if p.VideoPricingVersion != service.VideoPricingVersion {
+				allPricingIDs = append(allPricingIDs, p.ID)
+			}
 		}
 	}
 	if len(allPricingIDs) > 0 {
@@ -117,7 +137,9 @@ func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex
 		}
 		for ruleID, pricings := range pricingMap {
 			for i := range pricings {
-				pricings[i].Intervals = intervalsMap[pricings[i].ID]
+				if pricings[i].VideoPricingVersion != service.VideoPricingVersion {
+					pricings[i].Intervals = intervalsMap[pricings[i].ID]
+				}
 			}
 			pricingMap[ruleID] = pricings
 		}
@@ -187,13 +209,23 @@ func createAccountStatsModelPricingTx(ctx context.Context, tx *sql.Tx, ruleID in
 		billingMode = service.BillingModeToken
 	}
 	platform := pricing.Platform
-	err = tx.QueryRowContext(ctx,
-		`INSERT INTO channel_account_stats_model_pricing (rule_id, platform, models, billing_mode, input_price, output_price, cache_write_price, cache_write_1h_price, cache_read_price, reasoning_effort_multipliers, image_output_price, per_request_price)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at, updated_at`,
+	query := `INSERT INTO channel_account_stats_model_pricing (rule_id, platform, models, billing_mode, input_price, output_price, cache_write_price, cache_write_1h_price, cache_read_price, reasoning_effort_multipliers, image_output_price, per_request_price)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at, updated_at`
+	args := []any{
 		ruleID, platform, modelsJSON, billingMode,
 		pricing.InputPrice, pricing.OutputPrice, pricing.CacheWritePrice, pricing.CacheWrite1hPrice, pricing.CacheReadPrice,
 		reasoningEffortMultipliersJSON, pricing.ImageOutputPrice, pricing.PerRequestPrice,
-	).Scan(&pricing.ID, &pricing.CreatedAt, &pricing.UpdatedAt)
+	}
+	if platform == service.PlatformSeedance && pricing.VideoPricingVersion != 0 {
+		videoConfig, err := marshalVideoPricingConfig(pricing)
+		if err != nil {
+			return err
+		}
+		query = strings.Replace(query, "per_request_price)", "per_request_price, video_pricing_config)", 1)
+		query = strings.Replace(query, "$11, $12)", "$11, $12, $13)", 1)
+		args = append(args, videoConfig)
+	}
+	err = tx.QueryRowContext(ctx, query, args...).Scan(&pricing.ID, &pricing.CreatedAt, &pricing.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert account stats model pricing: %w", err)
 	}

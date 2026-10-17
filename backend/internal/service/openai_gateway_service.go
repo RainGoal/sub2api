@@ -290,7 +290,10 @@ type OpenAIForwardResult struct {
 	// VideoProvider selects provider-specific duration normalization.
 	VideoProvider string
 	// VideoDurationSeconds 是提交时请求的生成时长（xAI 按输出秒数计费），已归一化到 1-15 秒。
-	VideoDurationSeconds int
+	VideoDurationSeconds            int
+	VideoDurationSecondsExact       float64
+	VideoPricingVersion             int
+	VideoReferenceInputSecondsExact float64
 	// VideoBillingDurationSeconds includes provider-specific extra billable time.
 	VideoBillingDurationSeconds int
 	// VideoReferenceInputSeconds records Seedance reference-video input time when known.

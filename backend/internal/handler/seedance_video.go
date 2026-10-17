@@ -96,7 +96,7 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 			return
 		}
-		createRequest, body, requestInfo, err = service.PrepareSeedanceVideoRequest(body)
+		createRequest, body, requestInfo, err = h.gatewayService.PrepareVideoRequestForKey(c.Request.Context(), apiKey, body)
 		if err != nil {
 			h.errorResponse(c, http.StatusUnprocessableEntity, "invalid_request_error", err.Error())
 			return
@@ -158,6 +158,15 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			RequestPayloadHash: service.HashUsageRequestPayload(body),
 			TotalCostPerSecond: pricing.TotalCostPerSecond, ActualCostPerSecond: pricing.ActualCostPerSecond,
 			RateMultiplier: pricing.RateMultiplier, IsSubscriptionBilling: isSubscriptionBilling,
+			SalesSnapshot: pricing.SalesSnapshot,
+		}
+		if h.gatewayService.VideoTasksEnabled() {
+			pendingTemplate.StateID, err = service.NewSeedanceVideoPublicTaskID()
+			if err != nil {
+				h.errorResponse(c, http.StatusServiceUnavailable, "video_identity_unavailable", "Failed to create video task identity")
+				return
+			}
+			pendingTemplate.IDVersion = service.SeedanceVideoTaskIdentityVersion
 		}
 		if isSubscriptionBilling {
 			pendingTemplate.SubscriptionID = &subscription.ID
@@ -230,6 +239,10 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			return
 		}
 		if endpoint == service.SeedanceVideoEndpointCancel {
+			if pending.ExecutionSnapshot != nil && !pending.ExecutionSnapshot.SupportsCancel {
+				h.errorResponse(c, http.StatusNotImplemented, "operation_not_supported", "Video cancellation is not supported by the configured provider")
+				return
+			}
 			// A live processing lease belongs to another request/worker and must
 			// not be stolen. Once the lease has expired, the cancellation claim
 			// below is allowed to fence the abandoned owner and retry safely.
@@ -298,6 +311,7 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 	routingStart := time.Now()
 	var lastFailoverErr *service.UpstreamFailoverError
 	accountCostMissing := false
+	accountParametersUnsupported := false
 
 	for {
 		var selection *service.AccountSelectionResult
@@ -319,6 +333,8 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			} else if accountCostMissing {
 				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_account_cost_not_configured",
 					"Seedance account cost is not configured for this model and resolution")
+			} else if accountParametersUnsupported {
+				h.errorResponse(c, http.StatusUnprocessableEntity, "invalid_request_error", "No configured video account supports these parameters")
 			} else {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, selectErr)
 				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_no_available_account", "No available Seedance accounts")
@@ -327,6 +343,26 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 		}
 		account := selection.Account
 		if endpoint == service.SeedanceVideoEndpointCreate {
+			validated, validationErr := h.gatewayService.PrepareVideoRequestForAccount(createRequest, account)
+			if validationErr != nil {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				failedAccountIDs[account.ID] = struct{}{}
+				accountParametersUnsupported = true
+				// Local capability filtering never sends a generation request.
+				// Exhaust the finite candidate set before applying transport retries.
+				if pendingTemplate.IDVersion == service.SeedanceVideoTaskIdentityVersion {
+					continue
+				}
+				if switchCount < maxSwitches {
+					switchCount++
+					continue
+				}
+				h.errorResponse(c, http.StatusUnprocessableEntity, "invalid_request_error", "No configured video account supports these parameters")
+				return
+			}
+			createRequest = validated
 			taskProviderID = string(account.GetVideoProviderID())
 			if assignErr := h.gatewayService.AssignSeedanceVideoTaskAccount(requestCtx, &pendingTemplate, account, taskProviderID); assignErr != nil {
 				if selection.ReleaseFunc != nil {
@@ -334,8 +370,17 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 					selection.ReleaseFunc = nil
 				}
 				reqLog.Error("seedance_video.assign_task_account_failed", zap.Error(assignErr), zap.Int64("account_id", account.ID))
+				if errors.Is(assignErr, service.ErrVideoTaskSalesCapabilityMismatch) {
+					accountParametersUnsupported = true
+					failedAccountIDs[account.ID] = struct{}{}
+					continue
+				}
 				if errors.Is(assignErr, service.ErrSeedanceAccountCostMissing) {
 					accountCostMissing = true
+					if pendingTemplate.IDVersion == service.SeedanceVideoTaskIdentityVersion {
+						failedAccountIDs[account.ID] = struct{}{}
+						continue
+					}
 					if switchCount < maxSwitches {
 						// A local price gap is not a provider failure. Exclude only
 						// this request's candidate and retain the existing retry bound.
@@ -350,6 +395,16 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 				}
 				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_state_persistence_failed",
 					"Failed to persist Seedance account assignment")
+				return
+			}
+		}
+		if endpoint.IsLookup() && lookupPending != nil {
+			account, err = service.AccountForSeedanceVideoTask(lookupPending, account)
+			if err != nil {
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				h.errorResponse(c, http.StatusServiceUnavailable, "video_original_account_unavailable", "Video task account is unavailable")
 				return
 			}
 		}
@@ -368,7 +423,11 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 					accountRelease()
 				}
 			}()
-			return h.gatewayService.ForwardSeedanceVideo(requestCtx, c, account, taskProviderID, endpoint, taskID, createRequest)
+			upstreamID := taskID
+			if lookupPending != nil {
+				upstreamID = lookupPending.UpstreamID()
+			}
+			return h.gatewayService.ForwardSeedanceVideo(requestCtx, c, account, taskProviderID, endpoint, upstreamID, createRequest)
 		}()
 		if endpoint == service.SeedanceVideoEndpointCancel {
 			// A local driver/build error is safe to roll back. Once the request
@@ -378,6 +437,18 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			cancellationForwardAttempted = seedanceVideoCancellationReachedUpstream(c, forwardErr)
 		}
 		if forwardErr != nil {
+			var unknown *service.VideoSubmissionUnknownError
+			if errors.As(forwardErr, &unknown) {
+				taskNeedsRelease, holdReserved = false, false
+				reviewCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if reviewErr := h.gatewayService.MarkSeedanceVideoTaskNeedsReview(reviewCtx, &pendingTemplate, "submission_outcome_unknown", time.Now().Add(24*time.Hour)); reviewErr != nil {
+					reqLog.Error("video.review_persist_failed", zap.Error(reviewErr))
+				}
+				c.Header("X-Video-Task-ID", pendingTemplate.PublicID())
+				h.errorResponse(c, http.StatusBadGateway, "video_submission_unknown", "Video submission outcome is unknown; do not retry automatically. Contact support with X-Video-Task-ID")
+				return
+			}
 			if errors.Is(forwardErr, videoprovider.ErrVideoTaskCancellationUnsupported) {
 				// No provider request was sent for this capability error, so the
 				// local claim can be rolled back immediately for a retry.
@@ -423,6 +494,7 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 				return
 			}
 			pending := pendingTemplate
+			pending.TaskID = taskID
 			pending.AccountID = account.ID
 			// Preserve the provider-neutral task state in the durable snapshot. A
 			// provider can reject a task synchronously even though the create
@@ -433,6 +505,11 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 				pending.UpstreamStatus = "queued"
 			}
 			if err := h.gatewayService.StoreSeedanceVideoPendingBilling(requestCtx, taskID, subject.UserID, apiKey.ID, pending); err != nil {
+				if pending.IDVersion != 0 {
+					taskNeedsRelease, holdReserved = false, false
+					c.Header("X-Video-Task-ID", pending.PublicID())
+					_ = h.gatewayService.MarkSeedanceVideoTaskNeedsReview(context.WithoutCancel(requestCtx), &pending, "provider_identity_persistence_failed", time.Now().Add(24*time.Hour))
+				}
 				reqLog.Error("seedance_video.store_pending_billing_failed", zap.Error(err), zap.String("task_id", taskID))
 				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_state_persistence_failed",
 					"Video task was created upstream but its local state could not be persisted; do not retry automatically")
@@ -440,6 +517,8 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 			}
 			taskNeedsRelease = false
 			holdReserved = false
+			taskID = pending.PublicID()
+			result.ResponseID = taskID
 			if err := h.gatewayService.BindSeedanceVideoTaskAccount(requestCtx, apiKey.GroupID, taskID, subject.UserID, apiKey.ID, account.ID); err != nil {
 				reqLog.Warn("seedance_video.bind_task_account_failed_using_pending_fallback", zap.Error(err), zap.String("task_id", taskID))
 			}
@@ -583,7 +662,11 @@ func writeSeedanceVideoResponse(c *gin.Context, statusCode int, result *service.
 func seedanceVideoResponseMeta(taskID string, result *service.SeedanceVideoForwardResult, pending *service.SeedanceVideoPendingBilling, requestInfo service.SeedanceVideoRequestInfo) service.SeedanceVideoResponseMeta {
 	meta := service.SeedanceVideoResponseMeta{ID: strings.TrimSpace(taskID)}
 	if pending != nil {
+		if publicID := pending.PublicID(); publicID != "" {
+			meta.ID = publicID
+		}
 		meta.Model = pending.Model
+		meta.PreserveModel = pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Protocol == string(videoprovider.ProviderVideoTasksJSONV1)
 		meta.Resolution = pending.Resolution
 		meta.Duration = pending.DurationSeconds
 		meta.SettlementStatus = pending.SettlementStatus
@@ -648,6 +731,8 @@ func seedanceVideoLocalTerminalResult(endpoint service.SeedanceVideoEndpoint, ta
 				// released billing state must never be resurrected by a later poll.
 				localStatus = service.SeedanceVideoResponseStatusFailed
 			}
+		case service.SeedanceVideoSettlementNeedsReview:
+			localStatus = service.SeedanceVideoResponseStatusInProgress
 		case service.SeedanceVideoSettlementProcessing:
 			// A provider completion can still be in the local billing commit
 			// window. Keep the public state in progress until the row is settled,
@@ -716,7 +801,7 @@ func seedanceVideoContentUnavailable(pending *service.SeedanceVideoPendingBillin
 }
 
 func finalizeSeedanceVideoCancellation(ctx context.Context, h *OpenAIGatewayHandler, reqLog *zap.Logger, taskID string, pending *service.SeedanceVideoPendingBilling, terminalStatus string) error {
-	if pending == nil || !strings.EqualFold(strings.TrimSpace(pending.TaskID), strings.TrimSpace(taskID)) {
+	if pending == nil || strings.TrimSpace(pending.PublicID()) != strings.TrimSpace(taskID) {
 		return service.ErrSeedanceVideoTaskNotFound
 	}
 	if pending.SettlementStatus == service.SeedanceVideoSettlementSettled || pending.SettlementStatus == service.SeedanceVideoSettlementReleased {
@@ -776,7 +861,7 @@ func prepareSeedanceVideoCompletionBilling(ctx context.Context, h *OpenAIGateway
 		return nil
 	}
 	pending = claimedPending
-	merged, cost, buildErr := service.BuildSeedanceVideoCompletionBilling(pending, status)
+	merged, cost, buildErr := h.gatewayService.BuildSeedanceVideoCompletionBillingWithMetering(ctx, pending, status)
 	if buildErr != nil {
 		if retryErr := h.gatewayService.RetrySeedanceVideoBillingWithLease(ctx, pending, "settlement retry"); retryErr != nil && reqLog != nil {
 			reqLog.Warn("seedance_video.completion_billing_retry_schedule_failed", zap.String("task_id", taskID), zap.Error(retryErr))
@@ -841,8 +926,8 @@ func recordSeedanceVideoUsage(c *gin.Context, h *OpenAIGatewayHandler, reqLog *z
 		}
 		return
 	}
-	result.RequestID = service.StableSeedanceVideoBillingRequestID(pending.TaskID)
-	result.ResponseID = pending.TaskID
+	result.RequestID = service.StableSeedanceVideoBillingRequestID(pending.PublicID())
+	result.ResponseID = pending.PublicID()
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	channelUsageFields := service.ChannelUsageFields{

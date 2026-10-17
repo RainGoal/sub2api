@@ -14,10 +14,13 @@ describe('video provider catalog', () => {
   it('keeps protocol metadata in one ordered catalog', () => {
     expect(VIDEO_PROVIDER_OPTIONS.map((provider) => provider.id)).toEqual([
       'bblabu_v1',
-      'fflink_v1'
+      'fflink_v1',
+      'video_tasks_json_v1'
     ])
     expect(videoProviderDefaultBaseUrl('fflink_v1')).toBe('https://api.fflink.top/v1')
     expect(videoProviderDisplayName('bblabu_v1')).toBe('bblabu V1')
+    expect(videoProviderDefaultBaseUrl('video_tasks_json_v1')).toBe('')
+    expect(videoProviderModelOptions('video_tasks_json_v1')).toEqual([])
   })
 
   it('falls back to the backward-compatible default for missing and unknown values', () => {

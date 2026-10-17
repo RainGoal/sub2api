@@ -83,6 +83,8 @@ type postUsageBillingParams struct {
 	IsSubscriptionBill    bool
 	BalanceHoldID         string
 	BalanceHoldAmount     float64
+	VideoTaskStateID      string
+	VideoTaskLeaseUntil   *time.Time
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
 	Platform              string // 来自 APIKey 关联 Group 的平台标识
@@ -296,14 +298,16 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 
 	cmd := &UsageBillingCommand{
-		RequestID:          requestID,
-		APIKeyID:           p.APIKey.ID,
-		UserID:             p.User.ID,
-		AccountID:          p.Account.ID,
-		AccountType:        p.Account.Type,
-		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
-		BalanceHoldID:      strings.TrimSpace(p.BalanceHoldID),
-		BalanceHoldAmount:  p.BalanceHoldAmount,
+		RequestID:           requestID,
+		APIKeyID:            p.APIKey.ID,
+		UserID:              p.User.ID,
+		AccountID:           p.Account.ID,
+		AccountType:         p.Account.Type,
+		RequestPayloadHash:  strings.TrimSpace(p.RequestPayloadHash),
+		BalanceHoldID:       strings.TrimSpace(p.BalanceHoldID),
+		BalanceHoldAmount:   p.BalanceHoldAmount,
+		VideoTaskStateID:    p.VideoTaskStateID,
+		VideoTaskLeaseUntil: p.VideoTaskLeaseUntil,
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model

@@ -74,6 +74,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import VideoTasksAccountConfig from '../VideoTasksAccountConfig.vue'
 import AccountModelCostPricing from '../AccountModelCostPricing.vue'
 import { createAccountModelCostEntry } from '../accountModelCostPricing'
 
@@ -156,6 +157,7 @@ function mountModal(groups: any[] = []) {
         GroupSelector: GroupSelectorStub,
         ModelWhitelistSelector: ModelWhitelistSelectorStub,
         QuotaLimitCard: true,
+        VideoTasksAccountConfig: true,
       },
     },
   })
@@ -805,6 +807,28 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       api_key: 'sk-fflink',
       base_url: 'https://api.fflink.top/v1',
       video_provider: 'fflink_v1'
+    })
+  })
+
+  it('requires explicit video connection and authorization, then saves supplier capabilities', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Custom video')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(createAccountMock).not.toHaveBeenCalled()
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    const capability = { model: 'Custom/Video', profile: 'bblabu_route', enabled: true }
+    config.vm.$emit('update:capabilities', [capability])
+    config.vm.$emit('update:supplierName', 'My supplier')
+    config.vm.$emit('update:modelValue', ['Custom/Video'])
+    config.vm.$emit('update:baseUrl', 'https://custom.example/v1')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      credentials: { video_provider: 'video_tasks_json_v1', base_url: 'https://custom.example/v1', model_mapping: { 'Custom/Video': 'Custom/Video' } },
+      extra: { video_supplier_name: 'My supplier', video_model_capabilities: [capability] }
     })
   })
 

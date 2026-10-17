@@ -32,6 +32,10 @@ export function readAccountModelCostPricing(extra: Record<string, unknown> | und
     const entry: PricingFormEntry = {
       ...createAccountModelCostEntry(price.platform), models: [...price.models],
       billing_mode: price.billing_mode, per_request_price: price.per_request_price,
+      video_pricing_version: price.video_pricing_version,
+      video_billing_unit: price.video_billing_unit,
+      video_quantity_policy: price.video_quantity_policy,
+      video_max_billable_seconds: price.video_max_billable_seconds,
       intervals: apiIntervalsToForm(price.intervals),
       reasoning_effort_multipliers: price.reasoning_effort_multipliers
         ? { ...price.reasoning_effort_multipliers }
@@ -46,9 +50,15 @@ export function readAccountModelCostPricing(extra: Record<string, unknown> | und
 export function accountModelCostPricingToAPI(entries: PricingFormEntry[], platform: string): ChannelModelPricing[] {
   return entries.map(entry => {
     const price: ChannelModelPricing = {
-      platform, models: entry.models.map(model => platform === 'seedance'
+      platform, models: entry.models.map(model => platform === 'seedance' && !entry.video_pricing_version
         ? normalizeSeedanceModelID(model.trim()) : model.trim()),
       billing_mode: entry.billing_mode, input_price: null, output_price: null,
+      ...(entry.video_pricing_version ? {
+        video_pricing_version: entry.video_pricing_version,
+        video_billing_unit: entry.video_billing_unit,
+        video_quantity_policy: entry.video_quantity_policy,
+        video_max_billable_seconds: Number(entry.video_max_billable_seconds || 0),
+      } : {}),
       cache_write_price: null, cache_read_price: null, image_input_price: null, image_output_price: null,
       per_request_price: toNullableNumber(entry.per_request_price),
       intervals: formIntervalsToAPI(entry.intervals), time_pricing: null,
@@ -64,7 +74,7 @@ export function validateAccountModelCostPricing(
   entries: PricingFormEntry[], platform: string,
   t: (key: string, params?: Record<string, unknown>) => string,
 ): string | null {
-  const models = entries.flatMap(entry => entry.models.map(model => platform === 'seedance'
+  const models = entries.flatMap(entry => entry.models.map(model => platform === 'seedance' && !entry.video_pricing_version
     ? normalizeSeedanceModelID(model.trim()) : model.trim()))
   const conflict = findModelConflict(models)
   if (conflict) return t('admin.channels.modelConflict', { model1: conflict[0], model2: conflict[1] })
@@ -103,7 +113,8 @@ export function validateAccountModelCostPricing(
       for (const interval of entry.intervals) {
         const tier = interval.tier_label.trim().toLowerCase()
         if (!tier || tiers.has(tier) || !hasPrice(interval.per_request_price) || !validPrice(interval.per_request_price)) return invalid()
-        if (entry.billing_mode === 'video' && !['480p', '720p', '1080p', '4k'].includes(tier)) return invalid()
+        if (entry.billing_mode === 'video' && !(platform === 'seedance' && entry.video_pricing_version === 1) &&
+          !['480p', '720p', '1080p', '4k'].includes(tier)) return invalid()
         tiers.add(tier)
       }
     }

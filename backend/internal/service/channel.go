@@ -93,6 +93,10 @@ type ChannelModelPricing struct {
 	Platform                   string              `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
 	Models                     []string            `json:"models"`
 	BillingMode                BillingMode         `json:"billing_mode"`
+	VideoPricingVersion        int                 `json:"video_pricing_version,omitempty"`
+	VideoBillingUnit           VideoBillingUnit    `json:"video_billing_unit,omitempty"`
+	VideoQuantityPolicy        VideoQuantityPolicy `json:"video_quantity_policy,omitempty"`
+	VideoMaxBillableSeconds    float64             `json:"video_max_billable_seconds,omitempty"`
 	InputPrice                 *float64            `json:"input_price"`
 	OutputPrice                *float64            `json:"output_price"`
 	CacheWritePrice            *float64            `json:"cache_write_price"`

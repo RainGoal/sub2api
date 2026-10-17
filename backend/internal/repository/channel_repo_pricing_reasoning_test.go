@@ -31,7 +31,7 @@ func reasoningPricingRow(multipliers any) *sqlmock.Rows {
 	return sqlmock.NewRows(channelModelPricingTimePricingColumns).AddRow(
 		int64(11), int64(7), "openai", `["custom-model"]`, service.BillingModeToken,
 		nil, nil, nil, nil, nil, nil, nil, multipliers, nil, nil, nil, nil,
-		time.Time{}, time.Time{},
+		time.Time{}, time.Time{}, nil, nil,
 	)
 }
 
@@ -158,12 +158,12 @@ func TestAccountStatsReasoningEffortMultipliersRoundTrip(t *testing.T) {
 	columns := []string{
 		"id", "rule_id", "platform", "models", "billing_mode", "input_price", "output_price",
 		"cache_write_price", "cache_write_1h_price", "cache_read_price", "reasoning_effort_multipliers",
-		"image_output_price", "per_request_price", "created_at", "updated_at",
+		"image_output_price", "per_request_price", "created_at", "updated_at", "video_pricing_config", "video_pricing_intervals",
 	}
 	mock.ExpectQuery(`(?s)SELECT .*reasoning_effort_multipliers.*FROM channel_account_stats_model_pricing`).
 		WithArgs(pq.Array([]int64{9})).WillReturnRows(sqlmock.NewRows(columns).AddRow(
 		int64(11), int64(9), "anthropic", `["custom-model"]`, service.BillingModeToken,
-		nil, nil, nil, nil, nil, stored.value, nil, nil, time.Time{}, time.Time{},
+		nil, nil, nil, nil, nil, stored.value, nil, nil, time.Time{}, time.Time{}, nil, nil,
 	))
 	mock.ExpectQuery(`(?s)SELECT .*FROM channel_account_stats_pricing_intervals`).
 		WithArgs(pq.Array([]int64{11})).WillReturnRows(sqlmock.NewRows([]string{"id"}))

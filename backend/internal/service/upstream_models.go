@@ -231,6 +231,11 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 		)
 	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
+	// Video discovery is read-only. Its route IDs are not Codex models and must
+	// never trigger LLM registry enrichment or change account capabilities.
+	if account != nil && account.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+		return catalog, nil
+	}
 	if len(body) > 0 {
 		_, directMetadata, parseErr := extractUpstreamModelCatalog(body, account != nil && account.IsGrok())
 		if parseErr == nil {

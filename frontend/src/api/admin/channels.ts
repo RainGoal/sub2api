@@ -7,6 +7,8 @@ import { apiClient } from '../client'
 import type { BillingMode, ChannelStatus, BillingModelSource } from '@/constants/channel'
 
 export type { BillingMode } from '@/constants/channel'
+export type VideoBillingUnit = 'per_second' | 'per_video'
+export type VideoQuantityPolicy = 'requested_seconds' | 'output_seconds' | 'output_and_reference_seconds'
 
 export interface PricingInterval {
   id?: number
@@ -43,6 +45,10 @@ export interface ChannelModelPricing {
   platform: string
   models: string[]
   billing_mode: BillingMode
+  video_pricing_version?: number
+  video_billing_unit?: VideoBillingUnit
+  video_quantity_policy?: VideoQuantityPolicy
+  video_max_billable_seconds?: number
   input_price: number | null
   output_price: number | null
   cache_write_price: number | null

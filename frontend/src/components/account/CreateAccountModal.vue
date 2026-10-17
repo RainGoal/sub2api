@@ -1532,10 +1532,17 @@
           </select>
           <p class="input-hint">{{ t('admin.accounts.seedance.providerHint') }}</p>
           <SeedanceModelSelector
+            v-if="videoProvider !== 'video_tasks_json_v1'"
             id="create-seedance"
             v-model="seedanceModelSelection"
             :provider="videoProvider"
             class="mt-4"
+          />
+          <VideoTasksAccountConfig
+            v-else id="create-video-tasks" v-model="seedanceModelSelection"
+            v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
+            v-model:base-url="apiKeyBaseUrl" :api-key="apiKeyValue" :proxy-id="form.proxy_id"
+            @validity="videoCapabilitiesValid = $event"
           />
         </div>
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
@@ -4210,6 +4217,8 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
+import VideoTasksAccountConfig from '@/components/account/VideoTasksAccountConfig.vue'
+import type { VideoModelCapability } from '@/api/admin/videoTasks'
 import {
   buildSeedanceModelMapping,
   filterSeedanceModelSelection,
@@ -4308,6 +4317,9 @@ const oauthStepTitle = computed(() => {
 const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const videoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
 const seedanceModelSelection = ref<SeedanceModelSelection>(null)
+const videoCapabilities = ref<VideoModelCapability[]>([])
+const videoSupplierName = ref('')
+const videoCapabilitiesValid = ref(true)
 const modelCostPricing = ref<PricingFormEntry[]>([])
 
 // Platform-specific hints for API Key type
@@ -4317,9 +4329,12 @@ const withAccountExtra = <T extends Record<string, unknown> | undefined>(extra: 
   const costError = validateAccountModelCostPricing(modelCostPricing.value, form.platform, t)
   if (costError) throw new Error(costError)
   const name = upstreamRequestIdHeader.value.trim()
-  if (!name && modelCostPricing.value.length === 0) return extra
+  const videoExtra = form.platform === 'seedance' && videoProvider.value === 'video_tasks_json_v1'
+    ? { video_model_capabilities: videoCapabilities.value, video_supplier_name: videoSupplierName.value.trim() } : {}
+  if (!name && modelCostPricing.value.length === 0 && Object.keys(videoExtra).length === 0) return extra
   return {
     ...(extra || {}),
+    ...videoExtra,
     ...(name ? { upstream_request_id_header: name } : {}),
     ...(modelCostPricing.value.length > 0
       ? { [ACCOUNT_MODEL_COST_KEY]: accountModelCostPricingToAPI(modelCostPricing.value, form.platform) } : {}),
@@ -4330,6 +4345,7 @@ const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (form.platform === 'seedance') {
+    if (videoProvider.value === 'video_tasks_json_v1') return t('admin.videoTasks.explicitBaseUrl')
     return t('admin.accounts.seedance.baseUrlHint', {
       provider: videoProviderDisplayName(videoProvider.value),
       url: videoProviderDefaultBaseUrl(videoProvider.value)
@@ -4687,7 +4703,8 @@ watch(apiProtocol, (protocol) => {
 })
 watch(videoProvider, (provider, previousProvider) => {
   if (form.platform !== 'seedance') return
-  seedanceModelSelection.value = filterSeedanceModelSelection(seedanceModelSelection.value, provider)
+  videoCapabilitiesValid.value = true
+  seedanceModelSelection.value = provider === 'video_tasks_json_v1' ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = apiKeyBaseUrl.value.trim()
   if (!currentBaseUrl || currentBaseUrl === videoProviderDefaultBaseUrl(previousProvider)) {
     apiKeyBaseUrl.value = videoProviderDefaultBaseUrl(provider)
@@ -5260,6 +5277,9 @@ watch(
     }
     // Clear model-related settings
     seedanceModelSelection.value = null
+    videoCapabilities.value = []
+    videoSupplierName.value = ''
+    videoCapabilitiesValid.value = true
     modelCostPricing.value = []
     allowedModels.value = []
     upstreamModelsPreviewed.value = false
@@ -5750,6 +5770,9 @@ const resetForm = () => {
   apiKeyValue.value = ''
   videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
   seedanceModelSelection.value = null
+  videoCapabilities.value = []
+  videoSupplierName.value = ''
+  videoCapabilitiesValid.value = true
   upstreamRequestIdHeader.value = ''
   modelCostPricing.value = []
   upstreamBillingAutoProbeEnabled.value = true
@@ -6060,6 +6083,12 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 
 const handleSubmit = async () => {
   if (submitting.value) return
+  if (form.platform === 'seedance' && videoProvider.value === 'video_tasks_json_v1') {
+    if (!videoCapabilitiesValid.value || !apiKeyBaseUrl.value.trim() || !seedanceModelSelection.value?.length) {
+      appStore.showError(t(!videoCapabilitiesValid.value ? 'admin.videoTasks.invalidJSON' : !apiKeyBaseUrl.value.trim() ? 'admin.videoTasks.baseUrlRequired' : 'admin.videoTasks.chooseModels'))
+      return
+    }
+  }
   const costError = validateAccountModelCostPricing(modelCostPricing.value, form.platform, t)
   if (costError) {
     appStore.showError(costError)

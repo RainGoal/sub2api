@@ -68,6 +68,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import VideoTasksAccountConfig from '../VideoTasksAccountConfig.vue'
 import AccountModelCostPricing from '../AccountModelCostPricing.vue'
 import { accountModelCostPricingToAPI, createAccountModelCostEntry } from '../accountModelCostPricing'
 
@@ -333,7 +334,8 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
         Icon: true,
         ProxySelector: true,
         GroupSelector: renderGroupSelector ? false : GroupSelectorStub,
-        ModelWhitelistSelector: ModelWhitelistSelectorStub
+        ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        VideoTasksAccountConfig: true
       }
     }
   })
@@ -642,6 +644,32 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
       base_url: 'https://api.bblabu.ai/v1',
       video_provider: 'bblabu_v1'
+    })
+  })
+
+  it('preserves generic video capabilities and blocks invalid capability JSON on save', async () => {
+    const capability = { model: 'Custom/Video', profile: 'bblabu_route', enabled: true }
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: { api_key: 'sk-video', video_provider: 'video_tasks_json_v1', base_url: 'https://custom.example/v1', model_mapping: { 'Custom/Video': 'Custom/Video' } },
+      extra: { unrelated_setting: true, video_supplier_name: 'Original supplier', video_model_capabilities: [capability] }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    expect(config.props('modelValue')).toEqual(['Custom/Video'])
+    expect(config.props('capabilities')).toEqual([capability])
+    config.vm.$emit('validity', false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    config.vm.$emit('validity', true)
+    config.vm.$emit('update:supplierName', 'Updated supplier')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: { video_provider: 'video_tasks_json_v1', model_mapping: { 'Custom/Video': 'Custom/Video' } },
+      extra: { unrelated_setting: true, video_supplier_name: 'Updated supplier', video_model_capabilities: [capability] }
     })
   })
 

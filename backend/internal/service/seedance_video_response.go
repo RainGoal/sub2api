@@ -50,10 +50,11 @@ type SeedanceVideoResponseError struct {
 // SeedanceVideoResponseMeta carries local request/task metadata that should
 // take precedence over values echoed by a provider.
 type SeedanceVideoResponseMeta struct {
-	ID         string
-	Model      string
-	Resolution string
-	Duration   int
+	ID            string
+	Model         string
+	Resolution    string
+	Duration      int
+	PreserveModel bool
 	// SettlementStatus is an internal accounting snapshot. When present, a
 	// provider completion is not exposed as public completed until the local
 	// billing transaction has reached the settled state.
@@ -111,6 +112,9 @@ func BuildSeedanceVideoResponse(result *SeedanceVideoForwardResult, meta Seedanc
 	}
 	if value := normalizeSeedanceResponseModel(meta.Model); value != "" {
 		response.Model = value
+	}
+	if meta.PreserveModel && strings.TrimSpace(meta.Model) != "" {
+		response.Model = strings.TrimSpace(meta.Model)
 	}
 	if value := normalizeSeedanceResponseResolution(meta.Resolution); value != "" {
 		response.Resolution = value
@@ -177,7 +181,7 @@ func canonicalSeedanceVideoContentURL(taskID, candidate string) string {
 }
 
 func normalizeSeedanceResponseModel(model string) string {
-	model = strings.ToLower(strings.TrimSpace(model))
+	model = strings.TrimSpace(model)
 	if canonical, ok := videoprovider.CanonicalModel(model); ok {
 		return canonical
 	}

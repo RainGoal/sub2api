@@ -40,6 +40,19 @@ func TestAPIContracts(t *testing.T) {
 		wantJSON   string
 	}{
 		{
+			name:       "GET /v1/media/models disabled catalog",
+			method:     http.MethodGet,
+			path:       "/v1/media/models",
+			wantStatus: http.StatusOK,
+			wantJSON: `{
+				"object": "list",
+				"schema_version": 1,
+				"catalog_version": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+				"price_version": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+				"data": []
+			}`,
+		},
+		{
 			name:       "GET /api/v1/auth/me",
 			method:     http.MethodGet,
 			path:       "/api/v1/auth/me",
@@ -1516,6 +1529,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
 	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
 	adminAccountHandler := adminhandler.NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	mediaHandler := handler.NewOpenAIGatewayHandler(&service.OpenAIGatewayService{}, nil, nil, nil, nil, nil, nil, nil, cfg)
 
 	jwtAuth := func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
@@ -1535,6 +1549,10 @@ func newContractDeps(t *testing.T) *contractDeps {
 	}
 
 	r := gin.New()
+	r.GET("/v1/media/models", func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 1})
+		c.Next()
+	}, mediaHandler.MediaModels)
 
 	v1 := r.Group("/api/v1")
 

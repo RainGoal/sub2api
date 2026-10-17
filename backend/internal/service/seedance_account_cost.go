@@ -17,9 +17,13 @@ var ErrSeedanceAccountCostMissing = errors.New("seedance account cost is not con
 // provider accepts a task. UnitPrice is USD/second for video, USD/task otherwise.
 // Account statistics apply RateMultiplier once; user prices and quotas are separate.
 type SeedanceAccountCostSnapshot struct {
-	BillingMode    BillingMode `json:"billing_mode"`
-	UnitPrice      float64     `json:"unit_price"`
-	RateMultiplier float64     `json:"rate_multiplier"`
+	BillingMode        BillingMode         `json:"billing_mode"`
+	UnitPrice          float64             `json:"unit_price"`
+	RateMultiplier     float64             `json:"rate_multiplier"`
+	Version            int                 `json:"version,omitempty"`
+	BillingUnit        VideoBillingUnit    `json:"billing_unit,omitempty"`
+	QuantityPolicy     VideoQuantityPolicy `json:"quantity_policy,omitempty"`
+	MaxBillableSeconds float64             `json:"max_billable_seconds,omitempty"`
 }
 
 func validSeedanceAccountCost(value float64) bool {
@@ -33,6 +37,19 @@ func (s *SeedanceAccountCostSnapshot) Validate() error {
 	if s.BillingMode != BillingModeVideo && s.BillingMode != BillingModePerRequest {
 		return fmt.Errorf("invalid Seedance account cost billing mode")
 	}
+	if s.Version != 0 {
+		if s.Version != VideoPricingVersion {
+			return fmt.Errorf("invalid video purchase snapshot version")
+		}
+		if err := validateVideoQuantityConfig(s.BillingUnit, s.QuantityPolicy, s.MaxBillableSeconds); err != nil {
+			return err
+		}
+		if s.BillingMode == BillingModePerRequest && s.BillingUnit != VideoBillingPerVideo {
+			return fmt.Errorf("legacy per_request video purchase prices must remain per_video")
+		}
+	} else if s.BillingUnit != "" || s.QuantityPolicy != "" || s.MaxBillableSeconds != 0 {
+		return fmt.Errorf("explicit video purchase units require a versioned snapshot")
+	}
 	for _, value := range []float64{s.UnitPrice, s.RateMultiplier, s.UnitPrice * s.RateMultiplier} {
 		if !validSeedanceAccountCost(value) {
 			return fmt.Errorf("invalid Seedance account cost price or multiplier")
@@ -42,13 +59,23 @@ func (s *SeedanceAccountCostSnapshot) Validate() error {
 }
 
 func seedanceStatsPricingForModel(prices []ChannelModelPricing, model string) *ChannelModelPricing {
+	for i := range prices {
+		if prices[i].Platform != PlatformSeedance || prices[i].VideoPricingVersion == 0 {
+			continue
+		}
+		for _, candidate := range prices[i].Models {
+			if strings.TrimSpace(candidate) == strings.TrimSpace(model) {
+				return &prices[i]
+			}
+		}
+	}
 	canonical, known := videoprovider.CanonicalModel(model)
 	if !known {
 		return nil
 	}
 	// Canonical aliases have the same exact-match priority, ahead of wildcards.
 	for i := range prices {
-		if !isPlatformMatch(PlatformSeedance, prices[i].Platform) {
+		if prices[i].VideoPricingVersion != 0 || !isPlatformMatch(PlatformSeedance, prices[i].Platform) {
 			continue
 		}
 		for _, candidate := range prices[i].Models {
@@ -57,10 +84,31 @@ func seedanceStatsPricingForModel(prices []ChannelModelPricing, model string) *C
 			}
 		}
 	}
-	return findPricingForModel(prices, PlatformSeedance, canonical)
+	return findPricingForModel(legacyVideoPricingRows(prices), PlatformSeedance, canonical)
+}
+
+func legacyVideoPricingRows(prices []ChannelModelPricing) []ChannelModelPricing {
+	legacy := make([]ChannelModelPricing, 0, len(prices))
+	for _, price := range prices {
+		if price.VideoPricingVersion == 0 {
+			legacy = append(legacy, price)
+		}
+	}
+	return legacy
 }
 
 func seedanceStatsUnitPrice(pricing *ChannelModelPricing, resolution string) (*float64, error) {
+	if pricing.VideoPricingVersion != 0 {
+		if err := normalizeExplicitVideoPricing(pricing); err != nil {
+			return nil, err
+		}
+		for _, interval := range pricing.Intervals {
+			if strings.EqualFold(interval.TierLabel, strings.TrimSpace(resolution)) {
+				return interval.PerRequestPrice, nil
+			}
+		}
+		return pricing.PerRequestPrice, nil
+	}
 	if pricing.BillingMode == BillingModePerRequest {
 		return pricing.PerRequestPrice, nil
 	}
@@ -82,6 +130,12 @@ func seedanceStatsUnitPrice(pricing *ChannelModelPricing, resolution string) (*f
 func normalizeSeedanceStatsPricing(pricing *ChannelModelPricing) error {
 	if pricing.Platform != PlatformSeedance {
 		return nil
+	}
+	if pricing.VideoPricingVersion != 0 {
+		return normalizeExplicitVideoPricing(pricing)
+	}
+	if pricing.VideoBillingUnit != "" || pricing.VideoQuantityPolicy != "" || pricing.VideoMaxBillableSeconds != 0 {
+		return fmt.Errorf("explicit video units require video_pricing_version 1")
 	}
 	invalid := func(message string) error {
 		return infraerrors.BadRequest("INVALID_SEEDANCE_ACCOUNT_COST", message)
@@ -141,6 +195,10 @@ func (s *OpenAIGatewayService) resolveSeedanceAccountCost(ctx context.Context, p
 		snapshot.BillingMode = pricing.BillingMode
 		snapshot.UnitPrice = *price
 		snapshot.RateMultiplier = 1 // Explicit prices are the actual purchase price.
+		if pricing.VideoPricingVersion != 0 {
+			snapshot.Version, snapshot.BillingUnit = VideoPricingVersion, pricing.VideoBillingUnit
+			snapshot.QuantityPolicy, snapshot.MaxBillableSeconds = pricing.VideoQuantityPolicy, pricing.VideoMaxBillableSeconds
+		}
 	}
 	if err := snapshot.Validate(); err != nil {
 		return nil, err
@@ -162,7 +220,25 @@ func ApplySeedanceAccountCost(input *OpenAIRecordUsageInput, pending *SeedanceVi
 		return fmt.Errorf("seedance account cost settlement input is missing")
 	}
 	cost := snapshot.UnitPrice
-	if snapshot.BillingMode == BillingModeVideo {
+	if snapshot.Version == VideoPricingVersion {
+		outputSeconds := input.Result.VideoDurationSecondsExact
+		if outputSeconds == 0 {
+			outputSeconds = float64(input.Result.VideoDurationSeconds)
+		}
+		referenceSeconds := input.Result.VideoReferenceInputSecondsExact
+		if referenceSeconds == 0 {
+			referenceSeconds = float64(input.Result.VideoReferenceInputSeconds)
+		}
+		if snapshot.QuantityPolicy == VideoQuantityRequestedSeconds {
+			outputSeconds = float64(pending.DurationSeconds)
+		}
+		quantity, err := VideoBillingQuantity(snapshot.BillingUnit, snapshot.QuantityPolicy, snapshot.MaxBillableSeconds,
+			outputSeconds, referenceSeconds)
+		if err != nil {
+			return err
+		}
+		cost *= quantity
+	} else if snapshot.BillingMode == BillingModeVideo {
 		if input.Result.VideoBillingDurationSeconds <= 0 {
 			return fmt.Errorf("seedance account cost billing duration is missing")
 		}
@@ -178,8 +254,31 @@ func ApplySeedanceAccountCost(input *OpenAIRecordUsageInput, pending *SeedanceVi
 }
 
 func (s *OpenAIGatewayService) RecordSeedanceVideoUsage(ctx context.Context, pending *SeedanceVideoPendingBilling, input *OpenAIRecordUsageInput) error {
+	if pending != nil && pending.IDVersion == SeedanceVideoTaskIdentityVersion && input != nil {
+		input.VideoTaskStateID, input.VideoTaskLeaseUntil = pending.StateID, pending.LeaseUntil
+		input.BalanceHoldID, input.BalanceHoldAmount = pending.HoldID, pending.HoldAmount
+	}
+	reusedMetering := false
+	if input != nil {
+		result, cost, err := s.frozenVideoTaskCompletion(ctx, pending, input.Result)
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			if input.CostOverride == nil {
+				return fmt.Errorf("video metering settlement cost is unavailable")
+			}
+			*input.Result, *input.CostOverride = *result, *cost
+			reusedMetering = true
+		}
+	}
 	if err := ApplySeedanceAccountCost(input, pending); err != nil {
 		return err
+	}
+	if !reusedMetering {
+		if err := s.PersistVideoTaskMetering(ctx, pending, input); err != nil {
+			return err
+		}
 	}
 	return s.RecordUsage(ctx, input)
 }

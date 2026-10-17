@@ -19,7 +19,7 @@ func TestSeedanceVideoTaskRepositoryClaimSettlementAllowsExpiredLease(t *testing
 	defer func() { _ = db.Close() }()
 
 	repo := NewSeedanceVideoTaskRepository(db)
-	claimSQL := `(?s)UPDATE custom_seedance_video_tasks.*SET settlement_status = 'processing', lease_until = \$4.*WHERE provider_task_id = \$1 AND user_id = \$2 AND api_key_id = \$3.*settlement_status = 'pending'.*settlement_status = 'processing' AND lease_until <= NOW\(\).*upstream_status.*cancel_requested`
+	claimSQL := `(?s)UPDATE custom_seedance_video_tasks.*SET settlement_status = 'processing', lease_until = \$4.*WHERE state_id = \(.*user_id = \$2 AND api_key_id = \$3.*task_id_version = 1 AND state_id = \$1.*task_id_version = 0 AND provider_task_id = \$1.*settlement_status = 'pending'.*settlement_status = 'processing' AND lease_until <= NOW\(\).*upstream_status.*cancel_requested`
 	mock.ExpectExec(claimSQL).
 		WithArgs("task-expired", int64(7), int64(8), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -36,7 +36,7 @@ func TestSeedanceVideoTaskRepositoryClaimSettlementRowsAffectedZeroIsNotClaimed(
 	defer func() { _ = db.Close() }()
 
 	repo := NewSeedanceVideoTaskRepository(db)
-	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks.*SET settlement_status = 'processing'.*WHERE provider_task_id = \$1`).
+	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks.*SET settlement_status = 'processing'.*WHERE state_id = \(.*provider_task_id = \$1`).
 		WithArgs("task-owned", int64(7), int64(8), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
@@ -75,7 +75,7 @@ func TestSeedanceVideoTaskRepositoryClaimCancellationDoesNotStealExpiredProcessi
 	// A status poll may still be finalizing accounting after its lease expires.
 	// DELETE may only reclaim an expired lease that already carries the durable
 	// cancellation intent; an ordinary processing row must remain untouched.
-	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks.*SET settlement_status = 'processing', upstream_status = 'cancel_requested'.*WHERE provider_task_id = \$1 AND user_id = \$2 AND api_key_id = \$3.*settlement_status = 'pending'\s+OR \(settlement_status = 'processing'.*lease_until IS NOT NULL.*lease_until <= NOW\(\).*LOWER\(TRIM\(COALESCE\(upstream_status, ''\)\)\) = 'cancel_requested'`).
+	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks.*SET settlement_status = 'processing', upstream_status = 'cancel_requested'.*WHERE state_id = \(.*user_id = \$2 AND api_key_id = \$3.*task_id_version = 0 AND provider_task_id = \$1.*settlement_status = 'pending'\s+OR \(settlement_status = 'processing'.*lease_until IS NOT NULL.*lease_until <= NOW\(\).*LOWER\(TRIM\(COALESCE\(upstream_status, ''\)\)\) = 'cancel_requested'`).
 		WithArgs("task-processing", int64(7), int64(8), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 

@@ -15,6 +15,8 @@ import (
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
 var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerprint conflict")
+var ErrVideoTaskAlreadyCaptured = errors.New("video task billing was already captured and reconciled")
+var ErrVideoTaskAlreadyReleased = errors.New("video task balance was already released")
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
@@ -38,9 +40,12 @@ type UsageBillingCommand struct {
 	ImageCount          int
 	MediaType           string
 
-	BalanceCost         float64
-	BalanceHoldID       string
-	BalanceHoldAmount   float64
+	BalanceCost       float64
+	BalanceHoldID     string
+	BalanceHoldAmount float64
+	// Video task fencing is internal metadata, excluded from billing fingerprints.
+	VideoTaskStateID    string
+	VideoTaskLeaseUntil *time.Time
 	SubscriptionCost    float64
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
@@ -185,17 +190,19 @@ type UsageBillingApplyResult struct {
 
 // BatchImageBalanceHoldCommand describes an idempotent balance hold operation.
 type BatchImageBalanceHoldCommand struct {
-	RequestID          string
-	APIKeyID           int64
-	RequestFingerprint string
-	RequestPayloadHash string
-	UserID             int64
-	BatchID            string
-	HoldAmount         float64
-	ActualAmount       float64
-	SalesCost          *float64
-	SalesConsumedAt    time.Time
-	SalesModel         string
+	RequestID           string
+	APIKeyID            int64
+	RequestFingerprint  string
+	RequestPayloadHash  string
+	UserID              int64
+	BatchID             string
+	HoldAmount          float64
+	ActualAmount        float64
+	SalesCost           *float64
+	SalesConsumedAt     time.Time
+	SalesModel          string
+	VideoTaskStateID    string
+	VideoTaskLeaseUntil *time.Time
 }
 
 func (c *BatchImageBalanceHoldCommand) Normalize() {

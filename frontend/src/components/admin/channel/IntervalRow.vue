@@ -84,7 +84,7 @@
           type="number" min="0" class="input mt-0.5 text-xs" :placeholder="'∞'" />
       </div>
       <div class="flex-1">
-        <label class="text-xs text-gray-400">{{ mode === 'video' ? t('admin.channels.form.videoPricePerSecond') : t('admin.channels.form.perRequestPrice') }} <span v-if="isEmpty" class="text-red-500">*</span> <span class="text-gray-300">{{ mode === 'video' ? '$/s' : '$' }}</span></label>
+        <label class="text-xs text-gray-400">{{ mode === 'video' ? t(videoBillingUnit === 'per_video' ? 'admin.channels.form.videoPricePerVideo' : 'admin.channels.form.videoPricePerSecond') : t('admin.channels.form.perRequestPrice') }} <span v-if="isEmpty" class="text-red-500">*</span> <span class="text-gray-300">{{ mode === 'video' ? videoBillingUnit === 'per_video' ? '$/video' : '$/s' : '$' }}</span></label>
         <input :value="interval.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
           type="number" step="any" min="0" class="input mt-0.5 text-xs" />
       </div>
@@ -101,7 +101,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntervalFormEntry } from './types'
-import type { BillingMode } from '@/api/admin/channels'
+import type { BillingMode, VideoBillingUnit } from '@/api/admin/channels'
 
 const { t } = useI18n()
 
@@ -109,6 +109,7 @@ const props = defineProps<{
   interval: IntervalFormEntry
   mode: BillingMode
   enableMultipliers?: boolean
+  videoBillingUnit?: VideoBillingUnit
 }>()
 
 const emit = defineEmits<{

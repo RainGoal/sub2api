@@ -38,6 +38,8 @@ type OpenAIRecordUsageInput struct {
 	RateMultiplierOverride      *float64
 	BalanceHoldID               string
 	BalanceHoldAmount           float64
+	VideoTaskStateID            string
+	VideoTaskLeaseUntil         *time.Time
 	SubscriptionBillingOverride *bool
 	APIKeyService               APIKeyQuotaUpdater
 	QuotaPlatform               string // user×platform quota platform resolved by the handler before async billing.
@@ -435,6 +437,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.VideoResolution = optionalTrimmedStringPtr(NormalizeVideoBillingResolutionOrDefault(result.VideoResolution))
 		videoDurationSeconds := NormalizeVideoBillingDurationForProvider(result.VideoProvider, result.BillingModel, result.VideoDurationSeconds)
 		usageLog.VideoDurationSeconds = &videoDurationSeconds
+		if result.VideoProvider == PlatformSeedance && result.VideoPricingVersion == VideoPricingVersion {
+			usageLog.VideoResolution = optionalTrimmedStringPtr(result.VideoResolution)
+			usageLog.VideoDurationSeconds = &result.VideoDurationSeconds
+		}
 	}
 	if cost != nil {
 		usageLog.InputCost = cost.InputCost
@@ -567,6 +573,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		IsSubscriptionBill:         isSubscriptionBilling && !simpleModeKeyRateLimitOnly,
 		BalanceHoldID:              input.BalanceHoldID,
 		BalanceHoldAmount:          input.BalanceHoldAmount,
+		VideoTaskStateID:           input.VideoTaskStateID,
+		VideoTaskLeaseUntil:        input.VideoTaskLeaseUntil,
 		AccountRateMultiplier:      accountRateMultiplier,
 		APIKeyService:              input.APIKeyService,
 		Platform:                   quotaPlatform,

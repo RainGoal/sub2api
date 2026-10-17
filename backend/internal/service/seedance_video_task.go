@@ -11,6 +11,7 @@ const (
 	SeedanceVideoSettlementProcessing        = "processing"
 	SeedanceVideoSettlementSettled           = "settled"
 	SeedanceVideoSettlementReleased          = "released"
+	SeedanceVideoSettlementNeedsReview       = "needs_review"
 	SeedanceVideoCancellationRequestedStatus = "cancel_requested"
 )
 
@@ -29,12 +30,65 @@ type SeedanceVideoTaskRepository interface {
 	Create(ctx context.Context, pending *SeedanceVideoPendingBilling) error
 	AssignAccount(ctx context.Context, stateID string, accountID int64, providerID string, accountCost *SeedanceAccountCostSnapshot) error
 	BindProviderTask(ctx context.Context, stateID, taskID, upstreamStatus string, dueAt time.Time) error
+	// GetByProviderTask accepts a public task ID. Only legacy rows may be
+	// looked up by their provider task ID; new rows require their state ID.
 	GetByProviderTask(ctx context.Context, taskID string, userID, apiKeyID int64) (*SeedanceVideoPendingBilling, error)
 	ClaimDue(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]*SeedanceVideoPendingBilling, error)
 	ClaimSettlement(ctx context.Context, taskID string, userID, apiKeyID int64, lease time.Duration) (bool, error)
 	Reschedule(ctx context.Context, stateID, upstreamStatus string, dueAt time.Time, lastError string) error
 	MarkSettled(ctx context.Context, stateID string, actualCost float64) error
 	MarkReleased(ctx context.Context, stateID string) error
+}
+
+// Optional extensions retain compatibility with existing test doubles while
+// production freezes execution settings and supports controlled review.
+type SeedanceVideoTaskExecutionRepository interface {
+	AssignAccountWithExecution(ctx context.Context, stateID string, accountID int64, providerID string, accountCost *SeedanceAccountCostSnapshot, execution *VideoTasksExecutionSnapshot, expectedAPIKey string) error
+}
+
+type SeedanceVideoTaskAccountDependencyRepository interface {
+	HasUnfinishedForAccount(ctx context.Context, accountID int64) (bool, error)
+}
+
+type SeedanceVideoTaskReviewRepository interface {
+	MarkNeedsReview(ctx context.Context, stateID, reason string, deadline time.Time) error
+	MarkNeedsReviewWithLease(ctx context.Context, stateID, reason string, deadline, leaseUntil time.Time) error
+	ListNeedingReview(ctx context.Context, limit, offset int) ([]*SeedanceVideoPendingBilling, error)
+	ClaimReviewResolution(ctx context.Context, stateID string, lease time.Duration) (bool, error)
+	GetByStateID(ctx context.Context, stateID string) (*SeedanceVideoPendingBilling, error)
+	RecordReviewDecisionWithLease(ctx context.Context, stateID string, decision VideoTaskReviewDecision, leaseUntil time.Time) error
+	ResumeReviewPollingWithLease(ctx context.Context, stateID string, leaseUntil time.Time) error
+}
+
+type VideoTaskReviewDecision struct {
+	ActorID   int64     `json:"actor_id"`
+	Action    string    `json:"action"`
+	Reason    string    `json:"reason"`
+	DecidedAt time.Time `json:"decided_at"`
+}
+
+func (s *OpenAIGatewayService) MarkSeedanceVideoTaskNeedsReview(ctx context.Context, pending *SeedanceVideoPendingBilling, reason string, deadline time.Time) error {
+	if s == nil || pending == nil {
+		return errors.New("video task review state is unavailable")
+	}
+	repo, ok := s.seedanceVideoTaskRepo.(SeedanceVideoTaskReviewRepository)
+	if !ok {
+		return errors.New("video task review repository is unavailable")
+	}
+	var err error
+	if pending.LeaseUntil != nil {
+		err = repo.MarkNeedsReviewWithLease(ctx, pending.StateID, reason, deadline, *pending.LeaseUntil)
+	} else {
+		err = repo.MarkNeedsReview(ctx, pending.StateID, reason, deadline)
+	}
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	pending.SettlementStatus, pending.ReviewReason = SeedanceVideoSettlementNeedsReview, reason
+	pending.ReviewDeadline, pending.ReviewRequestedAt = &deadline, &now
+	pending.LeaseUntil = nil
+	return nil
 }
 
 // SeedanceVideoTaskCancellationRepository is an optional extension for

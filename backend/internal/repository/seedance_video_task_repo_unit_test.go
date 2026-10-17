@@ -21,6 +21,7 @@ var seedanceVideoTaskTestColumns = []string{
 	"total_cost_per_second", "actual_cost_per_second", "rate_multiplier",
 	"is_subscription_billing", "subscription_id", "upstream_status", "settlement_status",
 	"retry_count", "next_poll_at", "lease_until", "last_error_message", "created_at", "account_cost_snapshot",
+	"task_id_version", "sales_snapshot", "execution_snapshot", "review_reason", "review_requested_at", "review_deadline", "review_decisions",
 }
 
 // A typed nil []byte is not SQL NULL in lib/pq: it is sent as zero-length JSON.
@@ -34,6 +35,7 @@ func seedanceVideoTaskTestRow(now time.Time, settlement string, lease any) *sqlm
 		"bblabu_v1", "Seedance-2.5", "720p", 30, 1, "Seedance-2.5", "payload-hash",
 		"seedance:hold-1", 6.0, 0.1, 0.2, 2.0, false, nil,
 		"queued", settlement, 0, now, lease, "", now.Add(-time.Minute), nil,
+		0, nil, nil, "", nil, nil, []byte("[]"),
 	)
 }
 
@@ -61,17 +63,17 @@ func TestSeedanceVideoTaskRepositoryCreateBindAndOwnerLookup(t *testing.T) {
 			pending.ProviderID, pending.Model, pending.Resolution, pending.DurationSeconds, pending.ReferenceVideoCount,
 			pending.OriginalModel, pending.RequestPayloadHash, pending.HoldID, pending.HoldAmount,
 			pending.TotalCostPerSecond, pending.ActualCostPerSecond, pending.RateMultiplier,
-			pending.IsSubscriptionBilling, nil, pending.NextPollAt, now, seedanceSQLNullArgument{}).
+			pending.IsSubscriptionBilling, nil, pending.NextPollAt, now, seedanceSQLNullArgument{}, 0, seedanceSQLNullArgument{}, seedanceSQLNullArgument{}).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	require.NoError(t, repo.Create(ctx, pending))
 	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks\s+SET account_id = \$2`).
-		WithArgs("state-1", int64(20), "bblabu_v1", seedanceSQLNullArgument{}).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("state-1", int64(20), "bblabu_v1", seedanceSQLNullArgument{}, seedanceSQLNullArgument{}).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.AssignAccount(ctx, "state-1", 20, "bblabu_v1", nil))
 	dueAt := now.Add(4 * time.Second)
 	mock.ExpectExec(`(?s)UPDATE custom_seedance_video_tasks\s+SET provider_task_id = \$2`).
 		WithArgs("state-1", "task-1", "queued", dueAt).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.BindProviderTask(ctx, "state-1", "task-1", "queued", dueAt))
-	mock.ExpectQuery(`(?s)FROM custom_seedance_video_tasks\s+WHERE provider_task_id = \$1 AND user_id = \$2 AND api_key_id = \$3`).
+	mock.ExpectQuery(`(?s)FROM custom_seedance_video_tasks\s+WHERE user_id = \$2 AND api_key_id = \$3.*task_id_version = 1 AND state_id = \$1.*task_id_version = 0 AND provider_task_id = \$1`).
 		WithArgs("task-1", int64(7), int64(8)).WillReturnRows(seedanceVideoTaskTestRow(now, "pending", nil))
 
 	loaded, err := repo.GetByProviderTask(ctx, "task-1", 7, 8)
@@ -91,13 +93,14 @@ func TestSeedanceVideoTaskRepositoryAssignsCostAtomicallyAndReadsSnapshot(t *tes
 	snapshot := &service.SeedanceAccountCostSnapshot{BillingMode: service.BillingModeVideo, UnitPrice: 0.03, RateMultiplier: 0.5}
 	encoded := []byte(`{"billing_mode":"video","unit_price":0.03,"rate_multiplier":0.5}`)
 	mock.ExpectExec(`(?s)SET account_id = \$2, provider_protocol = \$3, account_cost_snapshot = \$4.*provider_task_id IS NULL`).
-		WithArgs("state-cost", int64(20), "fflink_v1", string(encoded)).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("state-cost", int64(20), "fflink_v1", string(encoded), seedanceSQLNullArgument{}).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.AssignAccount(context.Background(), "state-cost", 20, "fflink_v1", snapshot))
 	now := time.Now().UTC()
 	rows := sqlmock.NewRows(seedanceVideoTaskTestColumns).AddRow(
 		"state-cost", "task-cost", int64(7), int64(8), int64(9), int64(20),
 		"fflink_v1", "seedance-2.5", "720p", 10, 0, "seedance-2.5", "hash",
-		"hold-cost", 2.0, 0.1, 0.2, 2.0, false, nil, "queued", "pending", 0, now, nil, "", now, encoded)
+		"hold-cost", 2.0, 0.1, 0.2, 2.0, false, nil, "queued", "pending", 0, now, nil, "", now, encoded,
+		0, nil, nil, "", nil, nil, []byte("[]"))
 	mock.ExpectQuery(`(?s)FROM custom_seedance_video_tasks.*provider_task_id = \$1`).
 		WithArgs("task-cost", int64(7), int64(8)).WillReturnRows(rows)
 	loaded, err := repo.GetByProviderTask(context.Background(), "task-cost", 7, 8)
@@ -115,7 +118,7 @@ func TestSeedanceVideoTaskRepositoryClaimDueUsesDatabaseLease(t *testing.T) {
 	repo := NewSeedanceVideoTaskRepository(db)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	leaseUntil := now.Add(30 * time.Second)
-	claimSQL := `(?s)WHERE \(settlement_status = 'pending' AND next_poll_at <= \$1\)\s+OR \(settlement_status = 'processing' AND lease_until <= \$1\).*FOR UPDATE SKIP LOCKED`
+	claimSQL := `(?s)WHERE task_id_version IN \(0, 1\).*review_reason = ''.*settlement_status = 'pending' AND next_poll_at <= \$1.*settlement_status = 'processing' AND lease_until <= \$1.*FOR UPDATE SKIP LOCKED`
 	mock.ExpectQuery(claimSQL).WithArgs(now, 20, leaseUntil).
 		WillReturnRows(seedanceVideoTaskTestRow(now, "processing", leaseUntil))
 

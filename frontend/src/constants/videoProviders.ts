@@ -1,6 +1,7 @@
 export const VIDEO_PROVIDER_OPTIONS = [
   { id: 'bblabu_v1', label: 'bblabu V1', defaultBaseUrl: 'https://api.bblabu.ai/v1' },
-  { id: 'fflink_v1', label: 'fflink V1', defaultBaseUrl: 'https://api.fflink.top/v1' }
+  { id: 'fflink_v1', label: 'fflink V1', defaultBaseUrl: 'https://api.fflink.top/v1' },
+  { id: 'video_tasks_json_v1', label: 'Video Tasks JSON v1', defaultBaseUrl: '' }
 ] as const
 
 export type VideoProviderID = (typeof VIDEO_PROVIDER_OPTIONS)[number]['id']
@@ -26,6 +27,7 @@ export function normalizeSeedanceModelID(model: string): string {
 }
 
 export function videoProviderModelOptions(providerID: VideoProviderID): SeedanceModelOption[] {
+  if (providerID === 'video_tasks_json_v1') return [] // Loaded from the authenticated backend template catalog.
   return providerID === 'fflink_v1'
     ? SEEDANCE_MODEL_OPTIONS
     : SEEDANCE_MODEL_OPTIONS.filter(({ id }) => id === 'seedance-2.0' || id === 'seedance-2.5')

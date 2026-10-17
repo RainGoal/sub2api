@@ -1,4 +1,4 @@
-import type { BillingMode, ChannelTimePricing, PricingInterval } from '@/api/admin/channels'
+import type { BillingMode, ChannelTimePricing, PricingInterval, VideoBillingUnit, VideoQuantityPolicy } from '@/api/admin/channels'
 import { REASONING_EFFORT_LEVELS } from '@/constants/channel'
 
 type TranslateFn = (key: string, params?: Record<string, unknown>) => string
@@ -23,6 +23,10 @@ export interface IntervalFormEntry {
 export interface PricingFormEntry {
   models: string[]
   billing_mode: BillingMode
+  video_pricing_version?: number
+  video_billing_unit?: VideoBillingUnit
+  video_quantity_policy?: VideoQuantityPolicy
+  video_max_billable_seconds?: number | string
   input_price: number | string | null
   output_price: number | string | null
   cache_write_price: number | string | null
@@ -36,6 +40,15 @@ export interface PricingFormEntry {
   per_request_price: number | string | null
   intervals: IntervalFormEntry[]
   time_pricing: TimePricingFormEntry
+}
+
+export function videoPricingFieldsToAPI(entry: Pick<PricingFormEntry, 'video_pricing_version' | 'video_billing_unit' | 'video_quantity_policy' | 'video_max_billable_seconds'>) {
+  return entry.video_pricing_version ? {
+    video_pricing_version: entry.video_pricing_version,
+    video_billing_unit: entry.video_billing_unit,
+    video_quantity_policy: entry.video_quantity_policy,
+    video_max_billable_seconds: Number(entry.video_max_billable_seconds || 0),
+  } : {}
 }
 
 export interface TimePricingPeriodFormEntry {

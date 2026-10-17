@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/stretchr/testify/require"
 )
 
@@ -439,6 +440,50 @@ func TestFetchUpstreamSupportedModelsUsesVideoDriverParser(t *testing.T) {
 	require.Equal(t, []string{"seedance-2.0-fast"}, models)
 	require.Equal(t, "https://video.example.com/v1/models", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer video-key", upstream.lastReq.Header.Get("Authorization"))
+}
+
+func TestSyncUpstreamModelCatalogVideoTasksDiscoveryDoesNotEnrichOrAuthorize(t *testing.T) {
+	capabilities := videoprovider.BBLabuModelCapabilities()
+	require.Len(t, capabilities, 33)
+	items := make([]map[string]string, 0, len(capabilities))
+	want := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		items = append(items, map[string]string{"id": capability.Model})
+		want = append(want, capability.Model)
+	}
+	body, err := json.Marshal(map[string]any{"object": "list", "data": items})
+	require.NoError(t, err)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: http.StatusOK,
+		Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(string(body)))}}}
+	repo := &upstreamModelMetadataRepoStub{}
+	svc := &AccountTestService{httpUpstream: upstream, accountRepo: repo, cfg: upstreamModelSyncTestConfig()}
+	capability, ok := videoprovider.LookupVideoModelCapability("Seedance-2.0", nil)
+	require.True(t, ok)
+	price := 0.25
+	account := &Account{ID: 998, Platform: PlatformSeedance, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "video-only-key", "base_url": "https://video.example/v1",
+			"video_provider": string(videoprovider.ProviderVideoTasksJSONV1), "model_mapping": map[string]any{"Seedance-2.0": "Seedance-2.0"}},
+		Extra: map[string]any{VideoModelCapabilitiesExtra: []videoprovider.VideoModelCapability{capability},
+			AccountModelCostPricingExtraKey: []ChannelModelPricing{{Models: []string{"Seedance-2.0"},
+				Platform: PlatformSeedance, BillingMode: BillingModeVideo, PerRequestPrice: &price,
+				VideoPricingVersion: VideoPricingVersion, VideoBillingUnit: VideoBillingPerVideo}}}}
+	before, err := json.Marshal(account)
+	require.NoError(t, err)
+	catalog, err := svc.SyncUpstreamModelCatalog(context.Background(), account)
+	require.NoError(t, err)
+	require.ElementsMatch(t, want, catalog.Models, "discovery must retain every route model verbatim")
+	require.Len(t, upstream.requests, 1, "video routes must never trigger a models.dev enrichment request")
+	require.Equal(t, http.MethodGet, upstream.requests[0].Method)
+	require.Equal(t, "https://video.example/v1/models", upstream.requests[0].URL.String())
+	require.Equal(t, "Bearer video-only-key", upstream.requests[0].Header.Get("Authorization"))
+	require.Empty(t, catalog.Warnings, "LLM context/reasoning completeness is irrelevant to video routes")
+	require.Empty(t, catalog.Metadata)
+	require.Nil(t, repo.updates, "discovery must not persist capabilities, model authorization, or pricing")
+	after, err := json.Marshal(account)
+	require.NoError(t, err)
+	require.JSONEq(t, string(before), string(after))
+	require.True(t, account.isSeedanceModelSupported("Seedance-2.0"))
+	require.False(t, account.isSeedanceModelSupported("sd14-seedance-2.0"))
 }
 
 // Scenario: ID-only 模型列表从 Models.dev 补齐能力。

@@ -12,6 +12,19 @@ function videoEntry(price: number | null = 0.04): PricingFormEntry {
 }
 
 describe('account model purchase price form', () => {
+  it('round trips explicit per-video costs without changing exact model names or losing metering policies', () => {
+    const entry: PricingFormEntry = { ...videoEntry(0.7), models: ['bytedance/seedance-2.5'],
+      video_pricing_version: 1, video_billing_unit: 'per_video',
+      video_quantity_policy: 'output_and_reference_seconds', video_max_billable_seconds: '30.5' }
+    const prices = accountModelCostPricingToAPI([entry], 'seedance')
+    expect(prices[0]).toMatchObject({ models: ['bytedance/seedance-2.5'], billing_mode: 'video',
+      video_pricing_version: 1, video_billing_unit: 'per_video',
+      video_quantity_policy: 'output_and_reference_seconds', video_max_billable_seconds: 30.5 })
+    const restored = readAccountModelCostPricing({ [ACCOUNT_MODEL_COST_KEY]: prices })
+    expect(restored[0]).toMatchObject({ video_billing_unit: 'per_video', video_max_billable_seconds: 30.5 })
+    expect(validateAccountModelCostPricing(restored, 'seedance', t)).toBeNull()
+  })
+
   it('round trips token and cache prices in USD/MTok without applying account multipliers', () => {
     const entry = {
       ...createAccountModelCostEntry('openai'), models: ['vendor-model'], input_price: '2.5',
@@ -28,6 +41,30 @@ describe('account model purchase price form', () => {
     restored[0].models.push('another-model')
     expect(prices[0].models).toEqual(['vendor-model'])
     expect(validateAccountModelCostPricing(restored, 'openai', t)).toBeNull()
+  })
+
+  it.each(['768p', '2k', '2K'])('accepts explicit video purchase resolution %s while preserving legacy limits', tier => {
+    for (const unit of ['per_second', 'per_video'] as const) {
+      const entry: PricingFormEntry = { ...videoEntry(null), models: ['niulai-pro'],
+        video_pricing_version: 1, video_billing_unit: unit, video_quantity_policy: 'output_seconds',
+        intervals: [{ min_tokens: 0, max_tokens: null, tier_label: tier, per_request_price: 0.05,
+          input_price: null, output_price: null, cache_write_price: null, cache_read_price: null,
+          input_multiplier: null, output_multiplier: null, cache_write_multiplier: null, cache_read_multiplier: null,
+          sort_order: 0 }] }
+      expect(validateAccountModelCostPricing([entry], 'seedance', t)).toBeNull()
+      const saved = accountModelCostPricingToAPI([entry], 'seedance')
+      expect(saved[0].intervals[0]).toMatchObject({ tier_label: tier, per_request_price: 0.05 })
+      expect(validateAccountModelCostPricing(readAccountModelCostPricing({ [ACCOUNT_MODEL_COST_KEY]: saved }), 'seedance', t)).toBeNull()
+      expect(validateAccountModelCostPricing([{ ...entry, video_pricing_version: undefined,
+        video_billing_unit: undefined, video_quantity_policy: undefined }], 'seedance', t)).not.toBeNull()
+      entry.intervals.push({ ...entry.intervals[0], tier_label: tier.toUpperCase() })
+      expect(validateAccountModelCostPricing([entry], 'seedance', t)).not.toBeNull()
+      entry.intervals.pop()
+      for (const invalidPrice of [null, -1, Infinity]) {
+        entry.intervals[0].per_request_price = invalidPrice
+        expect(validateAccountModelCostPricing([entry], 'seedance', t)).not.toBeNull()
+      }
+    }
   })
 
   it.each([

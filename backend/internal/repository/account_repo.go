@@ -522,6 +522,11 @@ func (r *accountRepository) updateLockedAccount(
 	explicitRateSyncEnabled *bool,
 	explicitRateMultiplier *float64,
 ) (*dbent.Account, error) {
+	if account.IsSeedance() {
+		if err := guardVideoAccountMutation(ctx, client, []int64{account.ID}, account, nil, false); err != nil {
+			return nil, err
+		}
+	}
 	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled)
 	if err != nil {
 		return nil, err
@@ -873,6 +878,12 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			client = tx.Client()
 		}
 	}
+	if tx != nil || contextTx != nil {
+		candidate := &service.Account{Platform: service.PlatformSeedance, Type: service.AccountTypeAPIKey, Credentials: credentials}
+		if err := guardVideoAccountMutation(ctx, client, []int64{id}, candidate, nil, false); err != nil {
+			return err
+		}
+	}
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
@@ -985,6 +996,9 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 	} else {
 		// 已处于外部事务中（ErrTxStarted），复用当前 client
 		txClient = r.client
+	}
+	if err := guardVideoAccountMutation(ctx, txClient, []int64{id}, nil, nil, true); err != nil {
+		return err
 	}
 
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
@@ -3258,6 +3272,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 
+	if (tx != nil || contextTx != nil) && len(updates.Credentials) > 0 {
+		if err := guardVideoAccountMutation(ctx, exec, ids, nil, updates.Credentials, false); err != nil {
+			return 0, err
+		}
+	}
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err

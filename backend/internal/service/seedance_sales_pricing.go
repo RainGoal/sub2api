@@ -90,6 +90,10 @@ func ResolveSeedanceSalesPrice(ctx context.Context, channels *ChannelService, gr
 		if pricing == nil {
 			return nil, PricingSourceChannel, nil
 		}
+		// Versioned entries must use the unit-aware resolver and frozen task snapshot.
+		if pricing.VideoPricingVersion != 0 {
+			return nil, PricingSourceChannel, nil
+		}
 		if pricing.BillingMode != BillingModeVideo {
 			return nil, PricingSourceChannel, fmt.Errorf("seedance sales prices require video billing")
 		}
@@ -103,6 +107,15 @@ func normalizeSeedanceSalesPricing(prices []ChannelModelPricing) error {
 	for i := range prices {
 		if prices[i].Platform != PlatformSeedance {
 			continue
+		}
+		if prices[i].VideoPricingVersion != 0 {
+			if err := normalizeExplicitVideoPricing(&prices[i]); err != nil {
+				return infraerrors.BadRequest("INVALID_SEEDANCE_SALES_PRICE", err.Error())
+			}
+			continue
+		}
+		if prices[i].VideoBillingUnit != "" || prices[i].VideoQuantityPolicy != "" || prices[i].VideoMaxBillableSeconds != 0 {
+			return infraerrors.BadRequest("INVALID_SEEDANCE_SALES_PRICE", "explicit video units require video_pricing_version 1")
 		}
 		if prices[i].BillingMode != BillingModeVideo {
 			return infraerrors.BadRequest("INVALID_SEEDANCE_SALES_PRICE", "Seedance sales prices require video billing in USD/second")
@@ -159,15 +172,15 @@ func ProjectSeedanceSalesPrices(ctx context.Context, channels *ChannelService, g
 			continue
 		}
 		for _, resolution := range spec.Resolutions {
-			price, _, err := ResolveSeedanceSalesPrice(ctx, channels, group, model, resolution)
+			price, err := ResolveVideoSalesPrice(ctx, channels, group, model, resolution)
 			if err != nil {
 				return nil, err
 			}
-			if price != nil {
+			if price != nil && price.BillingUnit == VideoBillingPerSecond {
 				if projected.VideoModelPrices[spec.ID] == nil {
 					projected.VideoModelPrices[spec.ID] = make(map[string]float64)
 				}
-				projected.VideoModelPrices[spec.ID][resolution] = *price
+				projected.VideoModelPrices[spec.ID][resolution] = price.UnitPrice
 			}
 		}
 	}

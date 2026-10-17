@@ -562,6 +562,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/video-task-reviews',
+    name: 'AdminVideoTaskReviews',
+    component: () => import('@/views/admin/VideoTaskReviewsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Video Task Reviews',
+      titleKey: 'admin.videoTaskReviews.title',
+      descriptionKey: 'admin.videoTaskReviews.description'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

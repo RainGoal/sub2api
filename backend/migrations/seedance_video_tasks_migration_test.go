@@ -31,3 +31,18 @@ func TestCustomSeedanceVideoProviderMigration(t *testing.T) {
 	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS provider_protocol VARCHAR(32) NOT NULL DEFAULT 'bblabu_v1'")
 	require.Contains(t, sql, "custom_seedance_video_tasks_provider_idx")
 }
+
+func TestVideoTasksIdentityMigrationPreservesLegacyAndIsolatesSupplierIDs(t *testing.T) {
+	content, err := FS.ReadFile("248za_custom_video_tasks_identity_snapshots.sql")
+	require.NoError(t, err)
+	sql := strings.Join(strings.Fields(string(content)), " ")
+	require.Contains(t, sql, "task_id_version SMALLINT NOT NULL DEFAULT 0")
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS sales_snapshot JSONB")
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS execution_snapshot JSONB")
+	require.Contains(t, sql, "task_id_version = 0 AND duration_seconds > 0")
+	require.Contains(t, sql, "task_id_version = 1 AND duration_seconds >= 0")
+	require.Contains(t, sql, "ON custom_seedance_video_tasks (user_id, api_key_id, provider_task_id) WHERE task_id_version = 0")
+	require.Contains(t, sql, "ON custom_seedance_video_tasks (account_id, provider_protocol, provider_task_id) WHERE task_id_version = 1")
+	require.Contains(t, sql, "DROP INDEX IF EXISTS custom_seedance_video_tasks_owner_task_uq")
+	require.Contains(t, sql, "'needs_review'")
+}

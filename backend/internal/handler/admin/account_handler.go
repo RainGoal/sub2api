@@ -2912,7 +2912,8 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		if mapping := account.GetModelMapping(); len(mapping) > 0 {
 			modelIDs = modelIDs[:0]
 			for modelID := range mapping {
-				if driver.SupportsModel(modelID) {
+				_, capabilityEnabled := account.VideoModelCapability(modelID)
+				if driver.SupportsModel(modelID) || capabilityEnabled {
 					modelIDs = append(modelIDs, modelID)
 				}
 			}
@@ -3113,11 +3114,13 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 // POST /api/v1/admin/accounts/models/sync-upstream-preview
 func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	var req struct {
-		Platform     string            `json:"platform" binding:"required"`
-		Type         string            `json:"type" binding:"required"`
-		BaseURL      string            `json:"base_url"`
-		APIKey       string            `json:"api_key" binding:"required"`
-		ModelMapping map[string]string `json:"model_mapping"`
+		Platform      string            `json:"platform" binding:"required"`
+		Type          string            `json:"type" binding:"required"`
+		BaseURL       string            `json:"base_url"`
+		APIKey        string            `json:"api_key" binding:"required"`
+		ModelMapping  map[string]string `json:"model_mapping"`
+		VideoProvider string            `json:"video_provider"`
+		ProxyID       *int64            `json:"proxy_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -3131,10 +3134,12 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	tempAccount := &service.Account{
 		Platform: req.Platform,
 		Type:     req.Type,
+		ProxyID:  req.ProxyID,
 		Credentials: map[string]any{
-			"api_key":       req.APIKey,
-			"base_url":      req.BaseURL,
-			"model_mapping": modelMapping,
+			"api_key":        req.APIKey,
+			"base_url":       req.BaseURL,
+			"model_mapping":  modelMapping,
+			"video_provider": req.VideoProvider,
 		},
 	}
 
@@ -3143,6 +3148,14 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		return
 	}
 
+	if req.ProxyID != nil {
+		proxy, proxyErr := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
+		if proxyErr != nil || proxy == nil {
+			response.BadRequest(c, "Invalid proxy ID")
+			return
+		}
+		tempAccount.Proxy = proxy
+	}
 	catalog, err := h.accountTestService.SyncUpstreamModelCatalog(c.Request.Context(), tempAccount)
 	if err != nil {
 		var syncErr *service.UpstreamModelSyncError

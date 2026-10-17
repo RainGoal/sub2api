@@ -58,22 +58,26 @@ type updateChannelRequest struct {
 }
 
 type channelModelPricingRequest struct {
-	Platform                   string                     `json:"platform" binding:"omitempty,max=50"`
-	Models                     []string                   `json:"models" binding:"required,min=1,max=100"`
-	BillingMode                string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image video"`
-	InputPrice                 *float64                   `json:"input_price" binding:"omitempty,min=0"`
-	OutputPrice                *float64                   `json:"output_price" binding:"omitempty,min=0"`
-	CacheWritePrice            *float64                   `json:"cache_write_price" binding:"omitempty,min=0"`
-	CacheWrite1hPrice          *float64                   `json:"cache_write_1h_price" binding:"omitempty,min=0"`
-	CacheReadPrice             *float64                   `json:"cache_read_price" binding:"omitempty,min=0"`
-	FastMultiplier             *float64                   `json:"fast_multiplier" binding:"omitempty,gt=0"`
-	FlexMultiplier             *float64                   `json:"flex_multiplier" binding:"omitempty,gt=0"`
-	ReasoningEffortMultipliers map[string]float64         `json:"reasoning_effort_multipliers"`
-	ImageInputPrice            *float64                   `json:"image_input_price" binding:"omitempty,min=0"`
-	ImageOutputPrice           *float64                   `json:"image_output_price" binding:"omitempty,min=0"`
-	PerRequestPrice            *float64                   `json:"per_request_price" binding:"omitempty,min=0"`
-	Intervals                  []pricingIntervalRequest   `json:"intervals"`
-	TimePricing                *channelTimePricingRequest `json:"time_pricing"`
+	Platform                   string                      `json:"platform" binding:"omitempty,max=50"`
+	Models                     []string                    `json:"models" binding:"required,min=1,max=100"`
+	BillingMode                string                      `json:"billing_mode" binding:"omitempty,oneof=token per_request image video"`
+	VideoPricingVersion        int                         `json:"video_pricing_version" binding:"min=0,max=1"`
+	VideoBillingUnit           service.VideoBillingUnit    `json:"video_billing_unit" binding:"omitempty,oneof=per_second per_video"`
+	VideoQuantityPolicy        service.VideoQuantityPolicy `json:"video_quantity_policy" binding:"omitempty,oneof=requested_seconds output_seconds output_and_reference_seconds"`
+	VideoMaxBillableSeconds    float64                     `json:"video_max_billable_seconds" binding:"min=0"`
+	InputPrice                 *float64                    `json:"input_price" binding:"omitempty,min=0"`
+	OutputPrice                *float64                    `json:"output_price" binding:"omitempty,min=0"`
+	CacheWritePrice            *float64                    `json:"cache_write_price" binding:"omitempty,min=0"`
+	CacheWrite1hPrice          *float64                    `json:"cache_write_1h_price" binding:"omitempty,min=0"`
+	CacheReadPrice             *float64                    `json:"cache_read_price" binding:"omitempty,min=0"`
+	FastMultiplier             *float64                    `json:"fast_multiplier" binding:"omitempty,gt=0"`
+	FlexMultiplier             *float64                    `json:"flex_multiplier" binding:"omitempty,gt=0"`
+	ReasoningEffortMultipliers map[string]float64          `json:"reasoning_effort_multipliers"`
+	ImageInputPrice            *float64                    `json:"image_input_price" binding:"omitempty,min=0"`
+	ImageOutputPrice           *float64                    `json:"image_output_price" binding:"omitempty,min=0"`
+	PerRequestPrice            *float64                    `json:"per_request_price" binding:"omitempty,min=0"`
+	Intervals                  []pricingIntervalRequest    `json:"intervals"`
+	TimePricing                *channelTimePricingRequest  `json:"time_pricing"`
 }
 
 type channelTimePricingRequest struct {
@@ -135,6 +139,10 @@ type channelModelPricingResponse struct {
 	Platform                   string                      `json:"platform"`
 	Models                     []string                    `json:"models"`
 	BillingMode                string                      `json:"billing_mode"`
+	VideoPricingVersion        int                         `json:"video_pricing_version,omitempty"`
+	VideoBillingUnit           service.VideoBillingUnit    `json:"video_billing_unit,omitempty"`
+	VideoQuantityPolicy        service.VideoQuantityPolicy `json:"video_quantity_policy,omitempty"`
+	VideoMaxBillableSeconds    float64                     `json:"video_max_billable_seconds,omitempty"`
 	InputPrice                 *float64                    `json:"input_price"`
 	OutputPrice                *float64                    `json:"output_price"`
 	CacheWritePrice            *float64                    `json:"cache_write_price"`
@@ -265,6 +273,10 @@ func pricingToResponse(p *service.ChannelModelPricing) channelModelPricingRespon
 		Platform:                   platform,
 		Models:                     models,
 		BillingMode:                billingMode,
+		VideoPricingVersion:        p.VideoPricingVersion,
+		VideoBillingUnit:           p.VideoBillingUnit,
+		VideoQuantityPolicy:        p.VideoQuantityPolicy,
+		VideoMaxBillableSeconds:    p.VideoMaxBillableSeconds,
 		InputPrice:                 p.InputPrice,
 		OutputPrice:                p.OutputPrice,
 		CacheWritePrice:            p.CacheWritePrice,
@@ -363,6 +375,10 @@ func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMult
 			Platform:                   platform,
 			Models:                     r.Models,
 			BillingMode:                billingMode,
+			VideoPricingVersion:        r.VideoPricingVersion,
+			VideoBillingUnit:           r.VideoBillingUnit,
+			VideoQuantityPolicy:        r.VideoQuantityPolicy,
+			VideoMaxBillableSeconds:    r.VideoMaxBillableSeconds,
 			InputPrice:                 r.InputPrice,
 			OutputPrice:                r.OutputPrice,
 			CacheWritePrice:            r.CacheWritePrice,

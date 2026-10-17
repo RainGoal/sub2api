@@ -538,6 +538,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateVideoTasksAccount(account); err != nil {
+		return nil, err
+	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
@@ -583,6 +586,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := protectVideoTaskAccount(ctx, s.accountRepo, account, false, input.Credentials, input.Type); err != nil {
 		return nil, err
 	}
 	if err := NormalizeAccountModelCostPricingExtra(account.Platform, input.Extra); err != nil {
@@ -855,6 +861,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err := validateSeedanceAccountCredentials(account.Platform, account.Type, account.Credentials); err != nil {
 		return nil, err
 	}
+	if err := ValidateVideoTasksAccount(account); err != nil {
+		return nil, err
+	}
 
 	// 先验证分组是否存在（在任何写操作之前）
 	if input.GroupIDs != nil {
@@ -959,7 +968,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OpenCodeGoUsageSnapshotExtraKey)
 	_, hasLongContextBilling := updates[openAILongContextBillingEnabledKey]
 	_, hasModelCostPricing := updates[AccountModelCostPricingExtraKey]
-	if hasLongContextBilling || hasModelCostPricing {
+	_, hasVideoCapabilities := updates[VideoModelCapabilitiesExtra]
+	_, hasVideoSupplier := updates[VideoSupplierNameExtra]
+	if hasLongContextBilling || hasModelCostPricing || hasVideoCapabilities || hasVideoSupplier {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
 			return err
@@ -968,6 +979,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			return err
 		}
 		if err := NormalizeAccountModelCostPricingExtra(account.Platform, updates); err != nil {
+			return err
+		}
+		if err := ValidateVideoTasksAccount(&Account{Platform: account.Platform, Extra: updates}); err != nil {
 			return err
 		}
 	}
@@ -1027,7 +1041,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
 	_, hasModelCostPricing := input.Extra[AccountModelCostPricingExtraKey]
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || hasModelCostPricing {
+	_, hasVideoCapabilities := input.Extra[VideoModelCapabilitiesExtra]
+	_, hasVideoSupplier := input.Extra[VideoSupplierNameExtra]
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || hasModelCostPricing || hasVideoCapabilities || hasVideoSupplier {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1038,6 +1054,16 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+			if err := protectVideoTaskAccount(ctx, s.accountRepo, account, false, input.Credentials, ""); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(input.Credentials) > 0 || hasVideoCapabilities || hasVideoSupplier {
+		for _, account := range cachedTargets {
+			if err := validateVideoTaskBulkUpdate(account, input.Credentials, input.Extra); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if hasModelCostPricing {
@@ -1321,6 +1347,15 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 }
 
 func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
+	if _, guarded := s.accountRepo.(SeedanceVideoTaskAccountDependencyRepository); guarded {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := protectVideoTaskAccount(ctx, s.accountRepo, account, true, nil, ""); err != nil {
+			return err
+		}
+	}
 	// 级联删除 spark 影子账号（先删影子，再删母账号）
 	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
 	if err != nil {

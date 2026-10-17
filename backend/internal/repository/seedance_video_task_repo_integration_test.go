@@ -69,3 +69,48 @@ func TestSeedanceVideoTaskRepositoryPostgresCostSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestSeedanceVideoTaskRepositoryPostgresPublicIdentityIsolation(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSeedanceVideoTaskRepository(integrationDB)
+	upstreamID := fmt.Sprintf("shared-supplier-%d", time.Now().UnixNano())
+	var tasks []*service.SeedanceVideoPendingBilling
+	t.Cleanup(func() {
+		for _, task := range tasks {
+			_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM custom_seedance_video_tasks WHERE state_id = $1", task.StateID)
+			require.NoError(t, err)
+		}
+	})
+	for _, accountID := range []int64{20, 21} {
+		stateID, err := service.NewSeedanceVideoPublicTaskID()
+		require.NoError(t, err)
+		task := &service.SeedanceVideoPendingBilling{
+			IDVersion: 1, StateID: stateID, HoldID: stateID, UserID: 7, APIKeyID: 8,
+			AccountID: accountID, ProviderID: "bblabu_v1", Model: "seedance-2.0", Resolution: "480p", DurationSeconds: 4,
+			ExecutionSnapshot: &service.VideoTasksExecutionSnapshot{Version: 1, Protocol: "bblabu_v1", BaseURL: "https://original.example/v1", UpstreamModel: "Seedance-2.0"},
+		}
+		tasks = append(tasks, task)
+		require.NoError(t, repo.Create(ctx, task))
+		require.NoError(t, repo.BindProviderTask(ctx, stateID, upstreamID, "queued", time.Now().Add(time.Hour)))
+	}
+	for _, task := range tasks {
+		loaded, err := repo.GetByProviderTask(ctx, task.StateID, 7, 8)
+		require.NoError(t, err)
+		require.Equal(t, task.AccountID, loaded.AccountID)
+		require.Equal(t, task.StateID, loaded.PublicID())
+		require.Equal(t, upstreamID, loaded.UpstreamID())
+		_, err = repo.GetByProviderTask(ctx, task.StateID, 7, 9)
+		require.ErrorIs(t, err, service.ErrSeedanceVideoTaskNotFound)
+	}
+	_, err := repo.GetByProviderTask(ctx, upstreamID, 7, 8)
+	require.ErrorIs(t, err, service.ErrSeedanceVideoTaskNotFound)
+	claimed, err := repo.ClaimSettlement(ctx, upstreamID, 7, 8, time.Minute)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	claimed, err = repo.ClaimSettlement(ctx, tasks[0].StateID, 7, 8, time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	second, err := repo.GetByProviderTask(ctx, tasks[1].StateID, 7, 8)
+	require.NoError(t, err)
+	require.Equal(t, service.SeedanceVideoSettlementPending, second.SettlementStatus)
+}

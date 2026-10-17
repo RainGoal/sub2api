@@ -17,9 +17,10 @@ var ErrVideoTaskCancellationUnsupported = errors.New("video task cancellation un
 type ID string
 
 const (
-	ProviderBBLabuV1  ID = "bblabu_v1"
-	ProviderFFLinkV1  ID = "fflink_v1"
-	DefaultProviderID    = ProviderBBLabuV1
+	ProviderBBLabuV1         ID = "bblabu_v1"
+	ProviderFFLinkV1         ID = "fflink_v1"
+	ProviderVideoTasksJSONV1 ID = "video_tasks_json_v1"
+	DefaultProviderID           = ProviderBBLabuV1
 )
 
 type Operation string
@@ -51,20 +52,22 @@ const (
 )
 
 type CreateRequest struct {
-	RequestedModel  string         `json:"requested_model"`
-	Model           string         `json:"model"`
-	Prompt          string         `json:"prompt"`
-	AspectRatio     string         `json:"aspect_ratio"`
-	Duration        int            `json:"duration"`
-	Resolution      string         `json:"resolution"`
-	Audio           bool           `json:"audio,omitempty"`
-	StartFrameURL   string         `json:"start_frame_url,omitempty"`
-	EndFrameURL     string         `json:"end_frame_url,omitempty"`
-	ReferenceImages []string       `json:"reference_images,omitempty"`
-	ReferenceVideos []string       `json:"reference_videos,omitempty"`
-	ReferenceAudios []string       `json:"reference_audios,omitempty"`
-	Guidances       map[string]any `json:"guidances,omitempty"`
-	Raw             map[string]any `json:"raw,omitempty"`
+	RequestedModel          string                `json:"requested_model"`
+	Model                   string                `json:"model"`
+	Prompt                  string                `json:"prompt"`
+	AspectRatio             string                `json:"aspect_ratio"`
+	Duration                int                   `json:"duration"`
+	Resolution              string                `json:"resolution"`
+	Audio                   bool                  `json:"audio,omitempty"`
+	StartFrameURL           string                `json:"start_frame_url,omitempty"`
+	EndFrameURL             string                `json:"end_frame_url,omitempty"`
+	ReferenceImages         []string              `json:"reference_images,omitempty"`
+	ReferenceVideos         []string              `json:"reference_videos,omitempty"`
+	ReferenceAudios         []string              `json:"reference_audios,omitempty"`
+	Guidances               map[string]any        `json:"guidances,omitempty"`
+	Raw                     map[string]any        `json:"raw,omitempty"`
+	Capability              *VideoModelCapability `json:"capability,omitempty"`
+	ReferenceVideoDurations []int                 `json:"reference_video_durations,omitempty"`
 }
 
 type RequestInfo struct {
@@ -74,15 +77,19 @@ type RequestInfo struct {
 	Resolution          string
 	ReferenceVideoCount int
 	Audio               bool
+	Capability          *VideoModelCapability
+	BillingUnit         string
 }
 
 type Task struct {
-	ID                    string
-	Status                Status
-	Model                 string
-	Resolution            string
-	DurationSeconds       int
-	ReferenceInputSeconds int
+	ID                         string
+	Status                     Status
+	Model                      string
+	Resolution                 string
+	DurationSeconds            int
+	ReferenceInputSeconds      int
+	DurationSecondsExact       float64
+	ReferenceInputSecondsExact float64
 }
 
 type RequestParams struct {
@@ -91,6 +98,7 @@ type RequestParams struct {
 	Operation     Operation
 	TaskID        string
 	CreateRequest *CreateRequest
+	Capability    *VideoModelCapability
 }
 
 type Driver interface {
