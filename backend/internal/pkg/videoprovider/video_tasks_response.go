@@ -34,7 +34,7 @@ func (videoTasksJSONDriver) ParseTask(body []byte, fallbackTaskID string) (Task,
 	}
 	task.Status = normalizeBBLabuStatus(rawStatus)
 	var err error
-	task.DurationSecondsExact, err = firstVideoExactSeconds(payload, "duration", "data.duration", "video.duration", "properties.duration")
+	task.DurationSecondsExact, err = firstVideoExactSeconds(payload, "duration", "data.duration", "video.duration", "properties.duration", "seconds")
 	if err != nil {
 		return Task{}, err
 	}
@@ -60,6 +60,14 @@ func firstVideoExactSeconds(payload map[string]any, paths ...string) (float64, e
 			continue
 		}
 		number, ok := value.(json.Number)
+		// OpenAI-compatible video responses can encode output seconds as a string.
+		// Keep duration and reference metering fields strictly numeric.
+		if encoded, isString := value.(string); !ok && isString && path == "seconds" {
+			encoded = strings.TrimSpace(encoded)
+			if json.Valid([]byte(encoded)) {
+				number, ok = json.Number(encoded), true
+			}
+		}
 		if !ok {
 			return 0, fmt.Errorf("video duration %s must be a JSON number", path)
 		}

@@ -65,6 +65,9 @@ the capability's metering policy and trust flag before accepting a request.
 The new driver's protocol-level `BillingPolicy` is not a model billing rule.
 Its response parser preserves fractional seconds in `DurationSecondsExact`
 and `ReferenceInputSecondsExact`; the integer fields remain for old callers.
+Output metering also accepts top-level `seconds` as a JSON number or numeric
+string as a fallback after existing `duration` fields. All metering must remain
+finite, nonnegative, and at most 3600 seconds.
 
 The sd14 route accepts `reference_video_durations` as gateway validation
 metadata to enforce its documented 25-second input-plus-output limit; that

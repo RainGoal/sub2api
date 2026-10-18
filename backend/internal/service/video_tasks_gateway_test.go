@@ -114,6 +114,41 @@ func TestVideoTasksGatewaySettlesAllSalesPurchaseUnitCombinations(t *testing.T) 
 	}
 }
 
+func TestVideoTasksGatewayCompletedSecondsResponseRecordsUsage(t *testing.T) {
+	capability, ok := videoprovider.LookupVideoModelCapability("Seedance-2.0", nil)
+	require.True(t, ok)
+	svc, key := videoTasksGatewayPricingService(explicitVideoPrice(capability.Model, VideoBillingPerSecond, 0.1))
+	svc.seedanceVideoTaskRepo = &videoTasksGatewayRepo{}
+	account := videoTasksGatewayAccount(20, capability, explicitVideoPrice(capability.Model, VideoBillingPerSecond, 0.04))
+	quote, err := svc.ResolveSeedanceVideoPricingSnapshot(context.Background(), key, SeedanceVideoRequestInfo{
+		Model: capability.Model, Resolution: "720p", DurationSeconds: 6, Capability: &capability})
+	require.NoError(t, err)
+	pending := &SeedanceVideoPendingBilling{IDVersion: 1, StateID: "vid_00112233445566778899aabbccddeeff",
+		UserID: key.UserID, APIKeyID: key.ID, HoldID: "hold", Model: capability.Model, DurationSeconds: 6,
+		Resolution: "720p", SalesSnapshot: quote.SalesSnapshot, HoldAmount: quote.HoldAmount}
+	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), pending))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), pending, account, "video_tasks_json_v1"))
+	driver, err := videoprovider.Resolve(string(videoprovider.ProviderVideoTasksJSONV1))
+	require.NoError(t, err)
+	task, err := driver.ParseTask([]byte(`{"completed_at":1792332453,"created_at":1792332294,"id":"task_seconds_completed","model":"Seedance-2.0","object":"video","progress":85,"result_urls":[""],"seconds":"4","size":"1280x720","status":"completed","video_url":"https://cdn.example/video.mp4"}`), "")
+	require.NoError(t, err)
+	pending.TaskID = task.ID
+	lease := time.Now().Add(time.Minute)
+	pending.LeaseUntil = &lease
+	result, cost, err := BuildSeedanceVideoCompletionBilling(pending, seedanceForwardResultFromTask(task))
+	require.NoError(t, err)
+	require.Equal(t, 4.0, result.VideoDurationSecondsExact)
+	require.InDelta(t, 0.8, cost.ActualCost, 1e-12)
+	billing, logs := &seedanceVideoBillingRepo{}, &seedanceCostUsageRepo{}
+	svc.usageBillingRepo, svc.usageLogRepo, svc.deferredService = billing, logs, &DeferredService{}
+	require.NoError(t, svc.RecordSeedanceVideoUsage(context.Background(), pending, &OpenAIRecordUsageInput{
+		Result: result, CostOverride: cost, APIKey: key, User: key.User, Account: account}))
+	require.Len(t, logs.logs, 1)
+	require.InDelta(t, 0.16, *logs.logs[0].AccountStatsCost, 1e-12)
+	require.Len(t, billing.commands, 1)
+	require.InDelta(t, 0.8, billing.commands[0].BalanceCost, 1e-12)
+}
+
 func TestVideoTasksGatewayLegacyPricesKeepProviderFormulaAndEstimatedCost(t *testing.T) {
 	svc, key := videoTasksGatewayPricingService()
 	key.Group.VideoModelPrices[videoprovider.ModelSeedance25] = map[string]float64{"720p": 0.1}

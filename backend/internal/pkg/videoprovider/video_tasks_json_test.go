@@ -220,3 +220,75 @@ func TestVideoTasksTaskParsingPreservesFractionalMetering(t *testing.T) {
 	require.Equal(t, "fallback", task.ID)
 	require.Equal(t, StatusFailed, task.Status)
 }
+
+func TestVideoTasksTaskParsingCompletedSecondsResponse(t *testing.T) {
+	driver, err := Resolve(string(ProviderVideoTasksJSONV1))
+	require.NoError(t, err)
+	task, err := driver.ParseTask([]byte(`{"completed_at":1792332453,"created_at":1792332294,"id":"task_seconds_completed","model":"Seedance-2.0","object":"video","progress":85,"result_urls":[""],"seconds":"4","size":"1280x720","status":"completed","video_url":"https://cdn.example/video.mp4"}`), "")
+	require.NoError(t, err)
+	require.Equal(t, "task_seconds_completed", task.ID)
+	require.Equal(t, "Seedance-2.0", task.Model)
+	require.Equal(t, StatusCompleted, task.Status)
+	require.Equal(t, 4.0, task.DurationSecondsExact)
+	require.Equal(t, 4, task.DurationSeconds)
+}
+
+func TestVideoTasksTaskParsingSecondsMetering(t *testing.T) {
+	driver, err := Resolve(string(ProviderVideoTasksJSONV1))
+	require.NoError(t, err)
+	for _, test := range []struct {
+		name string
+		body string
+		want float64
+	}{
+		{"number", `{"id":"t","seconds":4}`, 4},
+		{"fractional number", `{"id":"t","seconds":4.125}`, 4.125},
+		{"fractional string", `{"id":"t","seconds":"4.125"}`, 4.125},
+		{"trimmed string", `{"id":"t","seconds":" 4.125 "}`, 4.125},
+		{"exponent string", `{"id":"t","seconds":"4e0"}`, 4},
+		{"zero", `{"id":"t","seconds":"0"}`, 0},
+		{"upper bound", `{"id":"t","seconds":"3600"}`, 3600},
+		{"duration takes priority", `{"id":"t","duration":5.125,"seconds":"4"}`, 5.125},
+		{"zero duration takes priority", `{"id":"t","duration":0,"seconds":"4"}`, 0},
+		{"duration ignores invalid alias", `{"id":"t","duration":5.125,"seconds":"invalid"}`, 5.125},
+		{"nested duration takes priority", `{"id":"t","data":{"duration":5.125},"seconds":"4"}`, 5.125},
+		{"null duration", `{"id":"t","duration":null,"seconds":"4"}`, 4},
+		{"missing metering", `{"id":"t","status":"completed"}`, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			task, err := driver.ParseTask([]byte(test.body), "")
+			require.NoError(t, err)
+			require.Equal(t, test.want, task.DurationSecondsExact)
+			require.Equal(t, int(test.want), task.DurationSeconds)
+		})
+	}
+}
+
+func TestVideoTasksTaskParsingRejectsInvalidSecondsMetering(t *testing.T) {
+	driver, err := Resolve(string(ProviderVideoTasksJSONV1))
+	require.NoError(t, err)
+	for name, fields := range map[string]string{
+		"negative number":         `"seconds":-1`,
+		"negative string":         `"seconds":"-1"`,
+		"out of range number":     `"seconds":3600.1`,
+		"out of range string":     `"seconds":"3600.1"`,
+		"overflow number":         `"seconds":1e1000`,
+		"overflow string":         `"seconds":"1e1000"`,
+		"nan":                     `"seconds":"NaN"`,
+		"infinity":                `"seconds":"Infinity"`,
+		"empty":                   `"seconds":""`,
+		"whitespace":              `"seconds":" "`,
+		"invalid decimal":         `"seconds":"four"`,
+		"positive sign":           `"seconds":"+4"`,
+		"hexadecimal":             `"seconds":"0x4"`,
+		"bool":                    `"seconds":true`,
+		"array":                   `"seconds":[4]`,
+		"object":                  `"seconds":{"value":4}`,
+		"duration remains strict": `"duration":"5","seconds":"4"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := driver.ParseTask([]byte(`{"id":"t",`+fields+`}`), "")
+			require.Error(t, err)
+		})
+	}
+}
