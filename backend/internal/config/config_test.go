@@ -619,6 +619,41 @@ func TestLoadOpenAICompactModelFromEnv(t *testing.T) {
 	require.Equal(t, "gpt-5.3-codex", cfg.Gateway.OpenAICompactModel)
 }
 
+func TestLoadVideoTasksJSONV1Enabled(t *testing.T) {
+	for _, loader := range []struct {
+		name string
+		load func() (*Config, error)
+	}{{"Load", Load}, {"LoadForBootstrap", LoadForBootstrap}} {
+		t.Run(loader.name, func(t *testing.T) {
+			for _, tt := range []struct {
+				name string
+				yaml string
+				env  string
+				want bool
+			}{
+				{name: "default enabled", want: true},
+				{name: "yaml false", yaml: "gateway:\n  video_tasks_json_v1_enabled: false\n", want: false},
+				{name: "yaml true", yaml: "gateway:\n  video_tasks_json_v1_enabled: true\n", want: true},
+				{name: "env false", env: "false", want: false},
+				{name: "env false overrides yaml true", yaml: "gateway:\n  video_tasks_json_v1_enabled: true\n", env: "false", want: false},
+				{name: "env true overrides yaml false", yaml: "gateway:\n  video_tasks_json_v1_enabled: false\n", env: "true", want: true},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					resetViperWithJWTSecret(t)
+					t.Setenv("GATEWAY_VIDEO_TASKS_JSON_V1_ENABLED", tt.env)
+					configFile := filepath.Join(t.TempDir(), "config.yaml")
+					require.NoError(t, os.WriteFile(configFile, []byte(tt.yaml), 0o600))
+					t.Setenv("CONFIG_FILE", configFile)
+
+					cfg, err := loader.load()
+					require.NoError(t, err)
+					require.Equal(t, tt.want, cfg.Gateway.VideoTasksJSONV1Enabled)
+				})
+			}
+		})
+	}
+}
+
 func TestLoadDefaultGrokFreeQuotaSoftGate(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

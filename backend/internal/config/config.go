@@ -980,7 +980,7 @@ const (
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
-	// VideoTasksJSONV1Enabled enables versioned video tasks after all replicas are upgraded.
+	// VideoTasksJSONV1Enabled enables versioned video tasks by default; false stops new v1 tasks.
 	VideoTasksJSONV1Enabled bool `mapstructure:"video_tasks_json_v1_enabled"`
 	// MinOutputTokens is the minimum max_output_tokens used when
 	// converting Chat Completions or Anthropic requests to Responses.
@@ -2517,9 +2517,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_proxy_stream_circuit.failure_threshold", 2)
 	viper.SetDefault("gateway.openai_proxy_stream_circuit.window_seconds", 60)
 	viper.SetDefault("gateway.openai_proxy_stream_circuit.ttl_seconds", 600)
+	viper.SetDefault("gateway.video_tasks_json_v1_enabled", true)
 	// Grok free-tier local soft gate (scheduler-only; admin QueryQuota does not use this).
 	// Enabled by default because free detection requires an explicit free tier marker.
-	viper.SetDefault("gateway.video_tasks_json_v1_enabled", false)
 	viper.SetDefault("gateway.grok.free_quota_soft_gate_enabled", true)
 	viper.SetDefault("gateway.grok.password_auth_enabled", false)
 	// Free soft-gate nominal limit: 500k tokens / rolling 24h (operator policy).

@@ -217,9 +217,9 @@ security:
 # 网关配置
 # =============================================================================
 gateway:
-  # Enable only after every instance has the video task migrations and recovery code.
-  # 全部实例升级并完成迁移后才可启用；关闭开关仍允许取回已有任务。
-  video_tasks_json_v1_enabled: false
+  # Enabled by default; false stops new v1 tasks while existing tasks remain retrievable.
+  # 默认启用；显式设为 false 停止新版创建，仍允许取回已有任务。
+  video_tasks_json_v1_enabled: true
   # Minimum max_output_tokens when converting Chat Completions or Anthropic requests to Responses (minimum 16, default 128)
   # Chat Completions 或 Anthropic 请求转换为 Responses 时的最小 max_output_tokens（最小 16，默认 128）
   min_output_tokens: 128

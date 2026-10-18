@@ -3,18 +3,21 @@
 本轮交付通用视频协议、33 个 BBLabu 能力模板、独立售采单位、任务恢复和管理端复核。
 内部平台仍是 `seedance`，已有 `bblabu_v1` / `fflink_v1`、历史任务和图片流程继续兼容。
 模板和本地测试不代表已经完成供应商真实生成或账单验收。
+当前版本默认启用 Video Tasks JSON v1，无需额外配置
+`GATEWAY_VIDEO_TASKS_JSON_V1_ENABLED=true`；已有显式 `false` 配置仍优先于默认值。
 
 ## 升级顺序
 
 1. 备份线上 compose 和数据库；先在具备 Docker 的环境通过完整 integration 测试。
 2. 使用明确提交号或版本号构建应用镜像，保留原配置与数据卷。
-3. 保持 `gateway.video_tasks_json_v1_enabled: false`，升级所有应用和恢复 worker。
+3. 多实例滚动升级时，先显式设置 `gateway.video_tasks_json_v1_enabled: false`，
+   再升级所有应用和恢复 worker，避免旧实例接收到新任务。
 4. 确认新增迁移 `248z`、`248za`、`248zb` 全部成功，全部实例均支持新任务。
 5. 检查健康接口、日志、管理端静态资源及下列网关路由；再启用选定模型。
-6. 开启 `gateway.video_tasks_json_v1_enabled: true`，或环境变量
-   `GATEWAY_VIDEO_TASKS_JSON_V1_ENABLED=true`，重启相应实例使配置生效。
+6. 未配置开关的部署在新版重启后默认启用；若升级期间显式关闭，移除 `false`
+   配置或改为 `true`，重启相应实例使配置生效。
 
-开关默认关闭；启用后新视频任务使用 `vid_` 公开身份与冻结快照。
+开关默认启用；包括旧协议渠道在内的新视频任务使用 `vid_` 公开身份与冻结快照。
 关闭开关会停止新版创建，已有任务仍需继续查询、结算、下载和人工处理。
 旧程序不能处理新任务：回滚时先关闭创建并排空新版任务及预占。
 还须保留支持 v1 的实例承接查询和下载，直到最后一笔成功结算后的 7 天取回窗口结束，
@@ -100,21 +103,21 @@ Nginx 检查以上路径、下载 Range 与超时、管理端新资源，不需�
 - 桌面与 390px 窄屏组件预览通过；使用本地 mock，未执行生产登录或真实收费生成。
 - `golangci-lint run --timeout=30m ./...` 未通过：现有 lint 的 importer 不支持 Go 1.27.2 的 export data version 5，须换用兼容工具后重跑。
 - `go test -tags=integration ./...` 未通过：本机缺少 Docker。新增仓储集成用例编译通过，但没有实际执行 PostgreSQL/Redis 并发验证；发布前须在完整环境或 CI 补验。
-- 供应商真实生成、精确计量与账单核对尚未执行；开关保持默认关闭。本地验证阶段未执行生产部署。
+- 当时未执行供应商真实生成、精确计量与账单核对，开关默认关闭。本地验证阶段未执行生产部署。
 
-## v0.1.57 发布约束
+## v0.1.57 发布约束（历史记录）
 
 先推送 `feat/my-sub`，待同一提交的 CI（含数据库集成测试、lint）和 Security Scan 全部通过，
 再创建 annotated Tag `v0.1.57`，信息为 `Release v0.1.57`，单独推送并核对远端 peeled commit。
 Tag 会触发现有 Release 流水线发布构建产物及镜像；生产部署和视频功能启用需另行完成验收。
-真实生成、计量与账单核对完成前，保持 `gateway.video_tasks_json_v1_enabled: false`。
+该版本要求真实生成、计量与账单核对完成前，保持 `gateway.video_tasks_json_v1_enabled: false`。
 
 ## v0.1.58 按条分辨率定价修复（2026-10-18）
 
 - 账号采购成本与渠道售价直接选择按秒或按条（按次），两种方式均支持分辨率价格档位。
 - 切换单位保留默认价和分辨率价格；已有旧格式配置在未主动切换或添加档位时保持原计费语义。
 - 复用已有 v1 视频计价协议。渠道按条及独立时长售价需服务端启用
-  `gateway.video_tasks_json_v1_enabled`；本次不改变开关默认值，不增加数据库迁移。
+  `gateway.video_tasks_json_v1_enabled`；该版本未改变当时默认关闭的行为，未增加数据库迁移。
 - 本地 `typecheck`、本次文件 ESLint、全量前端测试（389 文件、3180 项）、
   `build`、构建完成后的 `go test -tags embed ./internal/web` 及 `git diff --check` 通过。
 - 发布仍须等待待发布提交的 CI 与 Security Scan 全部成功，再推送 annotated Tag；
