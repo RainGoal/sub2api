@@ -27,7 +27,7 @@ func (videoTasksJSONDriver) SupportsModel(model string) bool {
 	return ok && c.Enabled
 }
 func (videoTasksJSONDriver) ParseModels(body []byte) ([]string, error) {
-	return parseOpenAIModelIDs(body, nil)
+	return parseOpenAIModelIDs(body, nil, true)
 }
 
 // NormalizeVideoTasksBaseURL requires an explicit HTTPS API location and adds

@@ -22,6 +22,40 @@ export interface VideoModelTemplates {
   models: VideoModelCapability[]
 }
 
+// A successful discovery is an account-scoped display snapshot, never authorization.
+export interface VideoModelDiscovery {
+  models: string[]
+  synced_at: string
+  base_url: string
+  proxy_id: number | null
+  protocol: 'video_tasks_json_v1'
+}
+
+export function readVideoModelDiscovery(value: unknown): VideoModelDiscovery | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const snapshot = value as Record<string, unknown>
+  if (snapshot.protocol !== 'video_tasks_json_v1' || !Array.isArray(snapshot.models) ||
+    typeof snapshot.base_url !== 'string' || typeof snapshot.synced_at !== 'string' ||
+    (snapshot.proxy_id !== null && (typeof snapshot.proxy_id !== 'number' || !Number.isSafeInteger(snapshot.proxy_id) || snapshot.proxy_id <= 0))) return null
+  const baseUrl = snapshot.base_url.trim()
+  const syncedAt = snapshot.synced_at.trim()
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(syncedAt) || !Number.isFinite(Date.parse(syncedAt))) return null
+  try {
+    const parsed = new URL(baseUrl)
+    if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) return null
+  } catch {
+    return null
+  }
+  const models: string[] = []
+  for (const model of snapshot.models) {
+    if (typeof model !== 'string' || !model.trim() || [...model].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return null
+    const name = model.trim()
+    if (!models.includes(name)) models.push(name)
+  }
+  // Explicitly select fields so credentials and unrelated data cannot be persisted.
+  return { models, synced_at: syncedAt, base_url: baseUrl, proxy_id: snapshot.proxy_id, protocol: snapshot.protocol }
+}
+
 export async function getVideoModelTemplates(): Promise<VideoModelTemplates> {
   const { data } = await apiClient.get<VideoModelTemplates>('/admin/accounts/video-model-templates')
   return data

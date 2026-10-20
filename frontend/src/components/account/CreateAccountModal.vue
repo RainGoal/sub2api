@@ -1541,6 +1541,7 @@
           <VideoTasksAccountConfig
             v-else id="create-video-tasks" v-model="seedanceModelSelection"
             v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
+            v-model:discovery="videoModelDiscovery"
             v-model:base-url="apiKeyBaseUrl" :api-key="apiKeyValue" :proxy-id="form.proxy_id"
             @validity="videoCapabilitiesValid = $event"
           />
@@ -4218,7 +4219,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
 import VideoTasksAccountConfig from '@/components/account/VideoTasksAccountConfig.vue'
-import type { VideoModelCapability } from '@/api/admin/videoTasks'
+import { readVideoModelDiscovery, type VideoModelCapability, type VideoModelDiscovery } from '@/api/admin/videoTasks'
 import {
   buildSeedanceModelMapping,
   filterSeedanceModelSelection,
@@ -4318,6 +4319,7 @@ const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const videoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
 const seedanceModelSelection = ref<SeedanceModelSelection>(null)
 const videoCapabilities = ref<VideoModelCapability[]>([])
+const videoModelDiscovery = ref<VideoModelDiscovery | null>(null)
 const videoSupplierName = ref('')
 const videoCapabilitiesValid = ref(true)
 const modelCostPricing = ref<PricingFormEntry[]>([])
@@ -4329,8 +4331,12 @@ const withAccountExtra = <T extends Record<string, unknown> | undefined>(extra: 
   const costError = validateAccountModelCostPricing(modelCostPricing.value, form.platform, t)
   if (costError) throw new Error(costError)
   const name = upstreamRequestIdHeader.value.trim()
+  const discovery = readVideoModelDiscovery(videoModelDiscovery.value)
   const videoExtra = form.platform === 'seedance' && videoProvider.value === 'video_tasks_json_v1'
-    ? { video_model_capabilities: videoCapabilities.value, video_supplier_name: videoSupplierName.value.trim() } : {}
+    ? {
+      video_model_capabilities: videoCapabilities.value, video_supplier_name: videoSupplierName.value.trim(),
+      ...(discovery ? { video_model_discovery: discovery } : {}),
+    } : {}
   if (!name && modelCostPricing.value.length === 0 && Object.keys(videoExtra).length === 0) return extra
   return {
     ...(extra || {}),
@@ -4703,6 +4709,7 @@ watch(apiProtocol, (protocol) => {
 })
 watch(videoProvider, (provider, previousProvider) => {
   if (form.platform !== 'seedance') return
+  videoModelDiscovery.value = null
   videoCapabilitiesValid.value = true
   seedanceModelSelection.value = provider === 'video_tasks_json_v1' ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = apiKeyBaseUrl.value.trim()
@@ -5278,6 +5285,7 @@ watch(
     // Clear model-related settings
     seedanceModelSelection.value = null
     videoCapabilities.value = []
+    videoModelDiscovery.value = null
     videoSupplierName.value = ''
     videoCapabilitiesValid.value = true
     modelCostPricing.value = []
@@ -5771,6 +5779,7 @@ const resetForm = () => {
   videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
   seedanceModelSelection.value = null
   videoCapabilities.value = []
+  videoModelDiscovery.value = null
   videoSupplierName.value = ''
   videoCapabilitiesValid.value = true
   upstreamRequestIdHeader.value = ''

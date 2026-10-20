@@ -57,6 +57,14 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
+vi.mock('@/api/admin/videoTasks', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/admin/videoTasks')>(),
+  getVideoModelTemplates: vi.fn().mockResolvedValue({
+    protocol: 'video_tasks_json_v1', version: 'test',
+    preset: { name: 'Supplier', base_url: 'https://supplier.example/v1' }, models: [],
+  }),
+}))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -319,7 +327,7 @@ function buildOpenAIOAuthParentAccount() {
   } as any
 }
 
-function mountModal(account = buildAccount(), renderGroupSelector = false) {
+function mountModal(account = buildAccount(), renderGroupSelector = false, renderVideoConfig = false) {
   return mount(EditAccountModal, {
     props: {
       show: true,
@@ -335,7 +343,7 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
         ProxySelector: true,
         GroupSelector: renderGroupSelector ? false : GroupSelectorStub,
         ModelWhitelistSelector: ModelWhitelistSelectorStub,
-        VideoTasksAccountConfig: true
+        VideoTasksAccountConfig: !renderVideoConfig
       }
     }
   })
@@ -671,6 +679,119 @@ describe('EditAccountModal', () => {
       credentials: { video_provider: 'video_tasks_json_v1', model_mapping: { 'Custom/Video': 'Custom/Video' } },
       extra: { unrelated_setting: true, video_supplier_name: 'Updated supplier', video_model_capabilities: [capability] }
     })
+  })
+
+  it('rehydrates and saves discovery with other extra fields and purchase-price changes', async () => {
+    const discovery = {
+      models: ['Custom/Video'], synced_at: '2026-10-20T01:00:00.000Z',
+      base_url: 'https://custom.example/v1', proxy_id: null, protocol: 'video_tasks_json_v1',
+    }
+    const capability = { model: 'Custom/Video', profile: 'bblabu_route', enabled: true }
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: { video_provider: 'video_tasks_json_v1', base_url: discovery.base_url, model_mapping: { 'Custom/Video': 'Custom/Video' } },
+      credentials_status: { has_api_key: true },
+      extra: { unrelated_setting: 'retained', video_model_capabilities: [capability], video_model_discovery: discovery },
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    expect(config.props('discovery')).toEqual(discovery)
+    const nextDiscovery = { ...discovery, models: ['New/Video'], synced_at: '2026-10-20T02:00:00.000Z' }
+    config.vm.$emit('update:discovery', nextDiscovery)
+    const cost = {
+      ...createAccountModelCostEntry('seedance'), models: ['Custom/Video'], per_request_price: 0.4,
+      video_pricing_version: 1 as const, video_billing_unit: 'per_video' as const,
+    }
+    wrapper.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [cost])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: { model_mapping: account.credentials.model_mapping },
+      extra: {
+        unrelated_setting: 'retained', video_model_capabilities: [capability],
+        video_model_discovery: nextDiscovery, model_cost_pricing: accountModelCostPricingToAPI([cost], 'seedance'),
+      },
+    })
+    expect(account.extra.video_model_discovery).toEqual(discovery)
+    wrapper.unmount()
+  })
+
+  it('preserves the next account catalog when switching accounts and reopening after a connection draft', async () => {
+    const buildVideoAccount = (id: number) => {
+      const model = `Supplier${id}/Video`
+      const baseUrl = `https://supplier${id}.example/v1`
+      return {
+        ...buildAccount(), id, platform: 'seedance',
+        credentials: { video_provider: 'video_tasks_json_v1', base_url: baseUrl, model_mapping: { [model]: model } },
+        credentials_status: { has_api_key: true },
+        extra: { video_model_discovery: {
+          models: [model], synced_at: '2026-10-20T01:00:00.000Z',
+          base_url: baseUrl, proxy_id: null, protocol: 'video_tasks_json_v1',
+        } },
+      } as any
+    }
+    const accountA = buildVideoAccount(20), accountB = buildVideoAccount(21)
+    updateAccountMock.mockReset().mockResolvedValue(accountB)
+    const wrapper = mountModal(accountA, false, true)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="video-model-row-Supplier20/Video"]').attributes('data-status')).toBe('available')
+    const previousConfig = wrapper.getComponent(VideoTasksAccountConfig).vm
+    await wrapper.setProps({ account: accountB })
+    await flushPromises()
+    expect(wrapper.getComponent(VideoTasksAccountConfig).vm === previousConfig).toBe(false)
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toEqual(accountB.extra.video_model_discovery)
+    expect(wrapper.get('[data-testid="video-model-row-Supplier21/Video"]').attributes('data-status')).toBe('available')
+    expect(wrapper.find('[data-testid="video-model-row-Supplier20/Video"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="account-base-url"]').setValue('https://unsaved.example/v1')
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toBeNull()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toEqual(accountB.extra.video_model_discovery)
+    expect(wrapper.get('[data-testid="video-model-row-Supplier21/Video"]').attributes('data-status')).toBe('available')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.video_model_discovery).toEqual(accountB.extra.video_model_discovery)
+    wrapper.unmount()
+  })
+
+  it.each(['connection', 'protocol', 'malformed'] as const)('clears stale video discovery after %s invalidation without changing saved costs', async reason => {
+    const discovery = {
+      models: ['Custom/Video'], synced_at: '2026-10-20T01:00:00.000Z',
+      base_url: 'https://custom.example/v1', proxy_id: null, protocol: 'video_tasks_json_v1',
+    }
+    const costs = accountModelCostPricingToAPI([{
+      ...createAccountModelCostEntry('seedance'), models: ['Custom/Video'], per_request_price: 0.4,
+      video_pricing_version: 1, video_billing_unit: 'per_video',
+    }], 'seedance')
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: { video_provider: 'video_tasks_json_v1', base_url: discovery.base_url, model_mapping: { 'Custom/Video': 'Custom/Video' } },
+      credentials_status: { has_api_key: true },
+      extra: {
+        unrelated_setting: 'retained', model_cost_pricing: costs,
+        video_model_discovery: reason === 'malformed' ? { ...discovery, models: [''] } : discovery,
+      },
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    if (reason === 'connection') wrapper.getComponent(VideoTasksAccountConfig).vm.$emit('update:discovery', null)
+    if (reason === 'protocol') {
+      await wrapper.get('[data-testid="video-provider-select"]').setValue('fflink_v1')
+      await wrapper.get('[data-testid="seedance-model-mode"]').setValue('all')
+      await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+      const config = wrapper.getComponent(VideoTasksAccountConfig)
+      expect(config.props('discovery')).toBeNull()
+      config.vm.$emit('update:modelValue', ['Custom/Video'])
+    }
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      unrelated_setting: 'retained', video_model_discovery: null,
+    })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('model_cost_pricing')
+    expect(account.extra.model_cost_pricing).toEqual(costs)
+    wrapper.unmount()
   })
 
   it('rehydrates and preserves a Seedance whitelist including the legacy 2.5 alias', async () => {

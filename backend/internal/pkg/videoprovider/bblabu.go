@@ -136,7 +136,7 @@ func (bblabuDriver) ParseTask(body []byte, fallbackTaskID string) (Task, error) 
 }
 
 func (driver bblabuDriver) ParseModels(body []byte) ([]string, error) {
-	return parseOpenAIModelIDs(body, driver.SupportsModel)
+	return parseOpenAIModelIDs(body, driver.SupportsModel, false)
 }
 
 func normalizeBBLabuStatus(status string) Status {

@@ -824,12 +824,45 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     config.vm.$emit('update:supplierName', 'My supplier')
     config.vm.$emit('update:modelValue', ['Custom/Video'])
     config.vm.$emit('update:baseUrl', 'https://custom.example/v1')
+    const discovery = {
+      models: ['Custom/Video', 'Upstream/New'], synced_at: '2026-10-20T01:00:00.000Z',
+      base_url: 'https://custom.example/v1', proxy_id: null, protocol: 'video_tasks_json_v1',
+    }
+    config.vm.$emit('update:discovery', discovery)
+    wrapper.getComponent(AccountModelCostPricing).vm.$emit('update:modelValue', [{
+      ...createAccountModelCostEntry('seedance'), models: ['Custom/Video'], per_request_price: 0.3,
+      video_pricing_version: 1, video_billing_unit: 'per_video',
+    }])
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
       credentials: { video_provider: 'video_tasks_json_v1', base_url: 'https://custom.example/v1', model_mapping: { 'Custom/Video': 'Custom/Video' } },
-      extra: { video_supplier_name: 'My supplier', video_model_capabilities: [capability] }
+      extra: {
+        video_supplier_name: 'My supplier', video_model_capabilities: [capability],
+        video_model_discovery: discovery,
+        model_cost_pricing: [expect.objectContaining({ models: ['Custom/Video'], per_request_price: 0.3 })],
+      }
     })
+  })
+
+  it('clears a newly discovered video catalog when changing protocols or resetting the dialog', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+    const discovery = {
+      models: ['Supplier/Video'], synced_at: '2026-10-20T01:00:00.000Z',
+      base_url: 'https://custom.example/v1', proxy_id: null, protocol: 'video_tasks_json_v1',
+    }
+    wrapper.getComponent(VideoTasksAccountConfig).vm.$emit('update:discovery', discovery)
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('fflink_v1')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toBeNull()
+    wrapper.getComponent(VideoTasksAccountConfig).vm.$emit('update:discovery', discovery)
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toBeNull()
   })
 
   it('submits adaptive MiniMax protocol endpoints', async () => {

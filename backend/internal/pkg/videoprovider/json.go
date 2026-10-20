@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 func cloneObject(source map[string]any) (map[string]any, error) {
@@ -45,20 +46,33 @@ func parseTaskBody(body []byte, fallbackTaskID string, idPaths ...string) (Task,
 	return task, payload, nil
 }
 
-func parseOpenAIModelIDs(body []byte, supports func(string) bool) ([]string, error) {
+func parseOpenAIModelIDs(body []byte, supports func(string) bool, requireValidList bool) ([]string, error) {
 	var payload struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
+		Error json.RawMessage `json:"error"`
 	}
 	if len(body) == 0 || json.Unmarshal(body, &payload) != nil {
+		return nil, fmt.Errorf("video provider returned an invalid model list")
+	}
+	// Only the JSON task protocol treats an empty list as an authoritative
+	// discovery result. Missing/null data and error envelopes must never mean
+	// that every upstream model was removed. Legacy parsers remain permissive.
+	if requireValidList && (payload.Data == nil || (len(payload.Error) > 0 && string(payload.Error) != "null")) {
 		return nil, fmt.Errorf("video provider returned an invalid model list")
 	}
 	seen := make(map[string]struct{}, len(payload.Data))
 	models := make([]string, 0, len(payload.Data))
 	for _, item := range payload.Data {
 		model := strings.TrimSpace(item.ID)
-		key := strings.ToLower(model)
+		if requireValidList && (model == "" || len(model) > 128 || strings.IndexFunc(item.ID, unicode.IsControl) >= 0) {
+			return nil, fmt.Errorf("video provider returned an invalid model list")
+		}
+		key := model
+		if !requireValidList {
+			key = strings.ToLower(model)
+		}
 		if model == "" || (supports != nil && !supports(model)) {
 			continue
 		}

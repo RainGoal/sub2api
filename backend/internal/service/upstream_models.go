@@ -217,6 +217,9 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	models, body, err := s.fetchUpstreamModelList(ctx, account)
 	liveListAvailable := err == nil
 	if err != nil {
+		if account != nil && account.IsSeedance() && account.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+			return nil, err
+		}
 		configuredModels := configuredUpstreamModelsForCapabilitySync(account)
 		if !upstreamModelListEndpointUnsupported(err) || len(configuredModels) == 0 {
 			return nil, err
@@ -787,7 +790,7 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if err != nil {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
 	}
-	if len(models) == 0 {
+	if len(models) == 0 && (!account.IsSeedance() || account.GetVideoProviderID() != videoprovider.ProviderVideoTasksJSONV1) {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
 	}
 

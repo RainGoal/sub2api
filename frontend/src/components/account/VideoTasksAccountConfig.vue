@@ -20,34 +20,51 @@
     </div>
     <p v-if="savedConnectionChanged" class="input-hint">{{ t('admin.videoTasks.saveBeforeDiscovery') }}</p>
     <p v-if="discoveryError" class="text-sm text-red-600 dark:text-red-400" role="alert">{{ discoveryError }}</p>
-    <div v-if="discovered !== null" class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="video-discovered-models">
-      <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.videoTasks.discoveredCount', { count: discovered.length }) }}</p>
-      <div class="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
-        <span v-for="model in discovered" :key="model" class="rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200">{{ model }}</span>
-      </div>
-      <p v-if="discovered.length === 0" class="input-hint">{{ t('admin.videoTasks.noDiscoveredModels') }}</p>
+    <div v-if="currentDiscovery" class="space-y-1 text-xs text-gray-500 dark:text-gray-400" data-testid="video-discovered-models">
+      <p>{{ t('admin.videoTasks.discoveredCount', { count: currentDiscovery.models.length }) }}</p>
+      <p>{{ t('admin.videoTasks.lastSync', { time: new Date(currentDiscovery.synced_at).toLocaleString() }) }}</p>
+      <p>{{ t('admin.videoTasks.discoverySaveHint') }}</p>
+      <p v-if="!currentDiscovery.models.length" class="input-hint">{{ t('admin.videoTasks.noDiscoveredModels') }}</p>
     </div>
+    <p v-else class="input-hint">{{ t('admin.videoTasks.syncFirst') }}</p>
     <div class="flex flex-wrap items-center justify-between gap-2">
       <label class="input-label mb-0" :for="`${id}-search`">{{ t('admin.videoTasks.enabledModels') }}</label>
       <span class="font-mono text-xs text-gray-500">{{ modelValue?.length || 0 }} / {{ models.length }}</span>
     </div>
     <input :id="`${id}-search`" v-model="search" type="search" class="input" :placeholder="t('admin.videoTasks.search')" />
     <p v-if="loading" class="input-hint" role="status">{{ t('admin.videoTasks.loadingTemplates') }}</p>
-    <div v-else-if="templateError" class="space-y-2" role="alert">
+    <div v-if="templateError" class="space-y-2" role="alert">
       <p class="text-sm text-red-600 dark:text-red-400">{{ templateError }}</p>
       <button type="button" class="btn btn-secondary btn-sm" @click="loadTemplates">{{ t('admin.videoTasks.retry') }}</button>
     </div>
-    <div v-else class="grid max-h-80 gap-2 overflow-y-auto sm:grid-cols-2" data-testid="video-capability-models">
-      <label v-for="model in filteredModels" :key="model.model" class="flex items-start gap-2 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
-        <input type="checkbox" class="checkbox mt-0.5" :disabled="!model.enabled" :checked="isSelected(model.model)"
-          :data-testid="`video-model-${model.model}`" @change="toggleModel(model)" />
-        <span class="min-w-0">
-          <span class="block break-all font-mono text-xs text-gray-800 dark:text-gray-100">{{ model.model }}</span>
-          <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ modelSummary(model) }}</span>
-        </span>
-      </label>
+    <div class="grid max-h-80 gap-2 overflow-y-auto sm:grid-cols-2" data-testid="video-capability-models">
+      <div v-for="model in filteredModels" :key="model.name" class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-600"
+        :data-testid="`video-model-row-${model.name}`" :data-status="model.status">
+        <label class="flex items-start gap-2">
+          <input type="checkbox" class="checkbox mt-0.5" :disabled="!isSelected(model.name) && !canSelect(model)" :checked="isSelected(model.name)"
+            :data-testid="`video-model-${model.name}`" @change="toggleModel(model)" />
+          <span class="min-w-0">
+            <span class="block break-all font-mono text-xs text-gray-800 dark:text-gray-100">{{ model.name }}</span>
+            <span v-if="model.status !== 'available'" class="mt-1 block text-xs text-amber-600 dark:text-amber-400">
+              {{ t(model.status === 'missing' ? 'admin.videoTasks.missingUpstream' : 'admin.videoTasks.notVerified') }}
+            </span>
+            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+              {{ model.capability ? modelSummary(model.capability) : t('admin.videoTasks.capabilityRequired') }}
+            </span>
+            <span v-if="model.capability && !model.capability.enabled" class="block text-xs text-amber-600 dark:text-amber-400">{{ t('admin.videoTasks.capabilityDisabled') }}</span>
+          </span>
+        </label>
+        <button type="button" class="btn btn-secondary btn-sm" :data-testid="`video-configure-${model.name}`"
+          @click="editingModel = model.name">
+          {{ t(model.capability ? 'admin.videoTasks.editCapability' : 'admin.videoTasks.configure') }}
+        </button>
+      </div>
       <p v-if="filteredModels.length === 0" class="input-hint">{{ t('admin.videoTasks.noMatchingModels') }}</p>
     </div>
+    <VideoModelCapabilityEditor v-if="editingModel" :key="editingModel" :model="editingModel"
+      :capability="configuredCapability(editingModel)" :templates="templates?.models || []"
+      @save="saveCapability" @cancel="editingModel = ''" />
+    <p v-if="capabilityError" class="text-sm text-red-600 dark:text-red-400" role="alert">{{ capabilityError }}</p>
     <p v-if="!modelValue?.length" class="text-sm text-red-600 dark:text-red-400">{{ t('admin.videoTasks.chooseModels') }}</p>
     <details class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
       <summary class="cursor-pointer text-sm text-gray-700 dark:text-gray-200">{{ t('admin.videoTasks.capabilityJSON') }}</summary>
@@ -60,20 +77,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { discoverVideoModels, getVideoModelTemplates, type VideoModelCapability, type VideoModelTemplates } from '@/api/admin/videoTasks'
+import { discoverVideoModels, getVideoModelTemplates, type VideoModelCapability, type VideoModelTemplates, type VideoModelDiscovery } from '@/api/admin/videoTasks'
 import type { SeedanceModelSelection } from './seedanceModelRestriction'
+import VideoModelCapabilityEditor from './VideoModelCapabilityEditor.vue'
+import { validateVideoModelCapability } from './videoModelCapabilityForm'
 
 const props = defineProps<{
   id: string; modelValue: SeedanceModelSelection; capabilities: VideoModelCapability[]; supplierName: string
   baseUrl: string; apiKey: string; accountId?: number; proxyId?: number | null; savedBaseUrl?: string; savedProtocol?: string; savedProxyId?: number | null
+  discovery?: VideoModelDiscovery | null
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: SeedanceModelSelection]
   'update:capabilities': [value: VideoModelCapability[]]
   'update:supplierName': [value: string]
   'update:baseUrl': [value: string]
+  'update:discovery': [value: VideoModelDiscovery | null]
   validity: [value: boolean]
 }>()
 const { t } = useI18n()
@@ -82,25 +103,60 @@ const loading = ref(false)
 const templateError = ref('')
 const discoveryError = ref('')
 const discovering = ref(false)
-const discovered = ref<string[] | null>(null)
+const currentDiscovery = ref<VideoModelDiscovery | null>(matchingDiscovery(props.discovery))
+const editingModel = ref('')
+const capabilityError = ref('')
+let requestSequence = 0
 const search = ref('')
 const draft = ref(JSON.stringify(props.capabilities, null, 2))
 const editing = ref(false)
-const jsonValid = ref(true)
-const models = computed(() => {
-  const merged = new Map((templates.value?.models || []).map((model) => [model.model.toLowerCase(), model]))
-  for (const model of props.capabilities) merged.set(model.model.toLowerCase(), model)
-  return [...merged.values()]
+const jsonValid = ref(validCapabilities(props.capabilities))
+interface ModelCandidate {
+  name: string
+  status: 'available' | 'missing' | 'unverified'
+  capability?: VideoModelCapability
+}
+const models = computed<ModelCandidate[]>(() => {
+  const available = new Set(currentDiscovery.value?.models || [])
+  const names = new Set([...available, ...(props.modelValue || []), ...props.capabilities.map((model) => model.model)])
+  return [...names].map((name) => ({
+    name, capability: configuredCapability(name),
+    status: available.has(name) ? 'available' : currentDiscovery.value ? 'missing' : 'unverified'
+  }))
 })
-const filteredModels = computed(() => models.value.filter((model) => model.model.toLowerCase().includes(search.value.trim().toLowerCase())))
+const filteredModels = computed(() => models.value.filter((model) => model.name.toLowerCase().includes(search.value.trim().toLowerCase())))
 const savedConnectionChanged = computed(() => !!props.accountId && !props.apiKey.trim() && (
   props.baseUrl.trim().replace(/\/$/, '') !== (props.savedBaseUrl || '').replace(/\/$/, '') ||
   props.savedProtocol !== 'video_tasks_json_v1' || (props.proxyId || null) !== (props.savedProxyId || null)
 ))
 const canDiscover = computed(() => !!props.baseUrl.trim() && (!!props.apiKey.trim() || !!props.accountId) && !savedConnectionChanged.value)
 
-watch(() => props.capabilities, (value) => { if (!editing.value) { draft.value = JSON.stringify(value, null, 2); jsonValid.value = true; emit('validity', true) } }, { deep: true })
-watch(() => [props.baseUrl, props.apiKey, props.accountId], () => { discovered.value = null; discoveryError.value = '' })
+watch(() => props.capabilities, (value) => {
+  if (!editing.value) {
+    draft.value = JSON.stringify(value, null, 2)
+    jsonValid.value = validCapabilities(value)
+  }
+}, { deep: true })
+watch(jsonValid, (value) => emit('validity', value), { immediate: true })
+watch(() => props.discovery, (value) => { currentDiscovery.value = matchingDiscovery(value) })
+watch(() => [props.baseUrl, props.apiKey, props.accountId, props.proxyId, props.savedProtocol], () => {
+  requestSequence++
+  discovering.value = false
+  currentDiscovery.value = null
+  discoveryError.value = ''
+  editingModel.value = ''
+  capabilityError.value = ''
+  emit('update:discovery', null)
+})
+
+function matchingDiscovery(value: VideoModelDiscovery | null | undefined): VideoModelDiscovery | null {
+  return value?.protocol === 'video_tasks_json_v1' && value.base_url.replace(/\/+$/, '') === props.baseUrl.trim().replace(/\/+$/, '') &&
+    value.proxy_id === (props.proxyId || null) ? value : null
+}
+
+function configuredCapability(model: string): VideoModelCapability | undefined {
+  return props.capabilities.find((capability) => capability.model === model)
+}
 
 async function loadTemplates() {
   loading.value = true; templateError.value = ''
@@ -118,31 +174,49 @@ function applyPreset() {
 async function discover() {
   if (!canDiscover.value || discovering.value) return
   discovering.value = true; discoveryError.value = ''
-  const connection = JSON.stringify([props.baseUrl, props.apiKey, props.accountId])
+  const sequence = ++requestSequence
   try {
     const result = await discoverVideoModels({ baseUrl: props.baseUrl, apiKey: props.apiKey, accountId: props.accountId, proxyId: props.proxyId })
-    if (connection === JSON.stringify([props.baseUrl, props.apiKey, props.accountId])) discovered.value = result
-  } catch { discoveryError.value = t('admin.videoTasks.discoveryFailed') }
-  finally { discovering.value = false }
+    if (sequence !== requestSequence) return
+    const snapshot: VideoModelDiscovery = {
+      models: [...new Set(result)], synced_at: new Date().toISOString(),
+      base_url: props.baseUrl.trim().replace(/\/+$/, ''), proxy_id: props.proxyId || null, protocol: 'video_tasks_json_v1'
+    }
+    currentDiscovery.value = snapshot
+    emit('update:discovery', snapshot)
+  } catch { if (sequence === requestSequence) discoveryError.value = t('admin.videoTasks.discoveryFailed') }
+  finally { if (sequence === requestSequence) discovering.value = false }
 }
 
 function isSelected(model: string): boolean {
-  return props.modelValue?.some((value) => value.toLowerCase() === model.toLowerCase()) || false
+  return props.modelValue?.includes(model) || false
 }
 
-function toggleModel(model: VideoModelCapability) {
-  if (!model.enabled) return
-  const selected = (props.modelValue || []).filter((value) => value.toLowerCase() !== model.model.toLowerCase())
-  if (!isSelected(model.model)) {
-    selected.push(model.model)
-    if (!props.capabilities.some((value) => value.model.toLowerCase() === model.model.toLowerCase())) {
-      emit('update:capabilities', [...props.capabilities, { ...model }])
-    }
-  }
+function canSelect(model: ModelCandidate): boolean {
+  return model.status === 'available' && !!model.capability?.enabled && validateVideoModelCapability(model.capability) === null
+}
+
+function toggleModel(model: ModelCandidate) {
+  if (!isSelected(model.name) && !canSelect(model)) return
+  const selected = (props.modelValue || []).filter((value) => value !== model.name)
+  if (!isSelected(model.name)) selected.push(model.name)
   emit('update:modelValue', selected)
 }
 
+function saveCapability(capability: VideoModelCapability) {
+  capabilityError.value = ''
+  if (capability.model !== editingModel.value || validateVideoModelCapability(capability) !== null) return
+  const key = capability.model.toLowerCase()
+  if (props.modelValue?.some((model) => model !== capability.model && model.toLowerCase() === key)) {
+    capabilityError.value = t('admin.videoTasks.modelCaseConflict')
+    return
+  }
+  emit('update:capabilities', [...props.capabilities.filter((model) => model.model.toLowerCase() !== key), capability])
+  editingModel.value = ''
+}
+
 function modelSummary(model: VideoModelCapability): string {
+  if (validateVideoModelCapability(model) !== null) return t('admin.videoTasks.capabilityRequired')
   const resolution = model.resolutions?.join(' / ') || t('admin.videoTasks.fixedSpecification')
   const unit = model.billing_unit === 'per_video' ? t('admin.videoTasks.perVideo') : t('admin.videoTasks.perSecond')
   return `${resolution} · ${unit}`
@@ -152,15 +226,20 @@ function updateDraft(event: Event) {
   draft.value = (event.target as HTMLTextAreaElement).value
   try {
     const parsed: unknown = JSON.parse(draft.value)
-    if (!Array.isArray(parsed) || parsed.some((model) => !model || typeof model !== 'object' || typeof model.model !== 'string')) throw new Error('invalid')
+    if (!validCapabilities(parsed)) throw new Error('invalid')
     jsonValid.value = true
     emit('update:capabilities', parsed as VideoModelCapability[])
   } catch { jsonValid.value = false }
-  emit('validity', jsonValid.value)
+}
+
+function validCapabilities(value: unknown): value is VideoModelCapability[] {
+  if (!Array.isArray(value) || value.length > 512 || value.some((model) => validateVideoModelCapability(model) !== null)) return false
+  return new Set(value.map((model: VideoModelCapability) => model.model.toLowerCase())).size === value.length
 }
 
 onMounted(() => {
   if (props.modelValue === null) emit('update:modelValue', [])
   void loadTemplates()
 })
+onBeforeUnmount(() => { requestSequence++ })
 </script>

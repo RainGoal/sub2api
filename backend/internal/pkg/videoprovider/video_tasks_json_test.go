@@ -181,7 +181,7 @@ func TestVideoTasksURLsDiscoveryAndCancellation(t *testing.T) {
 	require.Equal(t, "https://api.example/prefix/v2", base)
 	models, err := driver.ParseModels([]byte(`{"data":[{"id":"Brand/NewVideo"},{"id":"Seedance-2.0"},{"id":"brand/newvideo"}]}`))
 	require.NoError(t, err)
-	require.Equal(t, []string{"Brand/NewVideo", "Seedance-2.0"}, models)
+	require.Equal(t, []string{"Brand/NewVideo", "Seedance-2.0", "brand/newvideo"}, models)
 	for _, operation := range []Operation{OperationModels, OperationStatus, OperationContent} {
 		req, err := driver.BuildRequest(context.Background(), RequestParams{BaseURL: "https://api.example", APIKey: "key", Operation: operation, TaskID: "task/one"})
 		require.NoError(t, err)

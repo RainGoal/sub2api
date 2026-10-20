@@ -451,6 +451,8 @@ func TestSyncUpstreamModelCatalogVideoTasksDiscoveryDoesNotEnrichOrAuthorize(t *
 		items = append(items, map[string]string{"id": capability.Model})
 		want = append(want, capability.Model)
 	}
+	items = append(items, map[string]string{"id": "Brand/NewVideo"})
+	want = append(want, "Brand/NewVideo")
 	body, err := json.Marshal(map[string]any{"object": "list", "data": items})
 	require.NoError(t, err)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: http.StatusOK,
@@ -484,6 +486,7 @@ func TestSyncUpstreamModelCatalogVideoTasksDiscoveryDoesNotEnrichOrAuthorize(t *
 	require.JSONEq(t, string(before), string(after))
 	require.True(t, account.isSeedanceModelSupported("Seedance-2.0"))
 	require.False(t, account.isSeedanceModelSupported("sd14-seedance-2.0"))
+	require.False(t, account.isSeedanceModelSupported("Brand/NewVideo"))
 }
 
 // Scenario: ID-only 模型列表从 Models.dev 补齐能力。

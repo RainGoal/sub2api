@@ -139,7 +139,7 @@ func (fflinkDriver) ParseTask(body []byte, fallbackTaskID string) (Task, error) 
 }
 
 func (driver fflinkDriver) ParseModels(body []byte) ([]string, error) {
-	return parseOpenAIModelIDs(body, driver.SupportsModel)
+	return parseOpenAIModelIDs(body, driver.SupportsModel, false)
 }
 
 func normalizeFFLinkStatus(status string) Status {

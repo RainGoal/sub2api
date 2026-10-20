@@ -44,8 +44,9 @@
             class="mt-4"
           />
           <VideoTasksAccountConfig
-            v-else id="edit-video-tasks" v-model="seedanceModelSelection"
+            v-else :key="account.id" id="edit-video-tasks" v-model="seedanceModelSelection"
             v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
+            v-model:discovery="videoModelDiscovery"
             v-model:base-url="editBaseUrl" :api-key="editApiKey" :account-id="account.id" :proxy-id="form.proxy_id"
             :saved-base-url="typeof account.credentials?.base_url === 'string' ? account.credentials.base_url : ''"
             :saved-protocol="typeof account.credentials?.video_provider === 'string' ? account.credentials.video_provider : ''"
@@ -3303,7 +3304,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
 import VideoTasksAccountConfig from '@/components/account/VideoTasksAccountConfig.vue'
-import { readVideoCapabilities, type VideoModelCapability } from '@/api/admin/videoTasks'
+import { readVideoCapabilities, readVideoModelDiscovery, type VideoModelCapability, type VideoModelDiscovery } from '@/api/admin/videoTasks'
 import {
   buildSeedanceModelMapping,
   filterSeedanceModelSelection,
@@ -3439,6 +3440,7 @@ const videoProviderOptions = VIDEO_PROVIDER_OPTIONS
 const editVideoProvider = ref<VideoProviderID>(DEFAULT_VIDEO_PROVIDER_ID)
 const seedanceModelSelection = ref<SeedanceModelSelection>(null)
 const videoCapabilities = ref<VideoModelCapability[]>([])
+const videoModelDiscovery = ref<VideoModelDiscovery | null>(null)
 const videoSupplierName = ref('')
 const videoCapabilitiesValid = ref(true)
 const modelCostPricing = ref<PricingFormEntry[]>([])
@@ -3568,6 +3570,7 @@ const editApiKey = ref('')
 watch(editVideoProvider, (provider, previousProvider) => {
   if (props.account?.platform !== 'seedance') return
 	if (syncingForm.value) return
+  videoModelDiscovery.value = null
   videoCapabilitiesValid.value = true
   seedanceModelSelection.value = provider === 'video_tasks_json_v1' ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = editBaseUrl.value.trim()
@@ -4367,6 +4370,7 @@ const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>
 
 const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
+    videoModelDiscovery.value = null
     return
   }
   // 进入回填窗口：抑制 CN 模式/协议 watcher 联动重置 base_url（见 syncingForm 注释）。
@@ -4399,6 +4403,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   editVideoProvider.value = normalizeVideoProviderID(credentials?.video_provider)
   seedanceModelSelection.value = readSeedanceModelSelection(credentials?.model_mapping, editVideoProvider.value)
   videoCapabilities.value = readVideoCapabilities(newAccount.extra?.video_model_capabilities)
+  videoModelDiscovery.value = newAccount.platform === 'seedance' && editVideoProvider.value === 'video_tasks_json_v1'
+    ? readVideoModelDiscovery(newAccount.extra?.video_model_discovery) : null
   videoSupplierName.value = typeof newAccount.extra?.video_supplier_name === 'string' ? newAccount.extra.video_supplier_name : ''
   videoCapabilitiesValid.value = true
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
@@ -4833,6 +4839,7 @@ watch(
   [() => props.show, () => props.account],
   ([show, newAccount], [wasShow, previousAccount]) => {
     if (!show || !newAccount) {
+      videoModelDiscovery.value = null
       return
     }
     // Runtime usage updates replace the account object while this draft is open.
@@ -5356,6 +5363,7 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 // Methods
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
+  videoModelDiscovery.value = null
   clearMixedChannelDialog()
   emit('close')
 }
@@ -6224,6 +6232,17 @@ const handleSubmit = async () => {
       if (changed) updatePayload.extra = {
         ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>),
         video_model_capabilities: videoCapabilities.value, video_supplier_name: videoSupplierName.value.trim()
+      }
+    }
+
+    if (props.account.platform === 'seedance') {
+      const discovery = editVideoProvider.value === 'video_tasks_json_v1'
+        ? readVideoModelDiscovery(videoModelDiscovery.value) : null
+      if (JSON.stringify(discovery) !== JSON.stringify(props.account.extra?.video_model_discovery ?? null)) {
+        updatePayload.extra = {
+          ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>),
+          video_model_discovery: discovery,
+        }
       }
     }
 
