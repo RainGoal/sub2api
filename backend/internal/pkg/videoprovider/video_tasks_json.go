@@ -11,10 +11,18 @@ import (
 
 type videoTasksJSONDriver struct{}
 
-func (videoTasksJSONDriver) ID() ID                       { return ProviderVideoTasksJSONV1 }
-func (videoTasksJSONDriver) DisplayName() string          { return "Video Tasks JSON v1" }
-func (videoTasksJSONDriver) DefaultBaseURL() string       { return "" }
-func (videoTasksJSONDriver) BillingPolicy() BillingPolicy { return BillingOutputOnly }
+func (videoTasksJSONDriver) ID() ID                                      { return ProviderVideoTasksJSONV1 }
+func (videoTasksJSONDriver) DisplayName() string                         { return "Video Tasks JSON v1" }
+func (videoTasksJSONDriver) DefaultBaseURL() string                      { return "" }
+func (videoTasksJSONDriver) BillingPolicy() BillingPolicy                { return BillingOutputOnly }
+func (videoTasksJSONDriver) DefaultCapabilityProfile() VideoFieldProfile { return ProfileBBLabuRoute }
+func (videoTasksJSONDriver) SupportsReferenceVideoMetering() bool        { return true }
+func (videoTasksJSONDriver) ValidateCapability(c VideoModelCapability) error {
+	if c.Profile != ProfileBBLabuOfficial && c.Profile != ProfileBBLabuRoute {
+		return fmt.Errorf("field profile %q is not supported by video tasks JSON v1", c.Profile)
+	}
+	return nil
+}
 func (videoTasksJSONDriver) ModelIDs() []string {
 	models := make([]string, 0, len(bblabuVideoCapabilities))
 	for _, capability := range bblabuVideoCapabilities {
@@ -84,7 +92,7 @@ func (videoTasksJSONDriver) BuildRequest(ctx context.Context, params RequestPara
 			if params.Capability == nil || !params.Capability.Enabled || !params.Capability.SupportsCancel {
 				return nil, fmt.Errorf("%w: configured video model does not support cancellation", ErrVideoTaskCancellationUnsupported)
 			}
-			if err := ValidateVideoModelCapabilities([]VideoModelCapability{*params.Capability}); err != nil {
+			if err := ValidateCapabilityProvider(ProviderVideoTasksJSONV1, *params.Capability); err != nil {
 				return nil, err
 			}
 			method = http.MethodDelete
@@ -110,7 +118,7 @@ func encodeVideoTasksCreate(request *CreateRequest, explicit *VideoModelCapabili
 		return nil, fmt.Errorf("video tasks request requires a frozen model capability")
 	}
 	c := cloneVideoCapability(*capability)
-	if err := ValidateVideoModelCapabilities([]VideoModelCapability{c}); err != nil {
+	if err := ValidateCapabilityProvider(ProviderVideoTasksJSONV1, c); err != nil {
 		return nil, err
 	}
 	if err := validateVideoCapabilityRequest(request, c); err != nil {
@@ -118,7 +126,7 @@ func encodeVideoTasksCreate(request *CreateRequest, explicit *VideoModelCapabili
 	}
 	// Deliberately construct an allowlist; Raw can contain upstream secrets or
 	// unsupported parameters and is never cloned into a new-protocol request.
-	payload := map[string]any{"model": c.Model, "prompt": request.Prompt}
+	payload := map[string]any{"model": videoCapabilityUpstreamModel(c), "prompt": request.Prompt}
 	if c.DurationMode != VideoDurationUnknown {
 		payload["duration"] = request.Duration
 	}
@@ -150,4 +158,11 @@ func videoCapabilityValue(values []string, value string) string {
 		}
 	}
 	return value
+}
+
+func videoCapabilityUpstreamModel(c VideoModelCapability) string {
+	if c.UpstreamModel != "" {
+		return c.UpstreamModel
+	}
+	return c.Model
 }

@@ -12,6 +12,31 @@ const template = buildVideoCapability('Legacy/Old-Video', {
 })
 
 describe('VideoModelCapabilityEditor', () => {
+  it('starts Zhiqi models with the matching field profile and hides BBLabu templates', async () => {
+    const wrapper = mount(VideoModelCapabilityEditor, { props: { model: 'Public/Stable', protocol: 'zhiqi_v1', templates: [template] } })
+    expect(wrapper.find('[data-testid="capability-template"]').exists()).toBe(false)
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="capability-profile"]').element.value).toBe('zhiqi_v1')
+    expect(wrapper.find('[data-testid="capability-supports_cancel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="capability-metering-policy"] option[value="output_and_reference_seconds"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="capability-billing-policy"] option[value="output_and_reference"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="capability-profile"]').findAll('option').map(option => option.attributes('value'))).not.toContain('bblabu_official')
+    await wrapper.get('[data-testid="capability-upstream-model"]').setValue('Supplier/Actual')
+    await wrapper.get('[data-testid="capability-duration-mode"]').setValue('unknown')
+    await wrapper.get('[data-testid="capability-billing-unit"]').setValue('per_video')
+    await wrapper.get('[data-testid="capability-metering-policy"]').setValue('per_video')
+    await wrapper.get('[data-testid="capability-billing-policy"]').setValue('output_only')
+    await wrapper.get('[data-testid="capability-enabled"]').setValue(true)
+    await wrapper.get('[data-testid="capability-save"]').trigger('click')
+    expect(wrapper.emitted('save')?.[0]?.[0]).toMatchObject({ model: 'Public/Stable', upstream_model: 'Supplier/Actual', profile: 'zhiqi_v1' })
+    await wrapper.setProps({ protocol: 'video_tasks_json_v1' })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="capability-profile"]').element.value).toBe('')
+    expect(wrapper.find('[data-testid="capability-supports_cancel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="capability-metering-policy"] option[value="output_and_reference_seconds"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="capability-billing-policy"] option[value="output_and_reference"]').exists()).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="capability-upstream-model"]').element.value).toBe('')
+    expect(wrapper.get('[data-testid="capability-save"]').attributes('disabled')).toBeDefined()
+  })
+
   it('does not infer a new model capability from historical templates or authorize it', () => {
     const wrapper = mount(VideoModelCapabilityEditor, { props: { model: 'New/Exact-Case', templates: [template] } })
     expect(wrapper.get('[data-testid="capability-model"]').text()).toBe('New/Exact-Case')

@@ -336,7 +336,12 @@ func (a *Account) GetVideoProviderBaseURL(providerID string) string {
 		return ""
 	}
 	baseURL := strings.TrimRight(strings.TrimSpace(a.GetCredential("base_url")), "/")
-	if providerID == string(videoprovider.ProviderVideoTasksJSONV1) {
+	if videoprovider.SupportsModelCapabilities(videoprovider.ID(providerID)) {
+		if baseURL == "" {
+			if driver, err := videoprovider.Resolve(providerID); err == nil {
+				baseURL = driver.DefaultBaseURL()
+			}
+		}
 		normalized, err := videoprovider.NormalizeVideoTasksBaseURL(baseURL)
 		if err != nil {
 			return ""

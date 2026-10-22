@@ -5,6 +5,7 @@ import {
   VIDEO_PROVIDER_OPTIONS,
   normalizeSeedanceModelID,
   normalizeVideoProviderID,
+  isCapabilityVideoProvider,
   videoProviderDefaultBaseUrl,
   videoProviderDisplayName,
   videoProviderModelOptions
@@ -15,12 +16,18 @@ describe('video provider catalog', () => {
     expect(VIDEO_PROVIDER_OPTIONS.map((provider) => provider.id)).toEqual([
       'bblabu_v1',
       'fflink_v1',
-      'video_tasks_json_v1'
+      'video_tasks_json_v1',
+      'zhiqi_v1'
     ])
     expect(videoProviderDefaultBaseUrl('fflink_v1')).toBe('https://api.fflink.top/v1')
     expect(videoProviderDisplayName('bblabu_v1')).toBe('bblabu V1')
     expect(videoProviderDefaultBaseUrl('video_tasks_json_v1')).toBe('')
     expect(videoProviderModelOptions('video_tasks_json_v1')).toEqual([])
+    expect(videoProviderDefaultBaseUrl('zhiqi_v1')).toBe('https://zhiqiapi.com/v1')
+    expect(videoProviderModelOptions('zhiqi_v1')).toEqual([])
+    expect(normalizeVideoProviderID('zhiqi_v1')).toBe('zhiqi_v1')
+    expect(isCapabilityVideoProvider('zhiqi_v1')).toBe(true)
+    expect(isCapabilityVideoProvider('bblabu_v1')).toBe(false)
   })
 
   it('falls back to the backward-compatible default for missing and unknown values', () => {

@@ -120,6 +120,7 @@ var defaultRegistry = MustNewRegistry(
 	Registration{Driver: bblabuDriver{}, Aliases: []string{"bblabu"}},
 	Registration{Driver: fflinkDriver{}, Aliases: []string{"fflink"}},
 	Registration{Driver: videoTasksJSONDriver{}, Aliases: []string{"video-tasks-json-v1"}},
+	Registration{Driver: zhiqiDriver{}, Aliases: []string{"zhiqi"}},
 )
 
 func NormalizeID(value string) (ID, error) {
@@ -136,6 +137,54 @@ func ProviderIDs() []ID {
 
 func Descriptors() []Descriptor {
 	return defaultRegistry.Descriptors()
+}
+
+func SupportsModelCapabilities(id ID) bool {
+	driver, err := Resolve(string(id))
+	if err != nil {
+		return false
+	}
+	_, ok := driver.(ModelCapabilityDriver)
+	return ok
+}
+
+func DefaultCapabilityProfile(id ID) VideoFieldProfile {
+	driver, err := Resolve(string(id))
+	if err != nil {
+		return ""
+	}
+	if capabilityDriver, ok := driver.(ModelCapabilityDriver); ok {
+		return capabilityDriver.DefaultCapabilityProfile()
+	}
+	return ""
+}
+
+// SupportsReferenceVideoMetering reports whether a capability protocol can
+// supply actual reference-video seconds, not whether it accepts references.
+func SupportsReferenceVideoMetering(id ID) bool {
+	driver, err := Resolve(string(id))
+	if err != nil {
+		return false
+	}
+	if capabilityDriver, ok := driver.(ModelCapabilityDriver); ok {
+		return capabilityDriver.SupportsReferenceVideoMetering()
+	}
+	return false
+}
+
+func ValidateCapabilityProvider(id ID, capability VideoModelCapability) error {
+	driver, err := Resolve(string(id))
+	if err != nil {
+		return err
+	}
+	capabilityDriver, ok := driver.(ModelCapabilityDriver)
+	if !ok {
+		return fmt.Errorf("video provider %s does not support model capabilities", id)
+	}
+	if err := ValidateVideoModelCapabilities([]VideoModelCapability{capability}); err != nil {
+		return err
+	}
+	return capabilityDriver.ValidateCapability(capability)
 }
 
 func DefaultModelIDs() []string {

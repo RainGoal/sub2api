@@ -74,3 +74,42 @@ metadata to enforce its documented 25-second input-plus-output limit; that
 metadata is never forwarded or trusted for monetary usage. MM3 reference
 videos remain disabled until their duration wire format is verified. Other
 documented combinations remain available. Model presets contain no prices.
+
+## Zhiqi v1 and mixed protocols
+
+`zhiqi_v1` uses the same task endpoint paths and Bearer authentication, with
+`https://zhiqiapi.com/v1` as its default base URL. It has no built-in model
+names: discover `/models`, then explicitly configure each model capability
+using the `zhiqi_v1` field profile and configure purchase and sales pricing.
+The protocol does not document task cancellation and rejects that capability.
+
+Both capability drivers implement the optional `ModelCapabilityDriver`
+interface. Services use `SupportsModelCapabilities` and
+`ValidateCapabilityProvider` instead of identifying capability support by
+provider ID. A capability's `model` remains the customer-facing identity;
+optional `upstream_model` changes only the provider's create payload. Both
+identities and the field profile must stay frozen with the task.
+
+The common API keeps its existing input semantics. Zhiqi maps reference arrays
+to `reference_image_urls`, `reference_video_urls`, and `reference_audio_urls`,
+and start/end frames to `first_frame_image_url`/`last_frame_image_url`. A first
+frame or the first reference image is never silently reinterpreted as Zhiqi's
+separate primary `input_reference`. Provider-only fields are not forwarded
+from `Raw`. The Zhiqi create payload explicitly sends `n: 1`, matching the
+gateway's single-output contract.
+
+Zhiqi's optional `usage.duration_seconds` supplies exact output metering only
+for this driver. Missing usage stays unknown; request duration, progress,
+elapsed task time, and provider cost are never substituted for actual usage.
+Zhiqi does not expose actual reference-video seconds, so its capability rejects
+`output_and_reference` billing and `output_and_reference_seconds` metering.
+`SupportsReferenceVideoMetering` lets admission reject incompatible sales or
+purchase quantity policies before submitting a task; accepting a reference
+video does not establish a monetary metering contract.
+Its `expired` terminal status maps to failure. Existing BBLabu parsers retain
+their original metering fields and status behavior.
+
+The optional `ContentURLParser` handles Zhiqi's documented legacy JSON content
+fallback. It extracts a public HTTPS URL without issuing network requests.
+The gateway must then apply its normal URL/DNS/redirect checks, fetch the media
+without the supplier API key, and require a video response.

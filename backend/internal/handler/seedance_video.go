@@ -98,6 +98,11 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 		}
 		createRequest, body, requestInfo, err = h.gatewayService.PrepareVideoRequestForKey(c.Request.Context(), apiKey, body)
 		if err != nil {
+			if errors.Is(err, service.ErrSeedanceAccountCostMissing) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "seedance_account_cost_not_configured",
+					"Seedance account cost is not configured for this model and resolution")
+				return
+			}
 			h.errorResponse(c, http.StatusUnprocessableEntity, "invalid_request_error", err.Error())
 			return
 		}
@@ -666,7 +671,8 @@ func seedanceVideoResponseMeta(taskID string, result *service.SeedanceVideoForwa
 			meta.ID = publicID
 		}
 		meta.Model = pending.Model
-		meta.PreserveModel = pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Protocol == string(videoprovider.ProviderVideoTasksJSONV1)
+		meta.PreserveModel = pending.IDVersion == service.SeedanceVideoTaskIdentityVersion ||
+			(pending.ExecutionSnapshot != nil && videoprovider.SupportsModelCapabilities(videoprovider.ID(pending.ExecutionSnapshot.Protocol)))
 		meta.Resolution = pending.Resolution
 		meta.Duration = pending.DurationSeconds
 		meta.SettlementStatus = pending.SettlementStatus

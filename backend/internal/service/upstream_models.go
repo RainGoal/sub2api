@@ -217,7 +217,7 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	models, body, err := s.fetchUpstreamModelList(ctx, account)
 	liveListAvailable := err == nil
 	if err != nil {
-		if account != nil && account.IsSeedance() && account.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+		if account != nil && account.IsSeedance() && videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
 			return nil, err
 		}
 		configuredModels := configuredUpstreamModelsForCapabilitySync(account)
@@ -236,7 +236,7 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
 	// Video discovery is read-only. Its route IDs are not Codex models and must
 	// never trigger LLM registry enrichment or change account capabilities.
-	if account != nil && account.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+	if account != nil && account.IsSeedance() && videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
 		return catalog, nil
 	}
 	if len(body) > 0 {
@@ -790,7 +790,7 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if err != nil {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
 	}
-	if len(models) == 0 && (!account.IsSeedance() || account.GetVideoProviderID() != videoprovider.ProviderVideoTasksJSONV1) {
+	if len(models) == 0 && (!account.IsSeedance() || !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID())) {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
 	}
 

@@ -4,13 +4,15 @@
       <h4 class="text-sm font-medium text-gray-800 dark:text-gray-100">{{ label('title') }}</h4>
       <p class="mt-1 break-all font-mono text-xs text-gray-700 dark:text-gray-200" data-testid="capability-model">{{ model }}</p>
       <p class="input-hint">{{ label('modelHint') }}</p>
+      <label class="input-label mt-3">{{ label('upstreamModel') }}<input v-model="form.upstream_model" class="input font-mono" data-testid="capability-upstream-model" /></label>
+      <p class="input-hint">{{ label('upstreamModelHint') }}</p>
     </div>
-    <div v-if="templates.length" class="space-y-2">
+    <div v-if="compatibleTemplates.length" class="space-y-2">
       <label class="input-label">
         {{ label('historicalTemplate') }}
         <select v-model="selectedTemplate" class="input" data-testid="capability-template">
           <option value="">{{ label('noTemplate') }}</option>
-          <option v-for="template in templates" :key="template.model" :value="template.model">{{ template.model }}</option>
+          <option v-for="template in compatibleTemplates" :key="template.model" :value="template.model">{{ template.model }}</option>
         </select>
       </label>
       <p class="input-hint">{{ label('templateHint') }}</p>
@@ -25,8 +27,11 @@
         {{ label('profile') }}
         <select v-model="form.profile" class="input" data-testid="capability-profile">
           <option value="">{{ label('choose') }}</option>
-          <option value="bblabu_official">{{ label('officialProfile') }}</option>
-          <option value="bblabu_route">{{ label('routeProfile') }}</option>
+          <option v-if="protocol === 'zhiqi_v1'" value="zhiqi_v1">{{ label('zhiqiProfile') }}</option>
+          <template v-else>
+            <option value="bblabu_official">{{ label('officialProfile') }}</option>
+            <option value="bblabu_route">{{ label('routeProfile') }}</option>
+          </template>
         </select>
       </label>
       <label class="input-label">
@@ -78,7 +83,7 @@
         <button type="button" class="btn btn-secondary btn-sm" data-testid="capability-add-image-limit" @click="form.imageLimits.push({ resolution: '', limit: '0' })">{{ label('addImageLimit') }}</button>
       </div>
       <div class="grid gap-2 sm:grid-cols-2">
-        <label v-for="field in capabilityFlagFields" :key="field" class="flex items-start gap-2 text-sm"><input v-model="form.flags[field]" type="checkbox" class="checkbox mt-0.5" :data-testid="`capability-${field}`" />{{ label(field) }}</label>
+        <label v-for="field in visibleFlagFields" :key="field" class="flex items-start gap-2 text-sm"><input v-model="form.flags[field]" type="checkbox" class="checkbox mt-0.5" :data-testid="`capability-${field}`" />{{ label(field) }}</label>
         <label class="flex items-start gap-2 text-sm"><input v-model="form.unverifiedReferenceVideos" type="checkbox" class="checkbox mt-0.5" data-testid="capability-unverified-reference-videos" />{{ label('unverifiedReferenceVideos') }}</label>
       </div>
     </fieldset>
@@ -86,8 +91,8 @@
       <legend class="text-sm font-medium">{{ label('billing') }}</legend>
       <div class="grid gap-3 sm:grid-cols-2">
         <label class="input-label">{{ label('billingUnit') }}<select v-model="form.billing_unit" class="input" data-testid="capability-billing-unit"><option value="">{{ label('choose') }}</option><option value="per_video">{{ t('admin.videoTasks.perVideo') }}</option><option value="per_second">{{ t('admin.videoTasks.perSecond') }}</option></select></label>
-        <label class="input-label">{{ label('meteringPolicy') }}<select v-model="form.metering_policy" class="input" data-testid="capability-metering-policy"><option value="">{{ label('choose') }}</option><option value="per_video">{{ label('perVideoMetering') }}</option><option value="output_seconds">{{ label('outputSeconds') }}</option><option value="output_and_reference_seconds">{{ label('outputReferenceSeconds') }}</option></select></label>
-        <label class="input-label">{{ label('billingPolicy') }}<select v-model="form.billing_policy" class="input" data-testid="capability-billing-policy"><option value="">{{ label('choose') }}</option><option value="output_only">{{ label('outputOnly') }}</option><option value="output_and_reference">{{ label('outputReference') }}</option></select></label>
+        <label class="input-label">{{ label('meteringPolicy') }}<select v-model="form.metering_policy" class="input" data-testid="capability-metering-policy"><option value="">{{ label('choose') }}</option><option value="per_video">{{ label('perVideoMetering') }}</option><option value="output_seconds">{{ label('outputSeconds') }}</option><option v-if="protocol !== 'zhiqi_v1'" value="output_and_reference_seconds">{{ label('outputReferenceSeconds') }}</option></select></label>
+        <label class="input-label">{{ label('billingPolicy') }}<select v-model="form.billing_policy" class="input" data-testid="capability-billing-policy"><option value="">{{ label('choose') }}</option><option value="output_only">{{ label('outputOnly') }}</option><option v-if="protocol !== 'zhiqi_v1'" value="output_and_reference">{{ label('outputReference') }}</option></select></label>
       </div>
       <p class="input-hint">{{ label('billingHint') }}</p>
     </fieldset>
@@ -103,27 +108,30 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { VideoModelCapability } from '@/api/admin/videoTasks'
+import type { CapabilityVideoProviderID } from '@/constants/videoProviders'
 import { buildVideoCapability, capabilityFlagFields, capabilityLimitFields, createVideoCapabilityForm, videoCapabilityErrors } from './videoModelCapabilityForm'
 
-const props = defineProps<{ model: string; capability?: VideoModelCapability; templates: VideoModelCapability[] }>()
+const props = withDefaults(defineProps<{ model: string; capability?: VideoModelCapability; templates: VideoModelCapability[]; protocol?: CapabilityVideoProviderID }>(), { protocol: 'video_tasks_json_v1' })
 const emit = defineEmits<{ save: [value: VideoModelCapability]; cancel: [] }>()
 const { t } = useI18n()
 const label = (key: string) => t(`admin.videoTasks.capabilityEditor.${key}`)
 const durationFields = ['min_duration', 'max_duration', 'default_duration'] as const
-const form = ref(createVideoCapabilityForm(props.capability))
+const form = ref(createVideoCapabilityForm(props.capability, props.protocol))
+const compatibleTemplates = computed(() => props.templates.filter((template) => videoCapabilityErrors(template, props.protocol).length === 0))
+const visibleFlagFields = computed(() => capabilityFlagFields.filter((field) => props.protocol !== 'zhiqi_v1' || field !== 'supports_cancel'))
 const selectedTemplate = ref('')
 const candidate = computed(() => buildVideoCapability(props.model, form.value))
 const errors = computed(() => {
-  const result = videoCapabilityErrors(candidate.value)
+  const result = videoCapabilityErrors(candidate.value, props.protocol)
   const resolutionKeys = form.value.imageLimits.map((row) => row.resolution.trim().toLowerCase())
   if (new Set(resolutionKeys).size !== resolutionKeys.length && !result.includes('imageLimits')) result.push('imageLimits')
   return result
 })
-watch(() => [props.model, props.capability], () => { form.value = createVideoCapabilityForm(props.capability); selectedTemplate.value = '' }, { deep: true })
+watch(() => [props.model, props.capability, props.protocol], () => { form.value = createVideoCapabilityForm(props.capability, props.protocol); selectedTemplate.value = '' }, { deep: true })
 
 function copyTemplate() {
-  const template = props.templates.find((value) => value.model === selectedTemplate.value)
-  if (template) form.value = createVideoCapabilityForm({ ...form.value.original, ...template, model: props.model, enabled: form.value.enabled })
+  const template = compatibleTemplates.value.find((value) => value.model === selectedTemplate.value)
+  if (template) form.value = createVideoCapabilityForm({ ...form.value.original, ...template, model: props.model, enabled: form.value.enabled }, props.protocol)
 }
 function save() { if (errors.value.length === 0) emit('save', candidate.value) }
 </script>

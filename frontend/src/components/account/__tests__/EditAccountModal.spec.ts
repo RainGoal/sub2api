@@ -681,6 +681,79 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('preserves saved Zhiqi aliases and protocol-scoped discovery without touching purchase prices', async () => {
+    const capability = { model: 'Public/Video', upstream_model: 'Zhiqi/Exact', profile: 'zhiqi_v1', enabled: true }
+    const discovery = { models: ['Zhiqi/Exact'], synced_at: '2026-10-20T01:00:00.000Z', base_url: 'https://zhiqiapi.com/v1', proxy_id: null, protocol: 'zhiqi_v1' }
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: { api_key: 'sk-video', video_provider: 'zhiqi_v1', base_url: discovery.base_url, model_mapping: { 'Public/Video': 'Zhiqi/Exact' } },
+      extra: { unrelated_setting: true, video_model_capabilities: [capability], video_model_discovery: discovery }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    expect(config.props('protocol')).toBe('zhiqi_v1')
+    expect(config.props('modelValue')).toEqual(['Public/Video'])
+    expect(config.props('discovery')).toEqual(discovery)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({ video_provider: 'zhiqi_v1', model_mapping: { 'Public/Video': 'Zhiqi/Exact' } })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ video_model_capabilities: [capability], video_model_discovery: discovery, unrelated_setting: true })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('model_cost_pricing')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('capabilities')).toEqual([])
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toBeNull()
+    expect(wrapper.getComponent(VideoTasksAccountConfig).props('modelValue')).toEqual([])
+  })
+
+  it.each([
+    ['video_tasks_json_v1', 'Supplier/Exact'], ['zhiqi_v1', 'Supplier/Exact'],
+    ['video_tasks_json_v1', 'Public/Stable'], ['zhiqi_v1', 'Public/Stable'],
+  ])('preserves API-configured aliases for %s with capability stored as %s', async (protocol, capabilityModel) => {
+    const capability = { model: capabilityModel, profile: protocol === 'zhiqi_v1' ? 'zhiqi_v1' : 'bblabu_route', enabled: true }
+    const mapping = { 'Public/Stable': 'Supplier/Exact' }
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: { api_key: 'sk-video', video_provider: protocol, base_url: 'https://supplier.example/v1', model_mapping: mapping },
+      extra: { unrelated_setting: true, video_model_capabilities: [capability] }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    expect(config.props('modelValue')).toEqual(['Public/Stable'])
+    expect(config.props('modelMapping')).toEqual(mapping)
+    expect(config.props('capabilities')).toEqual([capabilityModel === 'Public/Stable' ? { ...capability, upstream_model: 'Supplier/Exact' } : capability])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual(mapping)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.video_model_capabilities).toEqual([capability])
+    expect(account.extra.video_model_capabilities).toEqual([capability])
+    wrapper.unmount()
+  })
+
+  it('retains a preset-backed alias and honors an explicitly edited upstream target', async () => {
+    const mapping = { 'Public/Stable': 'Seedance-2.0' }
+    const account = {
+      ...buildAccount(), platform: 'seedance',
+      credentials: { api_key: 'sk-video', video_provider: 'video_tasks_json_v1', base_url: 'https://supplier.example/v1', model_mapping: mapping },
+      extra: { unrelated_setting: true }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    expect(config.props('capabilities')).toEqual([])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual(mapping)
+    config.vm.$emit('update:capabilities', [{ model: 'Public/Stable', profile: 'bblabu_route', enabled: true, upstream_model: 'Supplier/New' }])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[1]?.[1]?.credentials.model_mapping).toEqual({ 'Public/Stable': 'Supplier/New' })
+    config.vm.$emit('update:capabilities', [{ model: 'Public/Stable', profile: 'bblabu_route', enabled: true }])
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[2]?.[1]?.credentials.model_mapping).toEqual({ 'Public/Stable': 'Public/Stable' })
+    wrapper.unmount()
+  })
+
   it('rehydrates and saves discovery with other extra fields and purchase-price changes', async () => {
     const discovery = {
       models: ['Custom/Video'], synced_at: '2026-10-20T01:00:00.000Z',

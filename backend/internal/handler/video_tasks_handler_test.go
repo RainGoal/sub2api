@@ -187,10 +187,11 @@ type videoTasksHandlerUpstreamCall struct {
 
 type videoTasksHandlerUpstream struct {
 	service.HTTPUpstream
-	calls  []videoTasksHandlerUpstreamCall
-	status int
-	body   string
-	err    error
+	responses []*http.Response
+	calls     []videoTasksHandlerUpstreamCall
+	status    int
+	body      string
+	err       error
 }
 
 func (u *videoTasksHandlerUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -199,6 +200,11 @@ func (u *videoTasksHandlerUpstream) Do(req *http.Request, _ string, accountID in
 		body, _ = io.ReadAll(req.Body)
 	}
 	u.calls = append(u.calls, videoTasksHandlerUpstreamCall{req.Method, req.URL.String(), string(body), accountID})
+	if len(u.responses) > 0 {
+		response := u.responses[0]
+		u.responses = u.responses[1:]
+		return response, nil
+	}
 	if u.err != nil {
 		return nil, u.err
 	}

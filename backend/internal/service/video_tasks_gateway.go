@@ -40,15 +40,55 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 	if err != nil {
 		return nil, nil, SeedanceVideoRequestInfo{}, err
 	}
-	var capabilityError error
+	var capabilityError, purchaseError error
 	legacyAvailable := false
+	var legacyRequests []*SeedanceVideoCreateRequest
+	var legacyInfo SeedanceVideoRequestInfo
+	var selected *SeedanceVideoCreateRequest
+	var selectedInfo SeedanceVideoRequestInfo
+	var selectedHold float64
 	for i := range accounts {
 		account := &accounts[i]
 		if !account.isSeedanceModelSupported(input.Model) {
 			continue
 		}
-		if account.GetVideoProviderID() != videoprovider.ProviderVideoTasksJSONV1 {
+		if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
 			legacyAvailable = true
+			legacy, _, info, parseErr := PrepareSeedanceVideoRequest(body)
+			if parseErr != nil {
+				continue
+			}
+			driver, resolveErr := videoprovider.Resolve(string(account.GetVideoProviderID()))
+			if resolveErr != nil {
+				continue
+			}
+			probe, buildErr := driver.BuildRequest(ctx, videoprovider.RequestParams{
+				BaseURL: account.GetSeedanceBaseURL(), APIKey: account.GetSeedanceAPIKey(),
+				Operation: videoprovider.OperationCreate, CreateRequest: legacy,
+			})
+			if buildErr != nil {
+				continue
+			}
+			if probe.Body != nil {
+				_ = probe.Body.Close()
+			}
+			// Mixed-group pricing uses the public model ID, just as capability
+			// requests do; the legacy parser canonicalizes known model aliases.
+			info.Model = strings.TrimSpace(input.Model)
+			quote, priceErr := s.ResolveSeedanceVideoPricingSnapshot(ctx, key, info)
+			if priceErr != nil {
+				continue
+			}
+			if _, costErr := ResolveVideoTaskAccountCost(account, info.Model, info.Resolution, false, VideoQuantityOutputSeconds, 0); costErr != nil {
+				continue
+			}
+			if len(legacyRequests) == 0 {
+				legacyInfo = info
+				if quote.SalesSnapshot == nil {
+					legacyInfo.Model = legacy.Model
+				}
+			}
+			legacyRequests = append(legacyRequests, legacy)
 			continue
 		}
 		capability, ok := account.VideoModelCapability(input.Model)
@@ -60,15 +100,60 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 			capabilityError = err
 			continue
 		}
-		if _, err := s.ResolveSeedanceVideoPricingSnapshot(ctx, key, info); err != nil {
+		quote, err := s.ResolveSeedanceVideoPricingSnapshot(ctx, key, info)
+		if err != nil {
 			capabilityError = err
 			continue
 		}
-		normalized, err := request.CanonicalJSON()
-		return request, normalized, info, err
+		if quote.SalesSnapshot != nil && videoTaskReferenceMeteringUnsupported(account.GetVideoProviderID(), info.ReferenceVideoCount, quote.SalesSnapshot.BillingUnit, quote.SalesSnapshot.QuantityPolicy) {
+			capabilityError = fmt.Errorf("video provider does not supply actual reference video metering required by sales pricing")
+			continue
+		}
+		policy := VideoQuantityRequestedSeconds
+		if capability.MeteringPolicy != videoprovider.VideoMeteringPerVideo {
+			policy = VideoQuantityPolicy(capability.MeteringPolicy)
+		}
+		purchase, costErr := ResolveVideoTaskAccountCost(account, info.Model, info.Resolution, true, policy, float64(capability.MaxDuration+capability.MaxReferenceVideoSeconds))
+		if costErr == nil {
+			costErr = validateVideoTaskPurchaseCapability(capability, info.DurationSeconds, purchase)
+		}
+		if costErr == nil && videoTaskReferenceMeteringUnsupported(account.GetVideoProviderID(), info.ReferenceVideoCount, purchase.BillingUnit, purchase.QuantityPolicy) {
+			costErr = ErrSeedanceAccountCostMissing
+		}
+		if costErr != nil {
+			purchaseError = fmt.Errorf("%w: %v", ErrSeedanceAccountCostMissing, costErr)
+			continue
+		}
+		if selected != nil && (selected.Duration != request.Duration || !strings.EqualFold(selected.Resolution, request.Resolution) || !strings.EqualFold(selected.AspectRatio, request.AspectRatio)) {
+			return nil, nil, SeedanceVideoRequestInfo{}, fmt.Errorf("video model has conflicting defaults; specify duration, resolution and aspect_ratio explicitly")
+		}
+		// Reserve against a complete eligible contract, never a union of separate
+		// suppliers' limits. The largest hold makes account ordering irrelevant.
+		if selected == nil || quote.HoldAmount > selectedHold {
+			selected, selectedInfo, selectedHold = request, info, quote.HoldAmount
+		}
+	}
+	if selected != nil {
+		for _, legacy := range legacyRequests {
+			if selected.Duration != legacy.Duration || !strings.EqualFold(selected.Resolution, legacy.Resolution) || !strings.EqualFold(selected.AspectRatio, legacy.AspectRatio) {
+				return nil, nil, SeedanceVideoRequestInfo{}, fmt.Errorf("video model has conflicting defaults; specify duration, resolution and aspect_ratio explicitly")
+			}
+		}
+		normalized, err := selected.CanonicalJSON()
+		return selected, normalized, selectedInfo, err
 	}
 	if legacyAvailable {
+		if len(legacyRequests) > 0 {
+			// Preserve the exact public identity for versioned prices even when
+			// only a legacy supplier remains. Older prices retain canonical IDs.
+			request := legacyRequests[0]
+			normalized, err := request.CanonicalJSON()
+			return request, normalized, legacyInfo, err
+		}
 		return PrepareSeedanceVideoRequest(body)
+	}
+	if purchaseError != nil {
+		return nil, nil, SeedanceVideoRequestInfo{}, purchaseError
 	}
 	if capabilityError != nil {
 		return nil, nil, SeedanceVideoRequestInfo{}, capabilityError
@@ -174,7 +259,7 @@ func (s *OpenAIGatewayService) resolveVideoTasksPricingSnapshot(ctx context.Cont
 
 func buildVideoTasksCompletionBilling(pending *SeedanceVideoPendingBilling, result *OpenAIForwardResult) (*OpenAIForwardResult, *CostBreakdown, error) {
 	output, reference := result.VideoDurationSecondsExact, result.VideoReferenceInputSecondsExact
-	if pending.ExecutionSnapshot == nil || pending.ExecutionSnapshot.Protocol != string(videoprovider.ProviderVideoTasksJSONV1) {
+	if pending.ExecutionSnapshot == nil || !videoprovider.SupportsModelCapabilities(videoprovider.ID(pending.ExecutionSnapshot.Protocol)) {
 		if output == 0 {
 			output = float64(result.VideoDurationSeconds)
 		}
@@ -235,10 +320,26 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForAccount(request *SeedanceVi
 	if request == nil || account == nil {
 		return nil, fmt.Errorf("video request and account are required")
 	}
-	if account.GetVideoProviderID() != videoprovider.ProviderVideoTasksJSONV1 {
-		// The request has already passed public-input validation. Preserve its
-		// typed references and raw provider fields; the legacy driver performs
-		// its own model and provider-specific checks before sending upstream.
+	if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
+		// Capability-based public validation may allow parameters beyond a
+		// legacy driver's limits. Check its encoder locally so scheduling can
+		// continue to a compatible account before assigning or sending a task.
+		if request.Capability != nil {
+			driver, err := videoprovider.Resolve(string(account.GetVideoProviderID()))
+			if err != nil {
+				return nil, err
+			}
+			probe, err := driver.BuildRequest(context.Background(), videoprovider.RequestParams{
+				BaseURL: account.GetSeedanceBaseURL(), APIKey: account.GetSeedanceAPIKey(),
+				Operation: videoprovider.OperationCreate, CreateRequest: request,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if probe.Body != nil {
+				_ = probe.Body.Close()
+			}
+		}
 		return request, nil
 	}
 	if !s.VideoTasksEnabled() {
@@ -274,7 +375,7 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForAccount(request *SeedanceVi
 		return nil, err
 	}
 	validated, _, err := videoprovider.ParseCreateRequestWithCapabilities(body, []videoprovider.VideoModelCapability{capability})
-	if err == nil && (validated.Duration != request.Duration || !strings.EqualFold(validated.Resolution, request.Resolution)) {
+	if err == nil && (validated.Duration != request.Duration || !strings.EqualFold(validated.Resolution, request.Resolution) || !strings.EqualFold(validated.AspectRatio, request.AspectRatio)) {
 		return nil, fmt.Errorf("video parameters differ on this account")
 	}
 	return validated, err

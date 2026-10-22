@@ -37,7 +37,7 @@
           </select>
           <p class="input-hint">{{ t('admin.accounts.seedance.providerHint') }}</p>
           <SeedanceModelSelector
-            v-if="editVideoProvider !== 'video_tasks_json_v1'"
+            v-if="!isCapabilityVideoProvider(editVideoProvider)"
             id="edit-seedance"
             v-model="seedanceModelSelection"
             :provider="editVideoProvider"
@@ -45,12 +45,14 @@
           />
           <VideoTasksAccountConfig
             v-else :key="account.id" id="edit-video-tasks" v-model="seedanceModelSelection"
+            :protocol="isCapabilityVideoProvider(editVideoProvider) ? editVideoProvider : undefined"
             v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
             v-model:discovery="videoModelDiscovery"
             v-model:base-url="editBaseUrl" :api-key="editApiKey" :account-id="account.id" :proxy-id="form.proxy_id"
             :saved-base-url="typeof account.credentials?.base_url === 'string' ? account.credentials.base_url : ''"
             :saved-protocol="typeof account.credentials?.video_provider === 'string' ? account.credentials.video_provider : ''"
             :saved-proxy-id="account.proxy_id"
+            :model-mapping="savedVideoModelMapping"
             @validity="videoCapabilitiesValid = $event"
           />
         </div>
@@ -3309,6 +3311,8 @@ import {
   buildSeedanceModelMapping,
   filterSeedanceModelSelection,
   readSeedanceModelSelection,
+  readSeedanceVideoCapabilities,
+  readSeedanceVideoModelMapping,
   type SeedanceModelSelection
 } from '@/components/account/seedanceModelRestriction'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -3373,6 +3377,7 @@ import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   DEFAULT_VIDEO_PROVIDER_ID,
   VIDEO_PROVIDER_OPTIONS,
+  isCapabilityVideoProvider,
   normalizeVideoProviderID,
   videoProviderDefaultBaseUrl,
   videoProviderDisplayName,
@@ -3443,6 +3448,8 @@ const videoCapabilities = ref<VideoModelCapability[]>([])
 const videoModelDiscovery = ref<VideoModelDiscovery | null>(null)
 const videoSupplierName = ref('')
 const videoCapabilitiesValid = ref(true)
+const savedVideoModelMapping = computed(() => editVideoProvider.value === normalizeVideoProviderID(props.account?.credentials?.video_provider)
+  ? readSeedanceVideoModelMapping(props.account?.credentials?.model_mapping) : {})
 const modelCostPricing = ref<PricingFormEntry[]>([])
 const initialModelCostPricing = ref('[]')
 
@@ -3534,7 +3541,7 @@ const baseUrlHint = computed(() => {
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (props.account.platform === 'seedance') {
-    if (editVideoProvider.value === 'video_tasks_json_v1') return t('admin.videoTasks.explicitBaseUrl')
+    if (isCapabilityVideoProvider(editVideoProvider.value)) return t('admin.videoTasks.explicitBaseUrl')
     return t('admin.accounts.seedance.baseUrlHint', {
       provider: videoProviderDisplayName(editVideoProvider.value),
       url: videoProviderDefaultBaseUrl(editVideoProvider.value)
@@ -3571,8 +3578,12 @@ watch(editVideoProvider, (provider, previousProvider) => {
   if (props.account?.platform !== 'seedance') return
 	if (syncingForm.value) return
   videoModelDiscovery.value = null
+  if (provider === 'zhiqi_v1' || previousProvider === 'zhiqi_v1') {
+    videoCapabilities.value = []
+    videoSupplierName.value = ''
+  }
   videoCapabilitiesValid.value = true
-  seedanceModelSelection.value = provider === 'video_tasks_json_v1' ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
+  seedanceModelSelection.value = isCapabilityVideoProvider(provider) ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = editBaseUrl.value.trim()
   if (!currentBaseUrl || currentBaseUrl === videoProviderDefaultBaseUrl(previousProvider)) {
     editBaseUrl.value = videoProviderDefaultBaseUrl(provider)
@@ -4402,9 +4413,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   const credentials = newAccount.credentials as Record<string, unknown> | undefined
   editVideoProvider.value = normalizeVideoProviderID(credentials?.video_provider)
   seedanceModelSelection.value = readSeedanceModelSelection(credentials?.model_mapping, editVideoProvider.value)
-  videoCapabilities.value = readVideoCapabilities(newAccount.extra?.video_model_capabilities)
-  videoModelDiscovery.value = newAccount.platform === 'seedance' && editVideoProvider.value === 'video_tasks_json_v1'
-    ? readVideoModelDiscovery(newAccount.extra?.video_model_discovery) : null
+  videoCapabilities.value = newAccount.platform === 'seedance' && isCapabilityVideoProvider(editVideoProvider.value)
+    ? readSeedanceVideoCapabilities(newAccount.extra?.video_model_capabilities, credentials?.model_mapping)
+    : readVideoCapabilities(newAccount.extra?.video_model_capabilities)
+  videoModelDiscovery.value = newAccount.platform === 'seedance' && isCapabilityVideoProvider(editVideoProvider.value)
+    ? readVideoModelDiscovery(newAccount.extra?.video_model_discovery, editVideoProvider.value) : null
   videoSupplierName.value = typeof newAccount.extra?.video_supplier_name === 'string' ? newAccount.extra.video_supplier_name : ''
   videoCapabilitiesValid.value = true
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
@@ -5432,7 +5445,7 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 
 const handleSubmit = async () => {
   if (!props.account || submitting.value) return
-  if (props.account.platform === 'seedance' && editVideoProvider.value === 'video_tasks_json_v1') {
+  if (props.account.platform === 'seedance' && isCapabilityVideoProvider(editVideoProvider.value)) {
     if (!videoCapabilitiesValid.value || !editBaseUrl.value.trim() || !seedanceModelSelection.value?.length) {
       appStore.showError(t(!videoCapabilitiesValid.value ? 'admin.videoTasks.invalidJSON' : !editBaseUrl.value.trim() ? 'admin.videoTasks.baseUrlRequired' : 'admin.videoTasks.chooseModels'))
       return
@@ -5550,7 +5563,7 @@ const handleSubmit = async () => {
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (props.account.platform === 'seedance') {
-        const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value)
+        const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value, isCapabilityVideoProvider(editVideoProvider.value) ? videoCapabilities.value : [], savedVideoModelMapping.value)
         if (modelMapping) newCredentials.model_mapping = modelMapping
         else delete newCredentials.model_mapping
         delete newCredentials.compact_model_mapping
@@ -6226,8 +6239,8 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    if (props.account.platform === 'seedance' && editVideoProvider.value === 'video_tasks_json_v1') {
-      const changed = JSON.stringify(videoCapabilities.value) !== JSON.stringify(readVideoCapabilities(props.account.extra?.video_model_capabilities)) ||
+    if (props.account.platform === 'seedance' && isCapabilityVideoProvider(editVideoProvider.value)) {
+      const changed = JSON.stringify(videoCapabilities.value) !== JSON.stringify(readSeedanceVideoCapabilities(props.account.extra?.video_model_capabilities, props.account.credentials?.model_mapping)) ||
         videoSupplierName.value.trim() !== (props.account.extra?.video_supplier_name || '')
       if (changed) updatePayload.extra = {
         ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>),
@@ -6236,8 +6249,8 @@ const handleSubmit = async () => {
     }
 
     if (props.account.platform === 'seedance') {
-      const discovery = editVideoProvider.value === 'video_tasks_json_v1'
-        ? readVideoModelDiscovery(videoModelDiscovery.value) : null
+      const discovery = isCapabilityVideoProvider(editVideoProvider.value)
+        ? readVideoModelDiscovery(videoModelDiscovery.value, editVideoProvider.value) : null
       if (JSON.stringify(discovery) !== JSON.stringify(props.account.extra?.video_model_discovery ?? null)) {
         updatePayload.extra = {
           ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>),

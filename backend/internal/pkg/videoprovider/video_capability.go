@@ -12,6 +12,7 @@ type VideoFieldProfile string
 const (
 	ProfileBBLabuOfficial                  VideoFieldProfile = "bblabu_official"
 	ProfileBBLabuRoute                     VideoFieldProfile = "bblabu_route"
+	ProfileZhiqiV1                         VideoFieldProfile = "zhiqi_v1"
 	VideoBillingPerSecond                                    = "per_second"
 	VideoBillingPerVideo                                     = "per_video"
 	VideoDurationControlled                                  = "controlled"
@@ -26,6 +27,7 @@ const (
 // stored with a task so later account edits cannot reinterpret an active job.
 type VideoModelCapability struct {
 	Model                          string            `json:"model"`
+	UpstreamModel                  string            `json:"upstream_model,omitempty"`
 	Profile                        VideoFieldProfile `json:"profile"`
 	Enabled                        bool              `json:"enabled"`
 	DurationMode                   string            `json:"duration_mode"`
@@ -101,6 +103,9 @@ func ValidateVideoModelCapabilities(capabilities []VideoModelCapability) error {
 			return fmt.Errorf("duplicate video capability model %q", capability.Model)
 		}
 		seen[key] = true
+		if capability.UpstreamModel != "" && (len(capability.UpstreamModel) > 128 || capability.UpstreamModel != strings.TrimSpace(capability.UpstreamModel) || strings.ContainsAny(capability.UpstreamModel, "\r\n\x00")) {
+			return fmt.Errorf("invalid video capability upstream model")
+		}
 		if err := validateVideoModelCapability(capability); err != nil {
 			return fmt.Errorf("video model %q: %w", capability.Model, err)
 		}
@@ -109,7 +114,7 @@ func ValidateVideoModelCapabilities(capabilities []VideoModelCapability) error {
 }
 
 func validateVideoModelCapability(c VideoModelCapability) error {
-	if c.Profile != ProfileBBLabuOfficial && c.Profile != ProfileBBLabuRoute {
+	if c.Profile != ProfileBBLabuOfficial && c.Profile != ProfileBBLabuRoute && c.Profile != ProfileZhiqiV1 {
 		return fmt.Errorf("unsupported field profile %q", c.Profile)
 	}
 	switch c.DurationMode {

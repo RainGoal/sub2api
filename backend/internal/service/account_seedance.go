@@ -24,8 +24,11 @@ func validateSeedanceAccountCredentials(platform, accountType string, credential
 	if err != nil {
 		return err
 	}
-	if driver.ID() == videoprovider.ProviderVideoTasksJSONV1 {
+	if videoprovider.SupportsModelCapabilities(driver.ID()) {
 		baseURL, _ := credentials["base_url"].(string)
+		if strings.TrimSpace(baseURL) == "" {
+			baseURL = driver.DefaultBaseURL()
+		}
 		if _, err := videoprovider.NormalizeVideoTasksBaseURL(baseURL); err != nil {
 			return err
 		}
@@ -35,8 +38,8 @@ func validateSeedanceAccountCredentials(platform, accountType string, credential
 		}
 		for model, target := range mapping {
 			value, ok := target.(string)
-			if !ok || strings.TrimSpace(model) == "" || value != model {
-				return fmt.Errorf("video model allowlist must preserve exact model names")
+			if !ok || !validVideoModelName(model) || !validVideoModelName(value) {
+				return fmt.Errorf("video model mapping requires explicit public and upstream model names")
 			}
 		}
 		return nil
@@ -82,7 +85,7 @@ func validateSeedanceModelSelection(driver videoprovider.Driver, raw any) error 
 }
 
 func (a *Account) isSeedanceModelSupported(requestedModel string) bool {
-	if a.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+	if videoprovider.SupportsModelCapabilities(a.GetVideoProviderID()) {
 		if _, ok := a.GetModelMapping()[requestedModel]; !ok {
 			return false
 		}
@@ -104,4 +107,8 @@ func (a *Account) isSeedanceModelSupported(requestedModel string) bool {
 		}
 	}
 	return false
+}
+
+func validVideoModelName(model string) bool {
+	return model != "" && model == strings.TrimSpace(model) && len(model) <= 128 && !strings.ContainsAny(model, "*\r\n\x00")
 }

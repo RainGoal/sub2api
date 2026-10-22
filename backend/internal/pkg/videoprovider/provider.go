@@ -20,6 +20,7 @@ const (
 	ProviderBBLabuV1         ID = "bblabu_v1"
 	ProviderFFLinkV1         ID = "fflink_v1"
 	ProviderVideoTasksJSONV1 ID = "video_tasks_json_v1"
+	ProviderZhiqiV1          ID = "zhiqi_v1"
 	DefaultProviderID           = ProviderBBLabuV1
 )
 
@@ -111,6 +112,20 @@ type Driver interface {
 	BuildRequest(ctx context.Context, params RequestParams) (*http.Request, error)
 	ParseModels(body []byte) ([]string, error)
 	ParseTask(body []byte, fallbackTaskID string) (Task, error)
+}
+
+// ModelCapabilityDriver opts a protocol into explicit, frozen model contracts.
+// Legacy drivers keep their original catalog and request behavior.
+type ModelCapabilityDriver interface {
+	DefaultCapabilityProfile() VideoFieldProfile
+	SupportsReferenceVideoMetering() bool
+	ValidateCapability(VideoModelCapability) error
+}
+
+// ContentURLParser opts a protocol into its documented JSON content fallback.
+// Callers must still apply their download URL, DNS, and redirect safety checks.
+type ContentURLParser interface {
+	ParseContentURL(body []byte) (string, error)
 }
 
 func IsPending(status string) bool {

@@ -259,8 +259,11 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	if normalizedProviderID == videoprovider.ProviderVideoTasksJSONV1 && pending.SalesSnapshot == nil {
+	if videoprovider.SupportsModelCapabilities(normalizedProviderID) && pending.SalesSnapshot == nil {
 		return fmt.Errorf("video tasks JSON v1 requires a sales snapshot")
+	}
+	if pending.SalesSnapshot != nil && videoTaskReferenceMeteringUnsupported(normalizedProviderID, pending.ReferenceVideoCount, pending.SalesSnapshot.BillingUnit, pending.SalesSnapshot.QuantityPolicy) {
+		return fmt.Errorf("%w: provider does not supply actual reference video metering", ErrVideoTaskSalesCapabilityMismatch)
 	}
 	if capability, ok := account.VideoModelCapability(pending.Model); ok && pending.SalesSnapshot != nil {
 		requiredHold, err := videoTaskSalesHoldForCapability(pending.SalesSnapshot, capability, pending.DurationSeconds, pending.ReferenceVideoCount)
@@ -286,7 +289,7 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 			policy = VideoQuantityOutputAndReferenceSeconds
 		}
 		accountCost, err = ResolveVideoTaskAccountCost(account, pending.Model, pending.Resolution,
-			normalizedProviderID == videoprovider.ProviderVideoTasksJSONV1, policy, maximum)
+			videoprovider.SupportsModelCapabilities(normalizedProviderID), policy, maximum)
 		if err == nil && accountCost == nil {
 			accountCost = &SeedanceAccountCostSnapshot{Version: VideoPricingVersion, BillingMode: BillingModeVideo,
 				BillingUnit: pending.SalesSnapshot.BillingUnit, UnitPrice: pending.SalesSnapshot.UnitPrice,
@@ -300,6 +303,9 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	if accountCost != nil && videoTaskReferenceMeteringUnsupported(normalizedProviderID, pending.ReferenceVideoCount, accountCost.BillingUnit, accountCost.QuantityPolicy) {
+		return fmt.Errorf("%w: provider does not supply actual reference video metering", ErrSeedanceAccountCostMissing)
+	}
 	if capability, ok := account.VideoModelCapability(pending.Model); ok {
 		if err := validateVideoTaskPurchaseCapability(capability, pending.DurationSeconds, accountCost); err != nil {
 			return err
@@ -311,6 +317,9 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 			SupportsContent: true, SupportsCancel: normalizedProviderID == videoprovider.ProviderFFLinkV1}
 		if capability, ok := account.VideoModelCapability(pending.Model); ok {
 			execution.Capability = &capability
+			if capability.UpstreamModel != "" {
+				execution.UpstreamModel = capability.UpstreamModel
+			}
 			execution.FieldProfile = string(capability.Profile)
 			execution.SupportsCancel = capability.SupportsCancel
 			execution.CapabilityVersion = "1"
@@ -698,6 +707,10 @@ func BuildSeedanceVideoCompletionBilling(pending *SeedanceVideoPendingBilling, s
 	if strings.TrimSpace(merged.BillingModel) == "" {
 		merged.BillingModel = pending.Model
 	}
+	if pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Capability != nil {
+		merged.Model, merged.BillingModel = pending.Model, pending.Model
+		merged.UpstreamModel = pending.ExecutionSnapshot.UpstreamModel
+	}
 	if pending.SalesSnapshot != nil {
 		return buildVideoTasksCompletionBilling(pending, &merged)
 	}
@@ -788,7 +801,15 @@ func (s *OpenAIGatewayService) ForwardSeedanceVideo(ctx context.Context, c *gin.
 			if !errors.As(err, &rejected) || rejected.StatusCode < 400 || rejected.StatusCode >= 500 || rejected.StatusCode == http.StatusRequestTimeout {
 				return nil, &VideoSubmissionUnknownError{Cause: err}
 			}
-			rejected.NextAccountAction = NextAccountStop
+			// Authentication and rate-limit responses explicitly reject this
+			// account before admission. Other 4xx responses may describe a
+			// request-wide error and must not be replayed across suppliers.
+			switch rejected.StatusCode {
+			case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+				rejected.NextAccountAction = NextAccountRetry
+			default:
+				rejected.NextAccountAction = NextAccountStop
+			}
 		}
 		return nil, err
 	}
@@ -1007,6 +1028,20 @@ func (s *OpenAIGatewayService) forwardSeedanceVideoContent(ctx context.Context, 
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = contentResp.Body.Close() }()
+	if parser, ok := driver.(videoprovider.ContentURLParser); ok {
+		if contentResp.StatusCode >= 200 && contentResp.StatusCode < 300 && videoContentIsJSON(contentResp) {
+			resolved, resolveErr := s.resolveVideoContentURL(upstreamCtx, c, account, parser, contentResp)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			contentResp = resolved
+		}
+		if contentResp.StatusCode < 400 || contentResp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			if err := validateVideoContentResponse(contentResp); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if contentResp.StatusCode >= 400 && contentResp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
 		body, readErr := ReadUpstreamResponseBody(contentResp.Body, s.cfg, c, seedanceTooLargeErrorWriter(c))
 		if readErr != nil {

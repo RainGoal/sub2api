@@ -36,6 +36,22 @@ describe('video model capability configuration', () => {
     expect(JSON.stringify(original)).toBe(before)
   })
 
+  it('validates profiles within the selected protocol and keeps supplier aliases explicit', () => {
+    expect(createVideoCapabilityForm(undefined, 'zhiqi_v1').profile).toBe('zhiqi_v1')
+    const form = createVideoCapabilityForm({ ...validCapability(), profile: 'zhiqi_v1', upstream_model: 'Supplier/Exact-ID' }, 'zhiqi_v1')
+    const capability = buildVideoCapability('Public/Stable-ID', form)
+    expect(capability).toMatchObject({ model: 'Public/Stable-ID', upstream_model: 'Supplier/Exact-ID' })
+    expect(validateVideoModelCapability(capability, 'zhiqi_v1')).toBeNull()
+    expect(validateVideoModelCapability(capability)).toBe('profile')
+    expect(validateVideoModelCapability(validCapability(), 'zhiqi_v1')).toBe('profile')
+    expect(validateVideoModelCapability({ ...capability, supports_cancel: true }, 'zhiqi_v1')).toBe('cancellationUnsupported')
+    expect(validateVideoModelCapability({ ...validCapability(), supports_cancel: true })).toBeNull()
+    expect(validateVideoModelCapability({ ...capability, billing_policy: 'output_and_reference' }, 'zhiqi_v1')).toBe('referenceMeteringUnsupported')
+    expect(validateVideoModelCapability({ ...capability, metering_policy: 'output_and_reference_seconds' }, 'zhiqi_v1')).toBe('referenceMeteringUnsupported')
+    form.upstream_model = ''
+    expect(buildVideoCapability('Public/Stable-ID', form).upstream_model).toBeUndefined()
+  })
+
   it.each([
     [{ duration_mode: 'fixed', min_duration: 4, max_duration: 8 }, 'durationBounds'],
     [{ allowed_durations: [8, 12] }, 'allowedDurations'],

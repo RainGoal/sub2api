@@ -21,7 +21,7 @@ func TestVideoTaskBulkCredentialValidationMergesCurrentAccount(t *testing.T) {
 	for _, credentials := range []map[string]any{
 		{"base_url": "http://supplier.example/v1"},
 		{"video_provider": "unsupported-protocol"},
-		{"model_mapping": map[string]any{"omni-fast": "different-model"}},
+		{"model_mapping": map[string]any{"omni-fast": "invalid-*"}},
 	} {
 		require.Error(t, validateVideoTaskBulkUpdate(account, credentials, nil))
 	}

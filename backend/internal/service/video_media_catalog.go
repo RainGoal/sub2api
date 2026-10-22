@@ -96,7 +96,7 @@ func (s *OpenAIGatewayService) ListVideoMediaModels(ctx context.Context, key *AP
 	seen := map[string]bool{}
 	for i := range accounts {
 		account := &accounts[i]
-		if account.GetVideoProviderID() != videoprovider.ProviderVideoTasksJSONV1 {
+		if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
 			continue
 		}
 		for model := range account.GetModelMapping() {
@@ -120,6 +120,14 @@ func (s *OpenAIGatewayService) ListVideoMediaModels(ctx context.Context, key *AP
 					continue
 				}
 				price := quote.SalesSnapshot
+				if videoTaskReferenceMeteringUnsupported(account.GetVideoProviderID(), 1, price.BillingUnit, price.QuantityPolicy) ||
+					videoTaskReferenceMeteringUnsupported(account.GetVideoProviderID(), 1, purchase.BillingUnit, purchase.QuantityPolicy) {
+					variant.MaxVideos, variant.MaxReferenceVideoSeconds = 0, 0
+					variant.RequireReferenceVideoDurations = false
+					if variant.MaxDuration > 0 && variant.MaxCombinedVideoSeconds >= variant.MaxDuration {
+						variant.MaxCombinedVideoSeconds = 0
+					}
+				}
 				variant.Prices = append(variant.Prices, VideoMediaPrice{Resolution: resolution, Version: price.Version,
 					BillingUnit: price.BillingUnit, UnitPrice: price.UnitPrice * price.RateMultiplier, QuantityPolicy: price.QuantityPolicy})
 			}

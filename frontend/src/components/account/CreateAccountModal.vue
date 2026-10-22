@@ -1532,7 +1532,7 @@
           </select>
           <p class="input-hint">{{ t('admin.accounts.seedance.providerHint') }}</p>
           <SeedanceModelSelector
-            v-if="videoProvider !== 'video_tasks_json_v1'"
+            v-if="!isCapabilityVideoProvider(videoProvider)"
             id="create-seedance"
             v-model="seedanceModelSelection"
             :provider="videoProvider"
@@ -1540,6 +1540,7 @@
           />
           <VideoTasksAccountConfig
             v-else id="create-video-tasks" v-model="seedanceModelSelection"
+            :protocol="isCapabilityVideoProvider(videoProvider) ? videoProvider : undefined"
             v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
             v-model:discovery="videoModelDiscovery"
             v-model:base-url="apiKeyBaseUrl" :api-key="apiKeyValue" :proxy-id="form.proxy_id"
@@ -4273,6 +4274,7 @@ import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   DEFAULT_VIDEO_PROVIDER_ID,
   VIDEO_PROVIDER_OPTIONS,
+  isCapabilityVideoProvider,
   videoProviderDefaultBaseUrl,
   videoProviderDisplayName,
   type VideoProviderID
@@ -4331,8 +4333,8 @@ const withAccountExtra = <T extends Record<string, unknown> | undefined>(extra: 
   const costError = validateAccountModelCostPricing(modelCostPricing.value, form.platform, t)
   if (costError) throw new Error(costError)
   const name = upstreamRequestIdHeader.value.trim()
-  const discovery = readVideoModelDiscovery(videoModelDiscovery.value)
-  const videoExtra = form.platform === 'seedance' && videoProvider.value === 'video_tasks_json_v1'
+  const discovery = isCapabilityVideoProvider(videoProvider.value) ? readVideoModelDiscovery(videoModelDiscovery.value, videoProvider.value) : null
+  const videoExtra = form.platform === 'seedance' && isCapabilityVideoProvider(videoProvider.value)
     ? {
       video_model_capabilities: videoCapabilities.value, video_supplier_name: videoSupplierName.value.trim(),
       ...(discovery ? { video_model_discovery: discovery } : {}),
@@ -4351,7 +4353,7 @@ const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (form.platform === 'seedance') {
-    if (videoProvider.value === 'video_tasks_json_v1') return t('admin.videoTasks.explicitBaseUrl')
+    if (isCapabilityVideoProvider(videoProvider.value)) return t('admin.videoTasks.explicitBaseUrl')
     return t('admin.accounts.seedance.baseUrlHint', {
       provider: videoProviderDisplayName(videoProvider.value),
       url: videoProviderDefaultBaseUrl(videoProvider.value)
@@ -4710,8 +4712,12 @@ watch(apiProtocol, (protocol) => {
 watch(videoProvider, (provider, previousProvider) => {
   if (form.platform !== 'seedance') return
   videoModelDiscovery.value = null
+  if (provider === 'zhiqi_v1' || previousProvider === 'zhiqi_v1') {
+    videoCapabilities.value = []
+    videoSupplierName.value = ''
+  }
   videoCapabilitiesValid.value = true
-  seedanceModelSelection.value = provider === 'video_tasks_json_v1' ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
+  seedanceModelSelection.value = isCapabilityVideoProvider(provider) ? [] : filterSeedanceModelSelection(seedanceModelSelection.value, provider)
   const currentBaseUrl = apiKeyBaseUrl.value.trim()
   if (!currentBaseUrl || currentBaseUrl === videoProviderDefaultBaseUrl(previousProvider)) {
     apiKeyBaseUrl.value = videoProviderDefaultBaseUrl(provider)
@@ -6092,7 +6098,7 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 
 const handleSubmit = async () => {
   if (submitting.value) return
-  if (form.platform === 'seedance' && videoProvider.value === 'video_tasks_json_v1') {
+  if (form.platform === 'seedance' && isCapabilityVideoProvider(videoProvider.value)) {
     if (!videoCapabilitiesValid.value || !apiKeyBaseUrl.value.trim() || !seedanceModelSelection.value?.length) {
       appStore.showError(t(!videoCapabilitiesValid.value ? 'admin.videoTasks.invalidJSON' : !apiKeyBaseUrl.value.trim() ? 'admin.videoTasks.baseUrlRequired' : 'admin.videoTasks.chooseModels'))
       return
@@ -6295,7 +6301,7 @@ const handleSubmit = async () => {
   }
   if (form.platform === 'seedance') {
     credentials.video_provider = videoProvider.value
-    const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value)
+    const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value, isCapabilityVideoProvider(videoProvider.value) ? videoCapabilities.value : [])
     if (modelMapping) credentials.model_mapping = modelMapping
   }
   if (form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl.value)) {

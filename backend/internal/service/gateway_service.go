@@ -1441,7 +1441,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 
 	for _, acc := range accounts {
 		if platform == PlatformSeedance {
-			if acc.GetVideoProviderID() == videoprovider.ProviderVideoTasksJSONV1 {
+			if videoprovider.SupportsModelCapabilities(acc.GetVideoProviderID()) {
 				if s.cfg == nil || !s.cfg.Gateway.VideoTasksJSONV1Enabled {
 					continue
 				}

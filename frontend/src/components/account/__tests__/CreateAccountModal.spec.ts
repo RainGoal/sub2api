@@ -865,6 +865,30 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(wrapper.getComponent(VideoTasksAccountConfig).props('discovery')).toBeNull()
   })
 
+  it('creates a Zhiqi account with a stable public model alias and excludes discovery from another protocol', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('video_tasks_json_v1')
+    wrapper.getComponent(VideoTasksAccountConfig).vm.$emit('update:capabilities', [{ model: 'Old/Video', profile: 'bblabu_route', enabled: true }])
+    await wrapper.get('[data-testid="video-provider-select"]').setValue('zhiqi_v1')
+    const config = wrapper.getComponent(VideoTasksAccountConfig)
+    expect(config.props('protocol')).toBe('zhiqi_v1')
+    expect(config.props('capabilities')).toEqual([])
+    expect(config.props('modelValue')).toEqual([])
+    expect(wrapper.get<HTMLInputElement>('[data-testid="account-base-url"]').element.value).toBe('https://zhiqiapi.com/v1')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Zhiqi video')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+    const capability = { model: 'Public/Video', upstream_model: 'Zhiqi/Exact', profile: 'zhiqi_v1', enabled: true }
+    config.vm.$emit('update:capabilities', [capability])
+    config.vm.$emit('update:modelValue', ['Public/Video'])
+    config.vm.$emit('update:discovery', { models: ['Zhiqi/Exact'], synced_at: '2026-10-20T01:00:00.000Z', base_url: 'https://zhiqiapi.com/v1', proxy_id: null, protocol: 'video_tasks_json_v1' })
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload).toMatchObject({ credentials: { video_provider: 'zhiqi_v1', model_mapping: { 'Public/Video': 'Zhiqi/Exact' } }, extra: { video_model_capabilities: [capability] } })
+    expect(payload.extra).not.toHaveProperty('video_model_discovery')
+  })
+
   it('submits adaptive MiniMax protocol endpoints', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'MiniMax')

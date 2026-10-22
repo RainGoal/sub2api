@@ -662,6 +662,11 @@ func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Co
 	if s.channelService == nil {
 		return false
 	}
+	if account != nil && account.Platform == PlatformSeedance && videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
+		// Capability-based video accounts map a public sales model to a private
+		// supplier model. Channel authorization must retain the public identity.
+		return requestedModel != "" && s.channelService.IsModelRestricted(ctx, groupID, requestedModel)
+	}
 	if compactForwardModel, ok := openAIForwardModelFromContext(ctx); ok {
 		requestedModel = compactForwardModel.model
 		requireCompact = compactForwardModel.useCompactModelMapping

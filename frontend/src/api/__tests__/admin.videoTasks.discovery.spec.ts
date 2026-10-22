@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { readVideoModelDiscovery } from '@/api/admin/videoTasks'
+import { describe, expect, it, vi } from 'vitest'
+import { discoverVideoModels, getVideoModelTemplates, readVideoModelDiscovery } from '@/api/admin/videoTasks'
+
+const { getMock, postMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn() }))
+vi.mock('@/api/client', () => ({ apiClient: { get: getMock, post: postMock } }))
 
 const snapshot = {
   models: ['Seedance-2.0'], synced_at: '2026-10-20T01:00:00.000Z',
@@ -7,6 +10,24 @@ const snapshot = {
 }
 
 describe('video model discovery snapshot', () => {
+  it('keeps snapshots isolated by protocol even when the upstream URL is identical', () => {
+    const zhiqiSnapshot = { ...snapshot, protocol: 'zhiqi_v1' }
+    expect(readVideoModelDiscovery(zhiqiSnapshot)).toBeNull()
+    expect(readVideoModelDiscovery(snapshot, 'zhiqi_v1')).toBeNull()
+    expect(readVideoModelDiscovery(zhiqiSnapshot, 'zhiqi_v1')).toEqual(zhiqiSnapshot)
+  })
+
+  it('requests the selected catalog and sends its protocol during discovery', async () => {
+    getMock.mockResolvedValue({ data: { protocol: 'zhiqi_v1', models: [] } })
+    postMock.mockResolvedValue({ data: { models: ['Zhiqi/Video'] } })
+    await getVideoModelTemplates('zhiqi_v1')
+    expect(getMock).toHaveBeenLastCalledWith('/admin/accounts/video-model-templates', { params: { protocol: 'zhiqi_v1' } })
+    await getVideoModelTemplates()
+    expect(getMock).toHaveBeenLastCalledWith('/admin/accounts/video-model-templates')
+    await expect(discoverVideoModels({ baseUrl: 'https://zhiqiapi.com/v1', apiKey: 'test-key', protocol: 'zhiqi_v1' })).resolves.toEqual(['Zhiqi/Video'])
+    expect(postMock).toHaveBeenLastCalledWith('/admin/accounts/models/sync-upstream-preview', expect.objectContaining({ video_provider: 'zhiqi_v1' }))
+  })
+
   it('trims and deduplicates exact IDs without folding model names or preserving credentials', () => {
     expect(readVideoModelDiscovery({
       ...snapshot, models: [' Seedance-2.0 ', 'seedance-2.0', 'Seedance-2.0'],

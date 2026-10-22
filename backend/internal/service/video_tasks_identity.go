@@ -81,15 +81,21 @@ func (s *VideoTasksExecutionSnapshot) Validate() error {
 	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return fmt.Errorf("invalid video execution snapshot base URL")
 	}
-	if protocol == videoprovider.ProviderVideoTasksJSONV1 && (parsed.Scheme != "https" || s.Capability == nil) {
+	if videoprovider.SupportsModelCapabilities(protocol) && (parsed.Scheme != "https" || s.Capability == nil) {
 		return fmt.Errorf("video tasks execution requires HTTPS and frozen capability")
 	}
 	if s.Capability != nil {
 		if err := videoprovider.ValidateVideoModelCapabilities([]videoprovider.VideoModelCapability{*s.Capability}); err != nil {
 			return err
 		}
+		if err := videoprovider.ValidateCapabilityProvider(protocol, *s.Capability); err != nil {
+			return err
+		}
 		if s.FieldProfile != "" && s.FieldProfile != string(s.Capability.Profile) {
 			return fmt.Errorf("video execution field profile differs from capability")
+		}
+		if s.Capability.UpstreamModel != "" && s.Capability.UpstreamModel != s.UpstreamModel {
+			return fmt.Errorf("video execution upstream model differs from capability")
 		}
 	}
 	return nil
@@ -143,6 +149,7 @@ func AccountForSeedanceVideoTask(p *SeedanceVideoPendingBilling, account *Accoun
 	}
 	if p.ExecutionSnapshot.Capability != nil {
 		copy.Extra["video_model_capabilities"] = []videoprovider.VideoModelCapability{*p.ExecutionSnapshot.Capability}
+		copy.Credentials["model_mapping"] = map[string]any{p.ExecutionSnapshot.Capability.Model: p.ExecutionSnapshot.UpstreamModel}
 	}
 	return &copy, nil
 }

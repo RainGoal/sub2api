@@ -1,4 +1,5 @@
 import type { VideoModelCapability } from '@/api/admin/videoTasks'
+import type { CapabilityVideoProviderID } from '@/constants/videoProviders'
 
 export const capabilityLimitFields = ['max_images', 'max_videos', 'max_audios', 'max_total_assets', 'max_reference_video_seconds', 'max_combined_video_seconds'] as const
 export const capabilityFlagFields = ['frames', 'allow_first_only', 'allow_frames_with_references', 'frames_require_auto_ratio', 'generate_audio', 'audio_requires_image', 'require_reference_video_durations', 'supports_cancel', 'metering_trusted'] as const
@@ -9,6 +10,7 @@ export interface VideoCapabilityForm {
   original: Record<string, unknown>
   enabled: boolean
   profile: string
+  upstream_model: string
   duration_mode: string
   min_duration: string
   max_duration: string
@@ -34,12 +36,12 @@ function list(value: unknown): string { return Array.isArray(value) ? value.join
 function text(value: unknown): string { return typeof value === 'string' ? value : '' }
 export function splitCapabilityOptions(value: string): string[] { return value.split(/[\s,，]+/).filter(Boolean) }
 
-export function createVideoCapabilityForm(capability?: VideoModelCapability): VideoCapabilityForm {
+export function createVideoCapabilityForm(capability?: VideoModelCapability, protocol: CapabilityVideoProviderID = 'video_tasks_json_v1'): VideoCapabilityForm {
   const source: Record<string, unknown> = capability ? clone(capability) : {}
   return {
     original: source,
     enabled: source.enabled === true,
-    profile: text(source.profile), duration_mode: text(source.duration_mode),
+    profile: text(source.profile) || (protocol === 'zhiqi_v1' ? 'zhiqi_v1' : ''), upstream_model: text(source.upstream_model), duration_mode: text(source.duration_mode),
     min_duration: String(source.min_duration ?? ''), max_duration: String(source.max_duration ?? ''), default_duration: String(source.default_duration ?? ''),
     allowed_durations: list(source.allowed_durations), resolutions: list(source.resolutions), default_resolution: text(source.default_resolution), resolution_control: source.resolution_control === true,
     ratios: list(source.ratios), default_ratio: text(source.default_ratio), billing_unit: text(source.billing_unit), billing_policy: text(source.billing_policy), metering_policy: text(source.metering_policy),
@@ -60,6 +62,7 @@ export function buildVideoCapability(model: string, form: VideoCapabilityForm): 
   if (form.unverifiedReferenceVideos) unverified.push('reference_videos')
   return {
     ...clone(form.original), model, enabled: form.enabled, profile: form.profile,
+    ...(form.upstream_model.trim() ? { upstream_model: form.upstream_model.trim() } : { upstream_model: undefined }),
     duration_mode: form.duration_mode,
     min_duration: unknownDuration ? 0 : number(form.min_duration),
     max_duration: unknownDuration ? 0 : number(form.max_duration),
@@ -80,10 +83,10 @@ function integer(value: unknown, minimum = 0, maximum = 3600): value is number {
 function contains(values: string[], value: unknown): boolean { return typeof value === 'string' && values.some((item) => item.toLowerCase() === value.toLowerCase()) }
 
 /** Error keys use admin.videoTasks.capabilityEditor.errors and match the server contract. */
-export function videoCapabilityErrors(capability: unknown): string[] {
+export function videoCapabilityErrors(capability: unknown, protocol: CapabilityVideoProviderID = 'video_tasks_json_v1'): string[] {
   if (!capability || typeof capability !== 'object' || Array.isArray(capability)) return ['schema']
   const raw = capability as Record<string, unknown>
-  const strings = ['model', 'profile', 'duration_mode', 'default_resolution', 'default_ratio', 'billing_unit', 'billing_policy', 'metering_policy', 'content_mode']
+  const strings = ['model', 'upstream_model', 'profile', 'duration_mode', 'default_resolution', 'default_ratio', 'billing_unit', 'billing_policy', 'metering_policy', 'content_mode']
   const numbers = [...capabilityLimitFields, 'min_duration', 'max_duration', 'default_duration']
   const flags = [...capabilityFlagFields, 'enabled', 'resolution_control']
   if (strings.some((key) => raw[key] != null && typeof raw[key] !== 'string') || numbers.some((key) => raw[key] != null && !Number.isInteger(raw[key])) || flags.some((key) => raw[key] != null && typeof raw[key] !== 'boolean')) return ['schema']
@@ -95,7 +98,10 @@ export function videoCapabilityErrors(capability: unknown): string[] {
   const errors: string[] = []
   const add = (key: string) => { if (!errors.includes(key)) errors.push(key) }
   if (typeof c.model !== 'string' || !c.model || c.model !== c.model.trim() || new TextEncoder().encode(c.model).length > 128 || /[\r\n\0]/.test(c.model)) add('model')
-  if (!['bblabu_official', 'bblabu_route'].includes(c.profile)) add('profile')
+  if (c.upstream_model && (c.upstream_model !== c.upstream_model.trim() || new TextEncoder().encode(c.upstream_model).length > 128 || /[\r\n\0]/.test(c.upstream_model))) add('model')
+  if (!(protocol === 'zhiqi_v1' ? ['zhiqi_v1'] : ['bblabu_official', 'bblabu_route']).includes(c.profile)) add('profile')
+  if (protocol === 'zhiqi_v1' && c.supports_cancel) add('cancellationUnsupported')
+  if (protocol === 'zhiqi_v1' && (c.billing_policy === 'output_and_reference' || c.metering_policy === 'output_and_reference_seconds')) add('referenceMeteringUnsupported')
   const durations = Array.isArray(c.allowed_durations) ? c.allowed_durations : []
   if (c.duration_mode === 'controlled' || c.duration_mode === 'fixed') {
     if (!integer(c.min_duration, 1) || !integer(c.max_duration, 1) || !integer(c.default_duration, 1) || c.max_duration < c.min_duration || c.default_duration < c.min_duration || c.default_duration > c.max_duration || c.duration_mode === 'fixed' && c.min_duration !== c.max_duration) add('durationBounds')
@@ -134,6 +140,6 @@ export function videoCapabilityErrors(capability: unknown): string[] {
   return errors
 }
 
-export function validateVideoModelCapability(capability: unknown): string | null {
-  return videoCapabilityErrors(capability)[0] || null
+export function validateVideoModelCapability(capability: unknown, protocol: CapabilityVideoProviderID = 'video_tasks_json_v1'): string | null {
+  return videoCapabilityErrors(capability, protocol)[0] || null
 }
