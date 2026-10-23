@@ -1059,6 +1059,9 @@ export default {
     custom: '自定义',
     startDate: '开始日期',
     endDate: '结束日期',
+    startTime: '开始时间',
+    endTime: '结束时间',
+    preciseRangeHint: '按本地时区筛选，精确到秒；包含开始时间，不包含结束时间。',
     apply: '应用',
     selectDateRange: '选择日期范围'
   },

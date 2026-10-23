@@ -1,7 +1,8 @@
 <template>
-  <div class="relative" ref="containerRef">
+  <div class="relative min-w-0" ref="containerRef">
     <button
       type="button"
+      :title="displayValue"
       @click="toggle"
       :class="['date-picker-trigger', isOpen && 'date-picker-trigger-open']"
     >
@@ -21,7 +22,7 @@
     </button>
 
     <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown">
+      <div v-if="isOpen" class="date-picker-dropdown" :class="{ 'date-picker-with-time': enableTime }">
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button
@@ -39,11 +40,13 @@
         <!-- Custom date range inputs -->
         <div class="date-picker-custom">
           <div class="date-picker-field">
-            <label class="date-picker-label">{{ t('dates.startDate') }}</label>
+            <label class="date-picker-label">{{ t(enableTime ? 'dates.startTime' : 'dates.startDate') }}</label>
             <input
-              type="date"
+              :type="enableTime ? 'datetime-local' : 'date'"
+              :step="enableTime ? 1 : undefined"
+              :aria-label="t(enableTime ? 'dates.startTime' : 'dates.startDate')"
               v-model="localStartDate"
-              :max="localEndDate || tomorrow()"
+              :max="localEndDate || maximumDate()"
               class="date-picker-input"
               @change="onDateChange"
             />
@@ -52,21 +55,24 @@
             <Icon name="arrowRight" size="sm" class="text-gray-400" />
           </div>
           <div class="date-picker-field">
-            <label class="date-picker-label">{{ t('dates.endDate') }}</label>
+            <label class="date-picker-label">{{ t(enableTime ? 'dates.endTime' : 'dates.endDate') }}</label>
             <input
-              type="date"
+              :type="enableTime ? 'datetime-local' : 'date'"
+              :step="enableTime ? 1 : undefined"
+              :aria-label="t(enableTime ? 'dates.endTime' : 'dates.endDate')"
               v-model="localEndDate"
               :min="localStartDate"
-              :max="tomorrow()"
+              :max="maximumDate()"
               class="date-picker-input"
               @change="onDateChange"
             />
           </div>
         </div>
 
+        <p v-if="enableTime" class="px-3 pb-2 text-xs text-gray-500">{{ t('dates.preciseRangeHint') }}</p>
         <!-- Apply button -->
         <div class="date-picker-actions">
-          <button @click="apply" class="date-picker-apply">
+          <button @click="apply" :disabled="!isValidRange" class="date-picker-apply disabled:cursor-not-allowed disabled:opacity-50">
             {{ t('dates.apply') }}
           </button>
         </div>
@@ -79,6 +85,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { formatRangeInput, getLast24HoursRange } from '@/utils/usageTimeRange'
 
 interface DatePreset {
   labelKey: string
@@ -89,6 +96,7 @@ interface DatePreset {
 interface Props {
   startDate: string
   endDate: string
+  enableTime?: boolean
 }
 
 interface Emits {
@@ -104,8 +112,9 @@ const { t, locale } = useI18n()
 
 const isOpen = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
-const localStartDate = ref(props.startDate)
-const localEndDate = ref(props.endDate)
+const inputValue = (value: string, end = false) => props.enableTime ? formatRangeInput(value, end) : value
+const localStartDate = ref(inputValue(props.startDate))
+const localEndDate = ref(inputValue(props.endDate, true))
 const activePreset = ref<string | null>('last24Hours')
 
 const today = () => formatDateToString(new Date())
@@ -117,6 +126,14 @@ const tomorrow = () => {
   d.setDate(d.getDate() + 1)
   return formatDateToString(d)
 }
+const maximumDate = () => props.enableTime ? `${tomorrow()}T23:59:59` : tomorrow()
+const isValidRange = computed(() => {
+  if (!localStartDate.value || !localEndDate.value) return false
+  if (!props.enableTime) return localStartDate.value <= localEndDate.value
+  const start = new Date(localStartDate.value).getTime()
+  const end = new Date(localEndDate.value).getTime()
+  return Number.isFinite(start) && Number.isFinite(end) && start < end
+})
 
 // Helper function to format date to YYYY-MM-DD using local timezone
 const formatDateToString = (date: Date): string => {
@@ -211,6 +228,13 @@ const presets: DatePreset[] = [
   }
 ]
 
+const getPresetRange = (preset: DatePreset) => {
+  const range = props.enableTime && preset.value === 'last24Hours'
+    ? getLast24HoursRange()
+    : preset.getRange()
+  return { start: inputValue(range.start), end: inputValue(range.end, true) }
+}
+
 const displayValue = computed(() => {
   if (activePreset.value) {
     const preset = presets.find((p) => p.value === activePreset.value)
@@ -228,6 +252,7 @@ const displayValue = computed(() => {
 })
 
 const formatDate = (dateStr: string): string => {
+  if (props.enableTime) return dateStr.replace('T', ' ')
   const date = new Date(dateStr + 'T00:00:00')
   const dateLocale = locale.value === 'zh' ? 'zh-CN' : 'en-US'
   return date.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })
@@ -238,7 +263,7 @@ const isPresetActive = (preset: DatePreset): boolean => {
 }
 
 const selectPreset = (preset: DatePreset) => {
-  const range = preset.getRange()
+  const range = getPresetRange(preset)
   localStartDate.value = range.start
   localEndDate.value = range.end
   activePreset.value = preset.value
@@ -248,7 +273,7 @@ const onDateChange = () => {
   // Check if current dates match any preset
   activePreset.value = null
   for (const preset of presets) {
-    const range = preset.getRange()
+    const range = getPresetRange(preset)
     if (range.start === localStartDate.value && range.end === localEndDate.value) {
       activePreset.value = preset.value
       break
@@ -261,11 +286,15 @@ const toggle = () => {
 }
 
 const apply = () => {
-  emit('update:startDate', localStartDate.value)
-  emit('update:endDate', localEndDate.value)
+  if (!isValidRange.value) return
+  const rollingRange = props.enableTime && activePreset.value === 'last24Hours' ? getLast24HoursRange() : null
+  const startDate = rollingRange?.start ?? (props.enableTime ? new Date(localStartDate.value).toISOString() : localStartDate.value)
+  const endDate = rollingRange?.end ?? (props.enableTime ? new Date(localEndDate.value).toISOString() : localEndDate.value)
+  emit('update:startDate', startDate)
+  emit('update:endDate', endDate)
   emit('change', {
-    startDate: localStartDate.value,
-    endDate: localEndDate.value,
+    startDate,
+    endDate,
     preset: activePreset.value
   })
   isOpen.value = false
@@ -286,8 +315,8 @@ const handleEscape = (event: KeyboardEvent) => {
 // Restore the applied range after dismissal, including parent updates from Apply.
 watch(isOpen, (open) => {
   if (open) return
-  localStartDate.value = props.startDate
-  localEndDate.value = props.endDate
+  localStartDate.value = inputValue(props.startDate)
+  localEndDate.value = inputValue(props.endDate, true)
   onDateChange()
 }, { flush: 'post' })
 
@@ -295,7 +324,7 @@ watch(isOpen, (open) => {
 watch(
   () => props.startDate,
   (val) => {
-    localStartDate.value = val
+    localStartDate.value = inputValue(val)
     onDateChange()
   }
 )
@@ -303,7 +332,7 @@ watch(
 watch(
   () => props.endDate,
   (val) => {
-    localEndDate.value = val
+    localEndDate.value = inputValue(val, true)
     onDateChange()
   }
 )
@@ -323,7 +352,7 @@ onUnmounted(() => {
 
 <style scoped>
 .date-picker-trigger {
-  @apply flex items-center gap-2;
+  @apply flex max-w-full items-center gap-2;
   @apply rounded-lg px-3 py-2 text-sm;
   @apply bg-white dark:bg-dark-800;
   @apply border border-gray-200 dark:border-dark-600;
@@ -343,7 +372,7 @@ onUnmounted(() => {
 }
 
 .date-picker-value {
-  @apply font-medium;
+  @apply truncate font-medium;
 }
 
 .date-picker-chevron {
@@ -385,7 +414,28 @@ onUnmounted(() => {
 }
 
 .date-picker-field {
-  @apply flex-1;
+  @apply min-w-0 flex-1;
+}
+
+.date-picker-with-time {
+  width: min(560px, calc(100vw - 2rem));
+  min-width: 0;
+}
+
+@media (max-width: 600px) {
+  .date-picker-with-time {
+    position: fixed;
+    inset: 20vh 1rem auto;
+    width: auto;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .date-picker-with-time .date-picker-custom {
+    @apply flex-col items-stretch;
+  }
+  .date-picker-with-time .date-picker-separator {
+    @apply hidden;
+  }
 }
 
 .date-picker-label {

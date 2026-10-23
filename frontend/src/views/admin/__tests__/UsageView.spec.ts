@@ -42,13 +42,6 @@ const messages: Record<string, string> = {
 	'common.no': 'No',
 }
 
-const formatLocalDate = (date: Date): string => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     usage: {
@@ -198,6 +191,50 @@ describe('admin UsageView route filters', () => {
   afterEach(() => {
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
     vi.useRealTimers()
+  })
+
+  it('uses the same precise 24-hour window for the list, totals, models, and charts', async () => {
+    vi.setSystemTime(new Date(2026, 9, 22, 23, 59, 12))
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const expected = {
+      start_date: new Date(2026, 9, 21, 23, 59, 12).toISOString(),
+      end_date: new Date(2026, 9, 22, 23, 59, 12).toISOString(),
+    }
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining(expected), expect.anything())
+    for (const request of [getStats, getModelStats, getSnapshotV2]) {
+      expect(request).toHaveBeenLastCalledWith(expect.objectContaining(expected))
+    }
+    vi.advanceTimersByTime(60000)
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: new Date(2026, 9, 22, 0, 0, 12).toISOString(),
+      end_date: new Date(2026, 9, 23, 0, 0, 12).toISOString(),
+    }))
+  })
+
+  it('preserves custom seconds across all requests and refreshes', async () => {
+    listErrorLogs.mockResolvedValue({ items: [], total: 0 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const range = { startDate: '2026-10-22T04:30:01.000Z', endDate: '2026-10-22T04:30:09.000Z', preset: null }
+    ;(wrapper.vm as any).onDateRangeChange(range)
+    await flushPromises()
+    const expected = { start_date: range.startDate, end_date: range.endDate }
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining(expected), expect.anything())
+    for (const request of [getStats, getModelStats, getSnapshotV2]) {
+      expect(request).toHaveBeenLastCalledWith(expect.objectContaining(expected))
+    }
+    ;(wrapper.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(listErrorLogs).toHaveBeenLastCalledWith(expect.objectContaining({ start_time: range.startDate, end_time: range.endDate }))
+    vi.advanceTimersByTime(60000)
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining(expected))
   })
 
   it('shows the routed user while applying user_id to usage requests', async () => {
@@ -405,6 +442,7 @@ describe('admin UsageView distribution metric toggles', () => {
   })
 
   it('keeps model and group metric toggles independent without refetching chart data', async () => {
+    vi.setSystemTime(new Date(2026, 9, 22, 23, 59, 12))
     const wrapper = mount(UsageView, {
       global: {
         stubs: {
@@ -431,11 +469,11 @@ describe('admin UsageView distribution metric toggles', () => {
     await flushPromises()
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
-    const now = new Date()
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000)
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
     expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
-      start_date: formatLocalDate(yesterday),
-      end_date: formatLocalDate(now),
+      start_date: yesterday.toISOString(),
+      end_date: now.toISOString(),
       granularity: 'hour'
     }))
 

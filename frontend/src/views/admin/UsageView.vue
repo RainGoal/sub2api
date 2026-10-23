@@ -9,6 +9,7 @@
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
               <DateRangePicker
+                enable-time
                 v-model:start-date="startDate"
                 v-model:end-date="endDate"
                 @change="onDateRangeChange"
@@ -185,6 +186,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { getLast24HoursRange, getUsageRangeGranularity, toUsageISOString } from '@/utils/usageTimeRange'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
@@ -275,29 +277,12 @@ const handleRankingSelectUser = (userId: number, email: string) => {
 }
 
 const granularityOptions = computed(() => [{ value: 'day', label: t('admin.dashboard.day') }, { value: 'hour', label: t('admin.dashboard.hour') }])
-// Use local timezone to avoid UTC timezone issues
-const formatLD = (d: Date) => {
-  const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-const getLast24HoursRangeDates = (): { start: string; end: string } => {
-  const end = new Date()
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-  return {
-    start: formatLD(start),
-    end: formatLD(end)
-  }
-}
-const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
-  const startTime = new Date(`${start}T00:00:00`).getTime()
-  const endTime = new Date(`${end}T00:00:00`).getTime()
-  const daysDiff = Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24))
-  return daysDiff <= 1 ? 'hour' : 'day'
-}
+// Preserve exact instants; the picker displays them in the browser's timezone.
+const getLast24HoursRangeDates = getLast24HoursRange
+const getGranularityForRange = getUsageRangeGranularity
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
+const selectedDatePreset = ref<string | null>('last24Hours')
 const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, native_compaction_v2: null, billing_type: null, start_date: startDate.value, end_date: endDate.value })
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 const sortState = reactive({
@@ -328,6 +313,7 @@ const applyRouteQueryFilters = () => {
   if (queryEndDate) {
     endDate.value = queryEndDate
   }
+  if (queryStartDate || queryEndDate) selectedDatePreset.value = null
 
   filters.value = {
     ...filters.value,
@@ -359,6 +345,7 @@ const loadRouteUserFilterLabel = async () => {
 }
 
 const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
+  selectedDatePreset.value = range.preset
   startDate.value = range.startDate
   endDate.value = range.endDate
   filters.value = {
@@ -532,6 +519,12 @@ const applyFilters = () => {
   }
 }
 const refreshData = () => {
+  if (selectedDatePreset.value === 'last24Hours') {
+    const range = getLast24HoursRangeDates()
+    startDate.value = range.start
+    endDate.value = range.end
+    filters.value = { ...filters.value, start_date: range.start, end_date: range.end }
+  }
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
@@ -541,6 +534,7 @@ const refreshData = () => {
   if (rankingMounted.value) rankingRef.value?.reload()
 }
 const resetFilters = () => {
+  selectedDatePreset.value = 'last24Hours'
   const range = getLast24HoursRangeDates()
   startDate.value = range.start
   endDate.value = range.end
@@ -811,9 +805,7 @@ const errSortOrder = ref<'asc' | 'desc'>('desc')
 const showErrorModal = ref(false)
 const selectedErrorId = ref<number | null>(null)
 
-// 注意：'YYYY-MM-DDT00:00:00' 无时区后缀，按本地时区解析后再转 UTC——与页面其它日期处理语义一致，刻意如此，勿改成 'T00:00:00Z'
-const toRFC3339 = (d: string | undefined, endOfDay = false): string | undefined =>
-  d ? new Date(d + (endOfDay ? 'T23:59:59.999' : 'T00:00:00')).toISOString() : undefined
+const toRFC3339 = toUsageISOString
 
 const loadAdminErrors = async () => {
   errLoading.value = true

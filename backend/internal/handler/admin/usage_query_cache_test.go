@@ -17,6 +17,10 @@ func TestUsageStatsCacheKey_StableAndDistinct(t *testing.T) {
 	k2 := usageStatsCacheKey(base)
 	require.NotEmpty(t, k1)
 	require.Equal(t, k1, k2, "same filters must produce same key")
+	preciseStart := start.Add(100 * time.Millisecond)
+	precise := base
+	precise.StartTime = &preciseStart
+	require.NotEqual(t, k1, usageStatsCacheKey(precise), "precise bounds must not share cached totals")
 
 	other := base
 	other.Model = "gpt-4o"

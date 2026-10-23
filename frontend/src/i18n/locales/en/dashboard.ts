@@ -1055,6 +1055,9 @@ export default {
     custom: 'Custom',
     startDate: 'Start Date',
     endDate: 'End Date',
+    startTime: 'Start Time',
+    endTime: 'End Time',
+    preciseRangeHint: 'Local timezone, precise to the second. Start is included; end is excluded.',
     apply: 'Apply',
     selectDateRange: 'Select date range'
   },
