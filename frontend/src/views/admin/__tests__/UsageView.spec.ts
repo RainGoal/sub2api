@@ -228,7 +228,7 @@ describe('admin UsageView route filters', () => {
     for (const request of [getStats, getModelStats, getSnapshotV2]) {
       expect(request).toHaveBeenLastCalledWith(expect.objectContaining(expected))
     }
-    ;(wrapper.vm as any).switchTab('errors')
+    (wrapper.vm as any).switchTab('errors')
     await flushPromises()
     expect(listErrorLogs).toHaveBeenLastCalledWith(expect.objectContaining({ start_time: range.startDate, end_time: range.endDate }))
     vi.advanceTimersByTime(60000)
