@@ -16,11 +16,11 @@ export function filterSeedanceModelSelection(
 
 export function readSeedanceModelSelection(
   mapping: unknown,
-  provider: VideoProviderID
+  _provider: VideoProviderID
 ): SeedanceModelSelection {
   if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return null
   const models = Object.keys(mapping)
-  return models.length === 0 ? null : filterSeedanceModelSelection(models, provider)
+  return models.length === 0 ? null : [...new Set(models.map(model => model.trim()).filter(Boolean))]
 }
 
 export function buildSeedanceModelMapping(

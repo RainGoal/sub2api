@@ -8,7 +8,7 @@
       data-testid="seedance-model-mode"
       @change="changeMode"
     >
-      <option value="all">{{ t('admin.accounts.seedance.allModels') }}</option>
+      <option value="all" :disabled="mappingActive">{{ t('admin.accounts.seedance.allModels') }}</option>
       <option value="selected">{{ t('admin.accounts.seedance.selectedModelsOnly') }}</option>
     </select>
     <p class="input-hint">{{ t('admin.accounts.seedance.modelsHint') }}</p>
@@ -21,7 +21,7 @@
         <input
           type="checkbox"
           class="checkbox mt-0.5"
-          :checked="modelValue === null || modelValue.includes(model.id)"
+          :checked="modelValue === null || modelValue.some(value => normalizeSeedanceModelID(value) === model.id)"
           :disabled="modelValue === null"
           :data-testid="`seedance-model-${model.id}`"
           @change="toggleModel(model.id)"
@@ -41,10 +41,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { videoProviderModelOptions, type VideoProviderID } from '@/constants/videoProviders'
+import { normalizeSeedanceModelID, videoProviderModelOptions, type VideoProviderID } from '@/constants/videoProviders'
 import type { SeedanceModelSelection } from './seedanceModelRestriction'
 
-const props = defineProps<{ id: string; provider: VideoProviderID; modelValue: SeedanceModelSelection }>()
+const props = defineProps<{ id: string; provider: VideoProviderID; modelValue: SeedanceModelSelection; mappingActive?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: SeedanceModelSelection] }>()
 const { t } = useI18n()
 const models = computed(() => videoProviderModelOptions(props.provider))
@@ -56,9 +56,8 @@ function changeMode(event: Event) {
 
 function toggleModel(id: string) {
   if (props.modelValue === null) return
-  const selected = new Set(props.modelValue)
-  if (selected.has(id)) selected.delete(id)
-  else selected.add(id)
-  emit('update:modelValue', models.value.filter((model) => selected.has(model.id)).map((model) => model.id))
+  const selected = props.modelValue.filter(model => normalizeSeedanceModelID(model) !== id)
+  if (selected.length === props.modelValue.length) selected.push(id)
+  emit('update:modelValue', selected)
 }
 </script>

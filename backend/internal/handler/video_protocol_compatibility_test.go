@@ -134,6 +134,11 @@ func TestVideoProtocolHandlerMixedGroupPreservesClientContractAndOriginalRoute(t
 				account.Credentials["base_url"] = "https://" + string(providers[i]) + ".example/v1"
 				account.Credentials["model_mapping"] = map[string]any{"Seedance-2.0": string(providers[i]) + "-upstream-model"}
 				account.Extra[service.VideoModelCapabilitiesExtra] = []videoprovider.VideoModelCapability{capability}
+				prices := append([]service.ChannelModelPricing(nil), account.Extra[service.AccountModelCostPricingExtraKey].([]service.ChannelModelPricing)...)
+				for j := range prices {
+					prices[j].Models = []string{string(providers[i]) + "-upstream-model"}
+				}
+				account.Extra[service.AccountModelCostPricingExtraKey] = prices
 			}
 			created := h.request(http.MethodPost, "")
 			require.Equal(t, http.StatusAccepted, created.Code, created.Body.String())

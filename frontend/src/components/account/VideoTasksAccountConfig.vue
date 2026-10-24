@@ -164,9 +164,9 @@ function matchingDiscovery(value: VideoModelDiscovery | null | undefined): Video
 }
 
 function configuredCapability(model: string): VideoModelCapability | undefined {
-  const direct = props.capabilities.find((capability) => capability.model.toLowerCase() === model.toLowerCase())
-  if (direct) return direct.model === model ? direct : { ...direct, model }
   const target = props.modelMapping?.[model]
+  const direct = props.capabilities.find((capability) => capability.model.toLowerCase() === model.toLowerCase())
+  if (direct) return target && target !== model && !direct.upstream_model ? { ...direct, model, upstream_model: target } : direct.model === model ? direct : { ...direct, model }
   if (!target) return undefined
   const inherited = [...props.capabilities, ...(templates.value?.models || [])].find((capability) => capability.model.toLowerCase() === target.toLowerCase())
   return inherited ? { ...inherited, model, upstream_model: inherited.upstream_model || target } : undefined

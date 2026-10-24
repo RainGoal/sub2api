@@ -198,8 +198,9 @@ func ResolveVideoSalesPrice(ctx context.Context, channels *ChannelService, group
 	return &VideoSalesPrice{BillingUnit: VideoBillingPerSecond, UnitPrice: *price, Source: source}, nil
 }
 
-// ResolveVideoTaskAccountCost returns a purchase snapshot only from the selected
-// account. Generic protocols require this explicit price; legacy callers retain
+// ResolveVideoTaskAccountCost looks up the already resolved upstream model only
+// on the selected account. It never applies model_mapping a second time.
+// Generic protocols require this explicit price; legacy callers retain
 // their historical estimate when this returns nil and requireExplicit is false.
 func ResolveVideoTaskAccountCost(account *Account, model, resolution string, requireExplicit bool, policy VideoQuantityPolicy, maxSeconds float64) (*SeedanceAccountCostSnapshot, error) {
 	pricing, err := LookupAccountModelCostPricing(account, model)

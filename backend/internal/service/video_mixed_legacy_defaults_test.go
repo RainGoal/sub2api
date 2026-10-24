@@ -84,6 +84,9 @@ func TestVideoProtocolLegacyDefaultEligibility(t *testing.T) {
 				case "missing_sales_tier":
 					sales = tierOnly
 				case "missing_purchase_tier":
+					upstream, resolveErr := videoprovider.ResolveLegacyUpstreamModel(provider, capability.Model)
+					require.NoError(t, resolveErr)
+					tierOnly.Models = []string{upstream}
 					legacy.Extra = map[string]any{AccountModelCostPricingExtraKey: []ChannelModelPricing{tierOnly}}
 				}
 				modern := videoProtocolAccount(21, videoprovider.ProviderZhiqiV1, capability)
@@ -102,7 +105,7 @@ func TestVideoProtocolLegacyDefaultEligibility(t *testing.T) {
 	}
 }
 
-func TestVideoProtocolLegacyPricesRetainCanonicalIdentity(t *testing.T) {
+func TestVideoProtocolLegacyPricesRetainPublicIdentity(t *testing.T) {
 	for _, provider := range []videoprovider.ID{videoprovider.ProviderBBLabuV1, videoprovider.ProviderFFLinkV1} {
 		t.Run(string(provider), func(t *testing.T) {
 			legacy := seedanceVideoTestAccount()
@@ -113,7 +116,7 @@ func TestVideoProtocolLegacyPricesRetainCanonicalIdentity(t *testing.T) {
 			request, _, info, err := svc.PrepareVideoRequestForKey(context.Background(), key,
 				[]byte(`{"model":"Seedance-2.0","prompt":"waves"}`))
 			require.NoError(t, err)
-			require.Equal(t, videoprovider.ModelSeedance20, info.Model)
+			require.Equal(t, "Seedance-2.0", info.Model)
 			require.Equal(t, "Seedance-2.0", info.RequestedModel)
 			require.Equal(t, 4, request.Duration)
 			require.Equal(t, "480p", request.Resolution)

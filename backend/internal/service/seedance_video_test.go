@@ -721,7 +721,7 @@ func TestStoreSeedanceVideoPendingBillingFailsClosedWhenDatabaseBindFails(t *tes
 		AccountID: 20, Model: "Seedance-2.0", Resolution: "720p", DurationSeconds: 10,
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID, Platform: PlatformSeedance, Credentials: map[string]any{"video_provider": pending.ProviderID}}, pending.ProviderID))
 	err := svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-fail", 7, 8, pending)
 	require.ErrorContains(t, err, "database unavailable")
 }
@@ -736,7 +736,7 @@ func TestStoreSeedanceVideoPendingBillingPreservesTerminalUpstreamStatus(t *test
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID, Platform: PlatformSeedance, Credentials: map[string]any{"video_provider": pending.ProviderID}}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-terminal", pending.UserID, pending.APIKeyID, pending))
 
 	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-terminal", pending.UserID, pending.APIKeyID)
@@ -753,7 +753,7 @@ func TestReleaseSeedanceVideoTaskWithStatusPersistsCanceledState(t *testing.T) {
 		Resolution: "720p", DurationSeconds: 10,
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID, Platform: PlatformSeedance, Credentials: map[string]any{"video_provider": pending.ProviderID}}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID, pending))
 	stored, err := svc.LoadSeedanceVideoPendingBilling(context.Background(), "task-canceled", pending.UserID, pending.APIKeyID)
 	require.NoError(t, err)
@@ -775,7 +775,7 @@ func TestClaimSeedanceVideoCancellationSerializesWithCompletion(t *testing.T) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID, Platform: PlatformSeedance, Credentials: map[string]any{"video_provider": pending.ProviderID}}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID, pending))
 
 	claimed, err := svc.ClaimSeedanceVideoCancellation(context.Background(), "task-cancel-claim", pending.UserID, pending.APIKeyID)
@@ -853,7 +853,7 @@ func TestClaimSeedanceVideoBillingPreservesObservedFailureStatus(t *testing.T) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	require.NoError(t, svc.BeginSeedanceVideoTask(context.Background(), &pending))
-	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID}, pending.ProviderID))
+	require.NoError(t, svc.AssignSeedanceVideoTaskAccount(context.Background(), &pending, &Account{ID: pending.AccountID, Platform: PlatformSeedance, Credentials: map[string]any{"video_provider": pending.ProviderID}}, pending.ProviderID))
 	require.NoError(t, svc.StoreSeedanceVideoPendingBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID, pending))
 
 	claimed, err := svc.ClaimSeedanceVideoBilling(context.Background(), "task-failed-claim", pending.UserID, pending.APIKeyID)

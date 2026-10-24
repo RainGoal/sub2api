@@ -24,9 +24,6 @@ func (e *VideoSubmissionUnknownError) Unwrap() error { return e.Cause }
 // PrepareVideoRequestForKey only considers capabilities from explicitly enabled
 // accounts in this key's group. Discovery never grants a model permission.
 func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, key *APIKey, body []byte) (*SeedanceVideoCreateRequest, []byte, SeedanceVideoRequestInfo, error) {
-	if !s.VideoTasksEnabled() {
-		return PrepareSeedanceVideoRequest(body)
-	}
 	var input struct {
 		Model string `json:"model"`
 	}
@@ -42,19 +39,22 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 	}
 	var capabilityError, purchaseError error
 	legacyAvailable := false
-	var legacyRequests []*SeedanceVideoCreateRequest
-	var legacyInfo SeedanceVideoRequestInfo
 	var selected *SeedanceVideoCreateRequest
 	var selectedInfo SeedanceVideoRequestInfo
 	var selectedHold float64
+	selectedLegacyRemapped := false
 	for i := range accounts {
 		account := &accounts[i]
 		if !account.isSeedanceModelSupported(input.Model) {
 			continue
 		}
+		upstreamModel, resolveErr := account.ResolveSeedanceUpstreamModel(input.Model)
+		if resolveErr != nil {
+			continue
+		}
 		if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
 			legacyAvailable = true
-			legacy, _, info, parseErr := PrepareSeedanceVideoRequest(body)
+			legacy, info, parseErr := prepareLegacyVideoRequestForAccount(body, account)
 			if parseErr != nil {
 				continue
 			}
@@ -72,23 +72,24 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 			if probe.Body != nil {
 				_ = probe.Body.Close()
 			}
-			// Mixed-group pricing uses the public model ID, just as capability
-			// requests do; the legacy parser canonicalizes known model aliases.
-			info.Model = strings.TrimSpace(input.Model)
 			quote, priceErr := s.ResolveSeedanceVideoPricingSnapshot(ctx, key, info)
 			if priceErr != nil {
 				continue
 			}
-			if _, costErr := ResolveVideoTaskAccountCost(account, info.Model, info.Resolution, false, VideoQuantityOutputSeconds, 0); costErr != nil {
+			if _, costErr := ResolveVideoTaskAccountCost(account, upstreamModel, info.Resolution, account.hasSeedanceModelRemapping(input.Model), VideoQuantityOutputSeconds, 0); costErr != nil {
+				purchaseError = costErr
 				continue
 			}
-			if len(legacyRequests) == 0 {
-				legacyInfo = info
-				if quote.SalesSnapshot == nil {
-					legacyInfo.Model = legacy.Model
-				}
+			if selected != nil && (selected.Duration != legacy.Duration || !strings.EqualFold(selected.Resolution, legacy.Resolution) || !strings.EqualFold(selected.AspectRatio, legacy.AspectRatio)) {
+				return nil, nil, SeedanceVideoRequestInfo{}, fmt.Errorf("video model has conflicting defaults; specify duration, resolution and aspect_ratio explicitly")
 			}
-			legacyRequests = append(legacyRequests, legacy)
+			if selected == nil || quote.HoldAmount > selectedHold {
+				selected, selectedInfo, selectedHold = legacy, info, quote.HoldAmount
+				selectedLegacyRemapped = account.hasSeedanceModelRemapping(input.Model)
+			}
+			continue
+		}
+		if !s.VideoTasksEnabled() {
 			continue
 		}
 		capability, ok := account.VideoModelCapability(input.Model)
@@ -113,7 +114,7 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 		if capability.MeteringPolicy != videoprovider.VideoMeteringPerVideo {
 			policy = VideoQuantityPolicy(capability.MeteringPolicy)
 		}
-		purchase, costErr := ResolveVideoTaskAccountCost(account, info.Model, info.Resolution, true, policy, float64(capability.MaxDuration+capability.MaxReferenceVideoSeconds))
+		purchase, costErr := ResolveVideoTaskAccountCost(account, upstreamModel, info.Resolution, true, policy, float64(capability.MaxDuration+capability.MaxReferenceVideoSeconds))
 		if costErr == nil {
 			costErr = validateVideoTaskPurchaseCapability(capability, info.DurationSeconds, purchase)
 		}
@@ -131,24 +132,20 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 		// suppliers' limits. The largest hold makes account ordering irrelevant.
 		if selected == nil || quote.HoldAmount > selectedHold {
 			selected, selectedInfo, selectedHold = request, info, quote.HoldAmount
+			selectedLegacyRemapped = false
 		}
 	}
 	if selected != nil {
-		for _, legacy := range legacyRequests {
-			if selected.Duration != legacy.Duration || !strings.EqualFold(selected.Resolution, legacy.Resolution) || !strings.EqualFold(selected.AspectRatio, legacy.AspectRatio) {
-				return nil, nil, SeedanceVideoRequestInfo{}, fmt.Errorf("video model has conflicting defaults; specify duration, resolution and aspect_ratio explicitly")
-			}
+		canonical := *selected
+		if selectedLegacyRemapped {
+			canonical.Model = selected.RequestedModel
 		}
-		normalized, err := selected.CanonicalJSON()
+		normalized, err := canonical.CanonicalJSON()
 		return selected, normalized, selectedInfo, err
 	}
 	if legacyAvailable {
-		if len(legacyRequests) > 0 {
-			// Preserve the exact public identity for versioned prices even when
-			// only a legacy supplier remains. Older prices retain canonical IDs.
-			request := legacyRequests[0]
-			normalized, err := request.CanonicalJSON()
-			return request, normalized, legacyInfo, err
+		if purchaseError != nil {
+			return nil, nil, SeedanceVideoRequestInfo{}, purchaseError
 		}
 		return PrepareSeedanceVideoRequest(body)
 	}
@@ -159,6 +156,32 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 		return nil, nil, SeedanceVideoRequestInfo{}, capabilityError
 	}
 	return nil, nil, SeedanceVideoRequestInfo{}, fmt.Errorf("video model is not configured for this key")
+}
+
+func prepareLegacyVideoRequestForAccount(body []byte, account *Account) (*SeedanceVideoCreateRequest, SeedanceVideoRequestInfo, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil || payload == nil {
+		return nil, SeedanceVideoRequestInfo{}, fmt.Errorf("request body must be a JSON object")
+	}
+	public, _ := payload["model"].(string)
+	upstream, err := account.ResolveSeedanceUpstreamModel(public)
+	if err != nil {
+		return nil, SeedanceVideoRequestInfo{}, err
+	}
+	payload["model"] = upstream
+	prepared, err := json.Marshal(payload)
+	if err != nil {
+		return nil, SeedanceVideoRequestInfo{}, err
+	}
+	request, info, err := videoprovider.ParseCreateRequest(prepared)
+	if err != nil {
+		return nil, SeedanceVideoRequestInfo{}, err
+	}
+	request.RequestedModel, request.UpstreamModel = public, upstream
+	request.Raw["model"] = public
+	info.Model, info.RequestedModel = public, public
+	info.UpstreamModel = upstream
+	return request, info, nil
 }
 
 // Compute the reservation using the selected capability and frozen prices.
@@ -321,26 +344,33 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForAccount(request *SeedanceVi
 		return nil, fmt.Errorf("video request and account are required")
 	}
 	if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
-		// Capability-based public validation may allow parameters beyond a
-		// legacy driver's limits. Check its encoder locally so scheduling can
-		// continue to a compatible account before assigning or sending a task.
-		if request.Capability != nil {
-			driver, err := videoprovider.Resolve(string(account.GetVideoProviderID()))
-			if err != nil {
-				return nil, err
-			}
-			probe, err := driver.BuildRequest(context.Background(), videoprovider.RequestParams{
-				BaseURL: account.GetSeedanceBaseURL(), APIKey: account.GetSeedanceAPIKey(),
-				Operation: videoprovider.OperationCreate, CreateRequest: request,
-			})
-			if err != nil {
-				return nil, err
-			}
-			if probe.Body != nil {
-				_ = probe.Body.Close()
-			}
+		public := request.RequestedModel
+		if public == "" {
+			public = request.Model
 		}
-		return request, nil
+		upstream, err := account.ResolveSeedanceUpstreamModel(public)
+		if err != nil {
+			return nil, err
+		}
+		prepared := *request
+		prepared.Model, _ = videoprovider.CanonicalModel(upstream)
+		prepared.RequestedModel, prepared.UpstreamModel = public, upstream
+		prepared.Capability = nil
+		driver, err := videoprovider.Resolve(string(account.GetVideoProviderID()))
+		if err != nil {
+			return nil, err
+		}
+		probe, err := driver.BuildRequest(context.Background(), videoprovider.RequestParams{
+			BaseURL: account.GetSeedanceBaseURL(), APIKey: account.GetSeedanceAPIKey(),
+			Operation: videoprovider.OperationCreate, CreateRequest: &prepared,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if probe.Body != nil {
+			_ = probe.Body.Close()
+		}
+		return &prepared, nil
 	}
 	if !s.VideoTasksEnabled() {
 		return nil, fmt.Errorf("video tasks JSON v1 is disabled")

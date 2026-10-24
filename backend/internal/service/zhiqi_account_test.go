@@ -118,6 +118,7 @@ func TestZhiqiPublicCatalogExposesOnlyCustomerModelAndCapabilities(t *testing.T)
 	account.Credentials["api_key"] = "supplier-secret-never-expose"
 	account.Credentials["base_url"] = "https://private-supplier.example/v1"
 	account.Credentials["model_mapping"] = map[string]any{c.Model: c.UpstreamModel}
+	account.Extra[AccountModelCostPricingExtraKey] = []ChannelModelPricing{explicitVideoPrice(c.UpstreamModel, VideoBillingPerVideo, 0.3)}
 	svc, key := videoTasksGatewayPricingService(explicitVideoPrice(c.Model, VideoBillingPerVideo, 0.7))
 	svc.accountRepo = &videoCatalogAccountRepo{accounts: []Account{*account}}
 	models, err := svc.ListVideoMediaModels(context.Background(), key)

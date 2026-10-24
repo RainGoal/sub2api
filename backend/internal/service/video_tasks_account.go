@@ -41,7 +41,8 @@ func (a *Account) VideoModelCapability(model string) (videoprovider.VideoModelCa
 }
 
 // Explicit public overrides (including disables) win over mapped overrides;
-// supplier presets are only a fallback after both account-local identities.
+// supplier presets are only a fallback after both account-local identities,
+// and the actual upstream preset takes precedence over a public alias preset.
 func lookupAccountVideoModelCapability(model, upstream string, overrides []videoprovider.VideoModelCapability) (videoprovider.VideoModelCapability, bool) {
 	for _, name := range []string{model, upstream} {
 		if name == "" {
@@ -53,10 +54,10 @@ func lookupAccountVideoModelCapability(model, upstream string, overrides []video
 			}
 		}
 	}
-	if capability, ok := videoprovider.LookupVideoModelCapability(model, nil); ok {
+	if capability, ok := videoprovider.LookupVideoModelCapability(upstream, nil); ok {
 		return capability, true
 	}
-	return videoprovider.LookupVideoModelCapability(upstream, nil)
+	return videoprovider.LookupVideoModelCapability(model, nil)
 }
 
 func ValidateVideoTasksAccount(account *Account) error {

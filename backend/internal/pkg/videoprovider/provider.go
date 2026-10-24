@@ -55,6 +55,7 @@ const (
 type CreateRequest struct {
 	RequestedModel          string                `json:"requested_model"`
 	Model                   string                `json:"model"`
+	UpstreamModel           string                `json:"-"`
 	Prompt                  string                `json:"prompt"`
 	AspectRatio             string                `json:"aspect_ratio"`
 	Duration                int                   `json:"duration"`
@@ -74,6 +75,7 @@ type CreateRequest struct {
 type RequestInfo struct {
 	Model               string
 	RequestedModel      string
+	UpstreamModel       string
 	DurationSeconds     int
 	Resolution          string
 	ReferenceVideoCount int

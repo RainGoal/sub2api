@@ -86,7 +86,7 @@ describe('VideoTasksAccountConfig', () => {
     expect(wrapper.get('[data-testid="video-model-Public/Stable"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('[data-testid="video-model-Seedance-2.0"]').attributes('disabled')).toBe(source === 'override' ? undefined : '')
     await wrapper.setProps({ capabilities: [{ ...capability, model: 'Public/Stable' }] })
-    expect(wrapper.get('[data-testid="video-model-row-Public/Stable"]').attributes('data-status')).toBe('missing')
+    expect(wrapper.get('[data-testid="video-model-row-Public/Stable"]').attributes('data-status')).toBe('available')
   })
 
   it('discards pending discovery and catalogs when the selected protocol changes', async () => {

@@ -41,20 +41,23 @@
             id="edit-seedance"
             v-model="seedanceModelSelection"
             :provider="editVideoProvider"
+            :mapping-active="seedanceMappingEntries.length > 0"
             class="mt-4"
           />
           <VideoTasksAccountConfig
             v-else :key="account.id" id="edit-video-tasks" v-model="seedanceModelSelection"
             :protocol="isCapabilityVideoProvider(editVideoProvider) ? editVideoProvider : undefined"
-            v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
+            :capabilities="videoCapabilities" @update:capabilities="updateSeedanceCapabilities" v-model:supplier-name="videoSupplierName"
             v-model:discovery="videoModelDiscovery"
             v-model:base-url="editBaseUrl" :api-key="editApiKey" :account-id="account.id" :proxy-id="form.proxy_id"
             :saved-base-url="typeof account.credentials?.base_url === 'string' ? account.credentials.base_url : ''"
             :saved-protocol="typeof account.credentials?.video_provider === 'string' ? account.credentials.video_provider : ''"
             :saved-proxy-id="account.proxy_id"
-            :model-mapping="savedVideoModelMapping"
+            :model-mapping="seedanceContextMapping"
             @validity="videoCapabilitiesValid = $event"
           />
+          <SeedanceModelMapping id="edit-seedance-mapping" :model-value="seedanceMappingEntries"
+            :upstream-models="seedanceUpstreamModels" @update:model-value="updateSeedanceMappings" />
         </div>
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
@@ -1881,6 +1884,7 @@
       <AccountModelCostPricing
         v-model="modelCostPricing"
         :platform="account.platform"
+        :upstream-models="account.platform === 'seedance' ? seedanceUpstreamModels : undefined"
         :disabled="submitting"
       />
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -3305,14 +3309,14 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
+import SeedanceModelMapping from '@/components/account/SeedanceModelMapping.vue'
+import { useSeedanceModelMapping } from '@/components/account/useSeedanceModelMapping'
 import VideoTasksAccountConfig from '@/components/account/VideoTasksAccountConfig.vue'
 import { readVideoCapabilities, readVideoModelDiscovery, type VideoModelCapability, type VideoModelDiscovery } from '@/api/admin/videoTasks'
 import {
-  buildSeedanceModelMapping,
   filterSeedanceModelSelection,
   readSeedanceModelSelection,
   readSeedanceVideoCapabilities,
-  readSeedanceVideoModelMapping,
   type SeedanceModelSelection
 } from '@/components/account/seedanceModelRestriction'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
@@ -3448,8 +3452,10 @@ const videoCapabilities = ref<VideoModelCapability[]>([])
 const videoModelDiscovery = ref<VideoModelDiscovery | null>(null)
 const videoSupplierName = ref('')
 const videoCapabilitiesValid = ref(true)
-const savedVideoModelMapping = computed(() => editVideoProvider.value === normalizeVideoProviderID(props.account?.credentials?.video_provider)
-  ? readSeedanceVideoModelMapping(props.account?.credentials?.model_mapping) : {})
+const { entries: seedanceMappingEntries, mapping: seedanceModelMapping, contextMapping: seedanceContextMapping,
+  valid: seedanceMappingValid, upstreamModels: seedanceUpstreamModels, load: loadSeedanceMapping,
+  updateEntries: updateSeedanceMappings, updateCapabilities: updateSeedanceCapabilities,
+} = useSeedanceModelMapping(seedanceModelSelection, videoCapabilities, videoModelDiscovery, editVideoProvider)
 const modelCostPricing = ref<PricingFormEntry[]>([])
 const initialModelCostPricing = ref('[]')
 
@@ -3577,6 +3583,7 @@ const editApiKey = ref('')
 watch(editVideoProvider, (provider, previousProvider) => {
   if (props.account?.platform !== 'seedance') return
 	if (syncingForm.value) return
+  loadSeedanceMapping()
   videoModelDiscovery.value = null
   if (provider === 'zhiqi_v1' || previousProvider === 'zhiqi_v1') {
     videoCapabilities.value = []
@@ -4413,6 +4420,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   const credentials = newAccount.credentials as Record<string, unknown> | undefined
   editVideoProvider.value = normalizeVideoProviderID(credentials?.video_provider)
   seedanceModelSelection.value = readSeedanceModelSelection(credentials?.model_mapping, editVideoProvider.value)
+  loadSeedanceMapping(credentials?.model_mapping)
   videoCapabilities.value = newAccount.platform === 'seedance' && isCapabilityVideoProvider(editVideoProvider.value)
     ? readSeedanceVideoCapabilities(newAccount.extra?.video_model_capabilities, credentials?.model_mapping)
     : readVideoCapabilities(newAccount.extra?.video_model_capabilities)
@@ -5445,6 +5453,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 
 const handleSubmit = async () => {
   if (!props.account || submitting.value) return
+  if (props.account.platform === 'seedance' && !seedanceMappingValid.value) {
+    appStore.showError(t('admin.videoTasks.invalidMapping'))
+    return
+  }
   if (props.account.platform === 'seedance' && isCapabilityVideoProvider(editVideoProvider.value)) {
     if (!videoCapabilitiesValid.value || !editBaseUrl.value.trim() || !seedanceModelSelection.value?.length) {
       appStore.showError(t(!videoCapabilitiesValid.value ? 'admin.videoTasks.invalidJSON' : !editBaseUrl.value.trim() ? 'admin.videoTasks.baseUrlRequired' : 'admin.videoTasks.chooseModels'))
@@ -5563,7 +5575,7 @@ const handleSubmit = async () => {
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (props.account.platform === 'seedance') {
-        const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value, isCapabilityVideoProvider(editVideoProvider.value) ? videoCapabilities.value : [], savedVideoModelMapping.value)
+        const modelMapping = seedanceModelMapping.value
         if (modelMapping) newCredentials.model_mapping = modelMapping
         else delete newCredentials.model_mapping
         delete newCredentials.compact_model_mapping

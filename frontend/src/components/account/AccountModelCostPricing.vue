@@ -9,6 +9,7 @@
     <p class="input-hint">{{ t('admin.accounts.modelCostPricing.hint') }}</p>
     <p v-if="platform === 'seedance'" class="input-hint">{{ t('admin.accounts.modelCostPricing.videoHint') }}</p>
     <p v-else class="input-hint">{{ t('admin.accounts.modelCostPricing.defaultPriceHint') }}</p>
+    <p v-if="upstreamModels" class="input-hint">{{ t('admin.videoTasks.purchaseModelHint') }}</p>
     <div v-if="modelValue.length === 0" class="rounded border border-dashed border-gray-300 p-3 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
       {{ t('admin.accounts.modelCostPricing.empty') }}
     </div>
@@ -17,6 +18,7 @@
       :key="index"
       :entry="entry"
       :platform="platform"
+      :model-suggestions="upstreamModels"
       :auto-fill-default-pricing="false"
       :enable-tier-multipliers="true"
       @update="updateEntry(index, $event)"
@@ -37,13 +39,19 @@ const props = withDefaults(defineProps<{
   modelValue: PricingFormEntry[]
   platform: string
   disabled?: boolean
+  upstreamModels?: string[]
 }>(), { disabled: false })
 const emit = defineEmits<{ 'update:modelValue': [entries: PricingFormEntry[]] }>()
 const { t } = useI18n()
 const error = computed(() => validateAccountModelCostPricing(props.modelValue, props.platform, t))
 
 function addEntry() {
-  if (!props.disabled) emit('update:modelValue', [...props.modelValue, createAccountModelCostEntry(props.platform)])
+  if (props.disabled) return
+  const entry = createAccountModelCostEntry(props.platform)
+  if (props.platform === 'seedance' && props.upstreamModels) {
+    Object.assign(entry, { video_pricing_version: 1, video_billing_unit: 'per_second', video_quantity_policy: 'output_seconds' })
+  }
+  emit('update:modelValue', [...props.modelValue, entry])
 }
 
 function updateEntry(index: number, entry: PricingFormEntry) {

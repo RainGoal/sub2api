@@ -655,6 +655,26 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it.each(['bblabu_v1', 'fflink_v1', 'video_tasks_json_v1', 'zhiqi_v1'])(
+    'edits a %s public alias without losing the supplier model casing', async protocol => {
+      const capabilities = protocol === 'zhiqi_v1' || protocol === 'video_tasks_json_v1'
+        ? [{ model: 'Public/Old', upstream_model: 'Seedance-2.0', profile: protocol === 'zhiqi_v1' ? 'zhiqi_v1' : 'bblabu_route', enabled: true }]
+        : []
+      const account = { ...buildAccount(), platform: 'seedance',
+        credentials: { api_key: 'sk-video', video_provider: protocol, base_url: 'https://supplier.example/v1',
+          model_mapping: { 'Public/Old': 'Seedance-2.0' } }, extra: { video_model_capabilities: capabilities } } as any
+      updateAccountMock.mockReset().mockResolvedValue(account)
+      const wrapper = mountModal(account)
+      await wrapper.get('[data-testid="seedance-mapping-from-0"]').setValue('seedance-2.0')
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual({ 'seedance-2.0': 'Seedance-2.0' })
+      if (capabilities.length) expect(updateAccountMock.mock.calls[0]?.[1]?.extra.video_model_capabilities)
+        .toEqual([{ ...capabilities[0], model: 'seedance-2.0' }])
+      expect(account.credentials.model_mapping).toEqual({ 'Public/Old': 'Seedance-2.0' })
+      wrapper.unmount()
+    },
+  )
+
   it('preserves generic video capabilities and blocks invalid capability JSON on save', async () => {
     const capability = { model: 'Custom/Video', profile: 'bblabu_route', enabled: true }
     const account = {
@@ -888,7 +908,7 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual({
-      'seedance-2.0-fast': 'seedance-2.0-fast', 'seedance-2.5': 'seedance-2.5'
+      'seedance-2.0-fast': 'seedance-2.0-fast', 'bytedance/seedance-2.5': 'bytedance/seedance-2.5'
     })
   })
 

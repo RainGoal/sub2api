@@ -61,7 +61,7 @@ func validateSeedanceAccountCredentials(platform, accountType string, credential
 	return nil
 }
 
-// Video model selection is an allowlist, not a cross-model rewrite rule.
+// Legacy protocols accept public aliases for their supported upstream models.
 func validateSeedanceModelSelection(driver videoprovider.Driver, raw any) error {
 	if raw == nil {
 		return nil
@@ -71,14 +71,12 @@ func validateSeedanceModelSelection(driver videoprovider.Driver, raw any) error 
 		return fmt.Errorf("seedance model_mapping must be a model allowlist")
 	}
 	for source, target := range mapping {
-		canonical, known := videoprovider.CanonicalModel(source)
-		if !known || !driver.SupportsModel(source) {
-			return fmt.Errorf("seedance model %q is not supported by this provider", source)
-		}
 		value, isString := target.(string)
-		mapped, targetKnown := videoprovider.CanonicalModel(value)
-		if !isString || !targetKnown || canonical != mapped {
-			return fmt.Errorf("seedance model selection must preserve the selected model %q", source)
+		if !isString || !validVideoModelName(source) || !validVideoModelName(value) {
+			return fmt.Errorf("video model mapping requires explicit public and upstream model names")
+		}
+		if !driver.SupportsModel(value) {
+			return fmt.Errorf("seedance upstream model %q is not supported by this provider", value)
 		}
 	}
 	return nil
@@ -92,21 +90,65 @@ func (a *Account) isSeedanceModelSupported(requestedModel string) bool {
 		_, ok := a.VideoModelCapability(requestedModel)
 		return ok
 	}
-	driver, err := videoprovider.Resolve(string(a.GetVideoProviderID()))
-	if err != nil || !driver.SupportsModel(requestedModel) {
-		return false
+	_, err := a.ResolveSeedanceUpstreamModel(requestedModel)
+	return err == nil
+}
+
+// ResolveSeedanceUpstreamModel returns the exact model sent by this account.
+// The result is already mapped and must not pass through account mapping again.
+func (a *Account) ResolveSeedanceUpstreamModel(public string) (string, error) {
+	if a == nil || !a.IsSeedance() || !validVideoModelName(public) {
+		return "", fmt.Errorf("valid video account and public model are required")
+	}
+	provider := a.GetVideoProviderID()
+	if videoprovider.SupportsModelCapabilities(provider) {
+		if _, ok := a.GetModelMapping()[public]; !ok {
+			return "", fmt.Errorf("video model is not enabled on this account")
+		}
+		capability, ok := a.VideoModelCapability(public)
+		if !ok {
+			return "", fmt.Errorf("video model capability is unavailable")
+		}
+		return capability.UpstreamModel, nil
+	}
+	driver, err := videoprovider.Resolve(string(provider))
+	if err != nil {
+		return "", err
 	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
-		return true
+		return videoprovider.ResolveLegacyUpstreamModel(provider, public)
 	}
-	canonical, _ := videoprovider.CanonicalModel(requestedModel)
-	for selected := range mapping {
-		if model, known := videoprovider.CanonicalModel(selected); known && model == canonical {
-			return true
+	if target, ok := mapping[public]; ok {
+		if !validVideoModelName(target) || !driver.SupportsModel(target) {
+			return "", fmt.Errorf("video upstream model is not supported by this provider")
+		}
+		// Existing identity entries were model selection, before mapping was
+		// supported. Keep their driver's historical spelling and aliases.
+		if target == public {
+			return videoprovider.ResolveLegacyUpstreamModel(provider, public)
+		}
+		return target, nil
+	}
+	if canonical, known := videoprovider.CanonicalModel(public); known {
+		for source, target := range mapping {
+			if source != target {
+				continue
+			}
+			if selected, ok := videoprovider.CanonicalModel(source); ok && selected == canonical {
+				return videoprovider.ResolveLegacyUpstreamModel(provider, public)
+			}
 		}
 	}
-	return false
+	return "", fmt.Errorf("video model is not enabled on this account")
+}
+
+func (a *Account) hasSeedanceModelRemapping(public string) bool {
+	if a == nil {
+		return false
+	}
+	target, exists := a.GetModelMapping()[public]
+	return exists && target != public
 }
 
 func validVideoModelName(model string) bool {

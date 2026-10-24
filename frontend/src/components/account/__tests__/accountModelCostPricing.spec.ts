@@ -57,6 +57,24 @@ async function addVideoTier(wrapper: VideoCostEditor, resolution: string, price:
 }
 
 describe('AccountModelCostPricing', () => {
+  it('uses account supplier IDs as exact purchase-price shortcuts without canonicalizing them', async () => {
+    const wrapper = mount(AccountModelCostPricing, { props: {
+      modelValue: [], platform: 'seedance', upstreamModels: ['Seedance-2.0', 'seedance-2.0'],
+    } })
+    await wrapper.get('[data-testid="add-account-model-cost"]').trigger('click')
+    await applyCostUpdate(wrapper)
+    const suggestions = wrapper.get('[data-testid="model-suggestions"]').findAll('button')
+    expect(suggestions.map(button => button.text())).toEqual(['Seedance-2.0', 'seedance-2.0'])
+    await suggestions[0].trigger('click')
+    let entries = await applyCostUpdate(wrapper)
+    wrapper.getComponent(PricingEntryCard).vm.$emit('update', { ...entries[0], per_request_price: 0.1 })
+    entries = await applyCostUpdate(wrapper)
+    expect(accountModelCostPricingToAPI(entries, 'seedance')[0]).toMatchObject({
+      models: ['Seedance-2.0'], video_pricing_version: 1,
+    })
+    wrapper.unmount()
+  })
+
   it('configures per-video resolution costs through the billing selector and preserves them across saving and unit changes', async () => {
     const wrapper = mountVideoCostEditor({
       ...createAccountModelCostEntry('seedance'), models: ['Niulai-Pro'], per_request_price: 0.4,

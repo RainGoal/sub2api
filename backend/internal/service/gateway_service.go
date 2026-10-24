@@ -1464,7 +1464,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 				}
 			} else {
 				for model := range mapping {
-					if driver.SupportsModel(model) {
+					if acc.isSeedanceModelSupported(model) {
 						modelSet[model] = struct{}{}
 					}
 				}

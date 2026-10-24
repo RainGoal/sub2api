@@ -95,7 +95,7 @@ func (fflinkDriver) encodeCreate(request *CreateRequest) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.EqualFold(request.RequestedModel, "bytedance/seedance-2.5") {
+	if request.UpstreamModel == "" && strings.EqualFold(request.RequestedModel, "bytedance/seedance-2.5") {
 		upstreamModel = "bytedance/seedance-2.5"
 	}
 	if len(spec.AllowedDurations) > 0 && !containsInt(spec.AllowedDurations, request.Duration) {

@@ -42,6 +42,32 @@ MM3 参考视频 schema 未确认，保持禁用；不能因其他模式通过�
 才会进入 `GET /v1/media/models` 的可用目录。目录返回完整能力变体与有效销售单位，
 不返回账号、供应商地址、采购价格或 Key；提交时仍会重新校验。
 
+### 账号模型映射
+
+Seedance 账号使用 `credentials.model_mapping` 配置“客户请求模型 → 上游模型”。
+例如客户统一请求 `seedance-2.0`，BBLabu 账号配置
+`seedance-2.0 → Seedance-2.0`，志奇账号配置
+`seedance-2.0 → seedance-2.0`。上游名称保留原始大小写；同步型号不会覆盖已有映射。
+
+- 渠道售价、分组模型授权、公开模型列表和任务响应使用客户请求名称。
+- 账号采购价使用最终实际发送的上游名称，同一公开型号在不同账号可以有不同采购价。
+- 能力配置仍按各账号的协议、时长、分辨率和素材限制校验；模型映射不会放宽能力限制。
+- 任务分配时冻结实际上游名称与售采价，之后修改账号映射或定价不会改变在途任务。
+
+升级前检查已有非同名映射：如果采购价此前配置在公开名称下，需要在账号中改为真实
+上游名称；渠道售价保持原公开名称。缺少上游采购价时不会使用公开型号的采购价替代。
+不自动迁移或猜测价格，也不重新计算历史账单。已有旧格式价格继续按原规范兼容，
+需要精确区分大小写的采购价使用显式 v1 视频定价。
+
+旧 `bblabu_v1` / `fflink_v1` 未配置映射及已有同名白名单继续使用原驱动的型号转换，
+包括 BBLabu 的 `Seedance-2.0` 和 FFLink 的 `bytedance/seedance-2.5` 兼容别名；
+非同名映射发送配置的目标原文，目标仍须为对应旧协议支持的型号。
+本功能不新增路由、数据库迁移或独立开关。部署后核对管理端映射保存与重新打开、
+`GET /v1/models`、`GET /v1/media/models`、创建/查询响应中的公开名称，以及账号采购统计。
+任意公开别名、显式 v1 售价和完整执行快照依赖现有
+`gateway.video_tasks_json_v1_enabled` 开启；关闭时继续使用旧型号与旧计价协议，
+不支持用未知公开别名绕过旧售价限制。
+
 ## 异常与凭证
 
 创建已发出但结果未知时，网关返回 `X-Video-Task-ID` 并保留预占，进入 `needs_review`。
@@ -122,3 +148,24 @@ Tag 会触发现有 Release 流水线发布构建产物及镜像；生产部署�
   `build`、构建完成后的 `go test -tags embed ./internal/web` 及 `git diff --check` 通过。
 - 发布仍须等待待发布提交的 CI 与 Security Scan 全部成功，再推送 annotated Tag；
   生产部署、真实供应商生成及账单验收另行执行。
+
+## 账号模型映射验证（2026-10-24）
+
+- `go test -p 1 -parallel 1 ./...`、`go test -p 1 -parallel 1 -tags=unit ./...`：全部包通过。
+  Windows 测试进程临时将已安装的 `D:/Environ/Git/bin` 加入 PATH，供既有备份测试调用 `sh`。
+- 四种视频协议的回归覆盖公开售价、精确上游采购价、缺失采购价拒绝、账号切换、
+  单次映射、最大供应商预扣、公开响应及任务快照恢复；既有无映射和同名白名单保持兼容。
+- `corepack pnpm@9.15.9 --dir frontend run typecheck`、`run build`：通过，包含 i18n 检查。
+- `corepack pnpm@9.15.9 --dir frontend run test:run --maxWorkers=4 --minWorkers=1`：
+  394 文件、3297 项测试全部通过；最后样式与文案调整后，相关 3 文件、170 项测试再次通过。
+- 桌面与 390px 本地 mock 预览通过；没有生产登录、真实收费生成或线上账号修改。
+- `go test -p 1 -tags embed ./internal/web`、修改文件 ESLint、`gofmt` 检查及 `git diff --check`：通过。
+- 使用 Go 1.27.3 临时构建官方 `golangci-lint v2.15.0`，解决旧工具无法读取 export data v5 的问题。
+  完整 `run --timeout=30m ./...` 已执行，仍有 3 个未修改的 OpenAI WS 测试 `errcheck` 告警：
+  `openai_ws_client_read_test.go:139`、`openai_ws_client_session_test.go:47`、
+  `openai_ws_passthrough_turn_pricing_test.go:279`。
+  补充 `run --timeout=30m --new-from-rev=HEAD --whole-files ./...` 通过，本次修改文件为 0 告警。
+- `go test -p 1 -parallel 1 -tags=integration ./...` 已执行但未通过：本机没有可用 Docker，
+  `TestRequestAuditPostgresIntegration` 报 `rootless Docker is not supported on Windows`。
+  其他 Docker 用例自动跳过不算集成验证完成；发布前须在具备 PostgreSQL/Redis 容器的环境或 CI 补验。
+- 本轮未提交、发布或部署；实际供应商生成、计量与账单核对仍需部署验收。

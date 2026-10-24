@@ -183,14 +183,18 @@ func (s *OpenAIGatewayService) resolveSeedanceAccountCost(ctx context.Context, p
 		BillingMode: BillingModeVideo, UnitPrice: pending.TotalCostPerSecond,
 		RateMultiplier: account.BillingRateMultiplier(),
 	}
-	pricing, err := LookupAccountModelCostPricing(account, pending.Model)
+	upstreamModel, err := account.ResolveSeedanceUpstreamModel(pending.Model)
+	if err != nil {
+		return nil, err
+	}
+	pricing, err := LookupAccountModelCostPricing(account, upstreamModel)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrSeedanceAccountCostMissing, err)
 	}
 	if pricing != nil {
 		price, err := seedanceStatsUnitPrice(pricing, pending.Resolution)
 		if err != nil || price == nil {
-			return nil, fmt.Errorf("%w for %s at %s", ErrSeedanceAccountCostMissing, pending.Model, pending.Resolution)
+			return nil, fmt.Errorf("%w for %s at %s", ErrSeedanceAccountCostMissing, upstreamModel, pending.Resolution)
 		}
 		snapshot.BillingMode = pricing.BillingMode
 		snapshot.UnitPrice = *price
@@ -199,6 +203,8 @@ func (s *OpenAIGatewayService) resolveSeedanceAccountCost(ctx context.Context, p
 			snapshot.Version, snapshot.BillingUnit = VideoPricingVersion, pricing.VideoBillingUnit
 			snapshot.QuantityPolicy, snapshot.MaxBillableSeconds = pricing.VideoQuantityPolicy, pricing.VideoMaxBillableSeconds
 		}
+	} else if account.hasSeedanceModelRemapping(pending.Model) {
+		return nil, fmt.Errorf("%w for %s at %s", ErrSeedanceAccountCostMissing, upstreamModel, pending.Resolution)
 	}
 	if err := snapshot.Validate(); err != nil {
 		return nil, err

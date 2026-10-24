@@ -104,6 +104,10 @@ func (s *OpenAIGatewayService) ListVideoMediaModels(ctx context.Context, key *AP
 			if !ok || !account.isSeedanceModelSupported(model) || !key.Group.ModelAllowlist.Allows(model) {
 				continue
 			}
+			upstreamModel, resolveErr := account.ResolveSeedanceUpstreamModel(model)
+			if resolveErr != nil {
+				continue
+			}
 			variant := publicVideoVariant(capability)
 			resolutions := capability.Resolutions
 			if len(resolutions) == 0 {
@@ -115,7 +119,7 @@ func (s *OpenAIGatewayService) ListVideoMediaModels(ctx context.Context, key *AP
 				if quoteErr != nil || quote.SalesSnapshot == nil {
 					continue
 				}
-				purchase, costErr := ResolveVideoTaskAccountCost(account, model, resolution, true, VideoQuantityPolicy(capability.MeteringPolicy), float64(capability.MaxDuration+capability.MaxReferenceVideoSeconds))
+				purchase, costErr := ResolveVideoTaskAccountCost(account, upstreamModel, resolution, true, VideoQuantityPolicy(capability.MeteringPolicy), float64(capability.MaxDuration+capability.MaxReferenceVideoSeconds))
 				if costErr != nil || validateVideoTaskPurchaseCapability(capability, capability.DefaultDuration, purchase) != nil {
 					continue
 				}

@@ -262,6 +262,10 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if videoprovider.SupportsModelCapabilities(normalizedProviderID) && pending.SalesSnapshot == nil {
 		return fmt.Errorf("video tasks JSON v1 requires a sales snapshot")
 	}
+	upstreamModel, err := account.ResolveSeedanceUpstreamModel(pending.Model)
+	if err != nil {
+		return err
+	}
 	if pending.SalesSnapshot != nil && videoTaskReferenceMeteringUnsupported(normalizedProviderID, pending.ReferenceVideoCount, pending.SalesSnapshot.BillingUnit, pending.SalesSnapshot.QuantityPolicy) {
 		return fmt.Errorf("%w: provider does not supply actual reference video metering", ErrVideoTaskSalesCapabilityMismatch)
 	}
@@ -288,8 +292,8 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 		} else if driver, resolveErr := videoprovider.Resolve(string(normalizedProviderID)); resolveErr == nil && driver.BillingPolicy() == videoprovider.BillingOutputAndReference {
 			policy = VideoQuantityOutputAndReferenceSeconds
 		}
-		accountCost, err = ResolveVideoTaskAccountCost(account, pending.Model, pending.Resolution,
-			videoprovider.SupportsModelCapabilities(normalizedProviderID), policy, maximum)
+		accountCost, err = ResolveVideoTaskAccountCost(account, upstreamModel, pending.Resolution,
+			videoprovider.SupportsModelCapabilities(normalizedProviderID) || account.hasSeedanceModelRemapping(pending.Model), policy, maximum)
 		if err == nil && accountCost == nil {
 			accountCost = &SeedanceAccountCostSnapshot{Version: VideoPricingVersion, BillingMode: BillingModeVideo,
 				BillingUnit: pending.SalesSnapshot.BillingUnit, UnitPrice: pending.SalesSnapshot.UnitPrice,
@@ -313,7 +317,7 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	}
 	if pending.IDVersion != 0 {
 		execution := &VideoTasksExecutionSnapshot{Version: 1, Protocol: string(normalizedProviderID),
-			BaseURL: account.GetVideoProviderBaseURL(string(normalizedProviderID)), UpstreamModel: pending.Model,
+			BaseURL: account.GetVideoProviderBaseURL(string(normalizedProviderID)), UpstreamModel: upstreamModel,
 			SupportsContent: true, SupportsCancel: normalizedProviderID == videoprovider.ProviderFFLinkV1}
 		if capability, ok := account.VideoModelCapability(pending.Model); ok {
 			execution.Capability = &capability
@@ -566,7 +570,12 @@ type SeedanceVideoPricingSnapshot struct {
 
 func seedanceVideoPricingBillingSeconds(info SeedanceVideoRequestInfo) int {
 	billingSeconds := info.DurationSeconds
-	if info.ReferenceVideoCount > 0 && strings.EqualFold(info.Model, videoprovider.ModelSeedance25) {
+	model := info.Model
+	if info.UpstreamModel != "" {
+		model = info.UpstreamModel
+	}
+	canonical, _ := videoprovider.CanonicalModel(model)
+	if info.ReferenceVideoCount > 0 && canonical == videoprovider.ModelSeedance25 {
 		if spec, ok := videoprovider.LookupModel(videoprovider.ModelSeedance25); ok {
 			billingSeconds += spec.MaxReferenceVideoSeconds
 		}
@@ -586,6 +595,9 @@ func (s *OpenAIGatewayService) ResolveSeedanceVideoPricingSnapshot(ctx context.C
 		baseMultiplier = s.ResolveUserGroupRateMultiplier(ctx, apiKey.User.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
 	}
 	rateMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
+	if requested := strings.TrimSpace(info.RequestedModel); requested != "" {
+		info.Model = requested
+	}
 	if s.VideoTasksEnabled() {
 		return s.resolveVideoTasksPricingSnapshot(ctx, apiKey, info, rateMultiplier)
 	}
@@ -621,7 +633,11 @@ func (s *OpenAIGatewayService) GetSeedanceVideoSalesPrice(ctx context.Context, a
 	if s == nil || apiKey == nil {
 		return nil, fmt.Errorf("seedance sales pricing dependencies are unavailable")
 	}
-	price, err := ResolveVideoSalesPrice(ctx, s.channelService, apiKey.Group, info.Model, info.Resolution)
+	model := info.Model
+	if requested := strings.TrimSpace(info.RequestedModel); requested != "" {
+		model = requested
+	}
+	price, err := ResolveVideoSalesPrice(ctx, s.channelService, apiKey.Group, model, info.Resolution)
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +723,7 @@ func BuildSeedanceVideoCompletionBilling(pending *SeedanceVideoPendingBilling, s
 	if strings.TrimSpace(merged.BillingModel) == "" {
 		merged.BillingModel = pending.Model
 	}
-	if pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Capability != nil {
+	if pending.ExecutionSnapshot != nil {
 		merged.Model, merged.BillingModel = pending.Model, pending.Model
 		merged.UpstreamModel = pending.ExecutionSnapshot.UpstreamModel
 	}
@@ -718,7 +734,7 @@ func BuildSeedanceVideoCompletionBilling(pending *SeedanceVideoPendingBilling, s
 	if err != nil {
 		return nil, nil, err
 	}
-	if canonical, ok := videoprovider.CanonicalModel(merged.BillingModel); ok &&
+	if canonical, ok := videoprovider.CanonicalModel(upstreamSentModel(merged.BillingModel, merged.UpstreamModel)); ok &&
 		driver.BillingPolicy() == videoprovider.BillingOutputAndReference &&
 		canonical == videoprovider.ModelSeedance25 && pending.ReferenceVideoCount > 0 &&
 		merged.VideoReferenceInputSeconds <= 0 {

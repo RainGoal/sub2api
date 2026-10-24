@@ -791,6 +791,31 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(wrapper.getComponent(AccountModelCostPricing).props('modelValue')).toEqual([])
   })
 
+  it.each(['bblabu_v1', 'fflink_v1', 'video_tasks_json_v1', 'zhiqi_v1'])(
+    'creates %s accounts with the configured public-to-upstream mapping', async protocol => {
+      const wrapper = mountModal()
+      await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')
+      await wrapper.get('[data-testid="video-provider-select"]').setValue(protocol)
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('Mapped video')
+      await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-video')
+      if (protocol === 'video_tasks_json_v1' || protocol === 'zhiqi_v1') {
+        const config = wrapper.getComponent(VideoTasksAccountConfig)
+        config.vm.$emit('update:baseUrl', 'https://supplier.example/v1')
+        config.vm.$emit('update:capabilities', [{ model: 'Seedance-2.0',
+          profile: protocol === 'zhiqi_v1' ? 'zhiqi_v1' : 'bblabu_route', enabled: true }])
+        config.vm.$emit('update:modelValue', ['Seedance-2.0'])
+      }
+      await wrapper.get('[data-testid="seedance-add-mapping"]').trigger('click')
+      await wrapper.get('[data-testid="seedance-mapping-from-0"]').setValue('seedance-2.0')
+      await wrapper.get('[data-testid="seedance-mapping-to-0"]').setValue('Seedance-2.0')
+      expect(wrapper.getComponent(AccountModelCostPricing).props('upstreamModels')).toContain('Seedance-2.0')
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(createAccountMock.mock.calls[0]?.[0]?.credentials.model_mapping).toEqual({ 'seedance-2.0': 'Seedance-2.0' })
+      wrapper.unmount()
+    },
+  )
+
   it('switches a Seedance account to the fflink video protocol', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'admin.accounts.platforms.seedance')

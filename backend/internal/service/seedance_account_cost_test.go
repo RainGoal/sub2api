@@ -51,6 +51,11 @@ func TestSeedanceAccountCostUsesModelResolutionAndSelectedAccount(t *testing.T) 
 			if tc.accountID != account.ID {
 				selected = &Account{ID: tc.accountID, Platform: PlatformSeedance, RateMultiplier: seedanceCostPrice(0.5)}
 			}
+			if tc.model == "seedance-2.0-fast" {
+				copy := *selected
+				copy.Credentials = map[string]any{"video_provider": "fflink_v1"}
+				selected = &copy
+			}
 			cost, err := svc.resolveSeedanceAccountCost(context.Background(), pending, selected)
 			if tc.wantError {
 				require.Error(t, err)

@@ -76,6 +76,7 @@
             <ModelTagInput
               :models="entry.models"
               :platform="props.platform"
+              :suggestions="modelSuggestions"
               @update:models="onModelsUpdate($event)"
               :placeholder="t('admin.channels.form.modelsPlaceholder')"
               class="mt-1"
@@ -336,6 +337,7 @@ const props = withDefaults(defineProps<{
   enableTierMultipliers?: boolean
   autoFillDefaultPricing?: boolean
   allowedBillingModes?: BillingMode[]
+  modelSuggestions?: string[]
 }>(), {
   hideTokenIntervals: false,
   enableTimePricing: false,
@@ -486,7 +488,9 @@ function removeInterval(idx: number) {
 
 async function onModelsUpdate(newModels: string[]) {
   const oldModels = props.entry.models
-  emit('update', { ...props.entry, models: newModels })
+  const entry = props.platform === 'seedance' && props.modelSuggestions
+    ? explicitVideoEntry(isPerVideo.value ? 'per_video' : 'per_second') : props.entry
+  emit('update', { ...entry, models: newModels })
 
   if (!props.autoFillDefaultPricing || props.platform === 'seedance') return
 

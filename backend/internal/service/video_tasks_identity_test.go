@@ -64,6 +64,21 @@ func TestVideoTaskExecutionRestoresOriginalRouteWithoutMutatingAccount(t *testin
 
 type identityStudioReader struct{ task *SeedanceVideoPendingBilling }
 
+func TestVideoTaskExecutionRestoresLegacyPublicMapping(t *testing.T) {
+	pending := &SeedanceVideoPendingBilling{AccountID: 20, Model: "studio-video",
+		ExecutionSnapshot: &VideoTasksExecutionSnapshot{Version: 1, Protocol: "bblabu_v1",
+			BaseURL: "https://original.example/v1", UpstreamModel: "Seedance-2.0"}}
+	account := mappedLegacyVideoAccount("fflink_v1", "seedance-2.5")
+	account.ID = pending.AccountID
+	frozen, err := AccountForSeedanceVideoTask(pending, account)
+	require.NoError(t, err)
+	upstream, err := frozen.ResolveSeedanceUpstreamModel(pending.Model)
+	require.NoError(t, err)
+	require.Equal(t, "Seedance-2.0", upstream)
+	require.Equal(t, "seedance-2.5", account.GetModelMapping()[pending.Model])
+	require.Equal(t, videoprovider.ProviderBBLabuV1, frozen.GetVideoProviderID())
+}
+
 func (r identityStudioReader) GetByProviderTask(context.Context, string, int64, int64) (*SeedanceVideoPendingBilling, error) {
 	return r.task, nil
 }

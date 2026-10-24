@@ -1536,16 +1536,20 @@
             id="create-seedance"
             v-model="seedanceModelSelection"
             :provider="videoProvider"
+            :mapping-active="seedanceMappingEntries.length > 0"
             class="mt-4"
           />
           <VideoTasksAccountConfig
             v-else id="create-video-tasks" v-model="seedanceModelSelection"
             :protocol="isCapabilityVideoProvider(videoProvider) ? videoProvider : undefined"
-            v-model:capabilities="videoCapabilities" v-model:supplier-name="videoSupplierName"
+            :capabilities="videoCapabilities" @update:capabilities="updateSeedanceCapabilities" v-model:supplier-name="videoSupplierName"
             v-model:discovery="videoModelDiscovery"
             v-model:base-url="apiKeyBaseUrl" :api-key="apiKeyValue" :proxy-id="form.proxy_id"
+            :model-mapping="seedanceContextMapping"
             @validity="videoCapabilitiesValid = $event"
           />
+          <SeedanceModelMapping id="create-seedance-mapping" :model-value="seedanceMappingEntries"
+            :upstream-models="seedanceUpstreamModels" @update:model-value="updateSeedanceMappings" />
         </div>
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
@@ -3319,6 +3323,7 @@
       <AccountModelCostPricing
         v-model="modelCostPricing"
         :platform="form.platform"
+        :upstream-models="form.platform === 'seedance' ? seedanceUpstreamModels : undefined"
         :disabled="submitting"
       />
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -4219,10 +4224,11 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import SeedanceModelSelector from '@/components/account/SeedanceModelSelector.vue'
+import SeedanceModelMapping from '@/components/account/SeedanceModelMapping.vue'
+import { useSeedanceModelMapping } from '@/components/account/useSeedanceModelMapping'
 import VideoTasksAccountConfig from '@/components/account/VideoTasksAccountConfig.vue'
 import { readVideoModelDiscovery, type VideoModelCapability, type VideoModelDiscovery } from '@/api/admin/videoTasks'
 import {
-  buildSeedanceModelMapping,
   filterSeedanceModelSelection,
   type SeedanceModelSelection
 } from '@/components/account/seedanceModelRestriction'
@@ -4324,6 +4330,10 @@ const videoCapabilities = ref<VideoModelCapability[]>([])
 const videoModelDiscovery = ref<VideoModelDiscovery | null>(null)
 const videoSupplierName = ref('')
 const videoCapabilitiesValid = ref(true)
+const { entries: seedanceMappingEntries, mapping: seedanceModelMapping, contextMapping: seedanceContextMapping,
+  valid: seedanceMappingValid, upstreamModels: seedanceUpstreamModels, load: loadSeedanceMapping,
+  updateEntries: updateSeedanceMappings, updateCapabilities: updateSeedanceCapabilities,
+} = useSeedanceModelMapping(seedanceModelSelection, videoCapabilities, videoModelDiscovery, videoProvider)
 const modelCostPricing = ref<PricingFormEntry[]>([])
 
 // Platform-specific hints for API Key type
@@ -4711,6 +4721,7 @@ watch(apiProtocol, (protocol) => {
 })
 watch(videoProvider, (provider, previousProvider) => {
   if (form.platform !== 'seedance') return
+  loadSeedanceMapping()
   videoModelDiscovery.value = null
   if (provider === 'zhiqi_v1' || previousProvider === 'zhiqi_v1') {
     videoCapabilities.value = []
@@ -5290,6 +5301,7 @@ watch(
     }
     // Clear model-related settings
     seedanceModelSelection.value = null
+    loadSeedanceMapping()
     videoCapabilities.value = []
     videoModelDiscovery.value = null
     videoSupplierName.value = ''
@@ -5784,6 +5796,7 @@ const resetForm = () => {
   apiKeyValue.value = ''
   videoProvider.value = DEFAULT_VIDEO_PROVIDER_ID
   seedanceModelSelection.value = null
+  loadSeedanceMapping()
   videoCapabilities.value = []
   videoModelDiscovery.value = null
   videoSupplierName.value = ''
@@ -6098,6 +6111,10 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 
 const handleSubmit = async () => {
   if (submitting.value) return
+  if (form.platform === 'seedance' && !seedanceMappingValid.value) {
+    appStore.showError(t('admin.videoTasks.invalidMapping'))
+    return
+  }
   if (form.platform === 'seedance' && isCapabilityVideoProvider(videoProvider.value)) {
     if (!videoCapabilitiesValid.value || !apiKeyBaseUrl.value.trim() || !seedanceModelSelection.value?.length) {
       appStore.showError(t(!videoCapabilitiesValid.value ? 'admin.videoTasks.invalidJSON' : !apiKeyBaseUrl.value.trim() ? 'admin.videoTasks.baseUrlRequired' : 'admin.videoTasks.chooseModels'))
@@ -6301,7 +6318,7 @@ const handleSubmit = async () => {
   }
   if (form.platform === 'seedance') {
     credentials.video_provider = videoProvider.value
-    const modelMapping = buildSeedanceModelMapping(seedanceModelSelection.value, isCapabilityVideoProvider(videoProvider.value) ? videoCapabilities.value : [])
+    const modelMapping = seedanceModelMapping.value
     if (modelMapping) credentials.model_mapping = modelMapping
   }
   if (form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl.value)) {

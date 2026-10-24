@@ -150,6 +150,8 @@ func AccountForSeedanceVideoTask(p *SeedanceVideoPendingBilling, account *Accoun
 	if p.ExecutionSnapshot.Capability != nil {
 		copy.Extra["video_model_capabilities"] = []videoprovider.VideoModelCapability{*p.ExecutionSnapshot.Capability}
 		copy.Credentials["model_mapping"] = map[string]any{p.ExecutionSnapshot.Capability.Model: p.ExecutionSnapshot.UpstreamModel}
+	} else if p.Model != "" {
+		copy.Credentials["model_mapping"] = map[string]any{p.Model: p.ExecutionSnapshot.UpstreamModel}
 	}
 	return &copy, nil
 }

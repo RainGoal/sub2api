@@ -25,7 +25,7 @@ func videoProtocolCapability(provider videoprovider.ID) videoprovider.VideoModel
 }
 
 func videoProtocolAccount(id int64, provider videoprovider.ID, capability videoprovider.VideoModelCapability) *Account {
-	account := videoTasksGatewayAccount(id, capability, explicitVideoPrice(capability.Model, VideoBillingPerVideo, 0.3))
+	account := videoTasksGatewayAccount(id, capability, explicitVideoPrice(string(provider)+"-upstream-model", VideoBillingPerVideo, 0.3))
 	account.Credentials["video_provider"] = string(provider)
 	account.Credentials["base_url"] = "https://" + string(provider) + ".example/v1"
 	account.Credentials["model_mapping"] = map[string]any{capability.Model: string(provider) + "-upstream-model"}
@@ -134,7 +134,7 @@ func TestVideoProtocolUnpurchasableSupplierDoesNotChangeDefaultsOrReservation(t 
 			unavailable := videoProtocolAccount(21, videoprovider.ProviderZhiqiV1, bad)
 			delete(unavailable.Extra, AccountModelCostPricingExtraKey)
 			if missingTier {
-				price := explicitVideoPrice(bad.Model, VideoBillingPerVideo, 0.3)
+				price := explicitVideoPrice(string(videoprovider.ProviderZhiqiV1)+"-upstream-model", VideoBillingPerVideo, 0.3)
 				price.PerRequestPrice = nil
 				price.Intervals = []PricingInterval{{TierLabel: "1080p", PerRequestPrice: seedanceCostPrice(0.3)}}
 				unavailable.Extra[AccountModelCostPricingExtraKey] = []ChannelModelPricing{price}

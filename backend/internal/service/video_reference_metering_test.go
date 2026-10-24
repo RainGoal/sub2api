@@ -33,6 +33,7 @@ func TestVideoReferenceMeteringAssignmentRejectsUnsupportedSalesAndPurchase(t *t
 				capability := videoReferenceMeteringCapability(videoprovider.ProviderZhiqiV1)
 				sales, purchase := videoReferenceMeteringPrices(side)
 				account := videoProtocolAccount(20, videoprovider.ProviderZhiqiV1, capability)
+				purchase.Models = []string{account.GetModelMapping()[capability.Model]}
 				account.Extra[AccountModelCostPricingExtraKey] = []ChannelModelPricing{purchase}
 				svc, key := videoTasksGatewayPricingService(sales)
 				repo := &videoTasksGatewayRepo{}
@@ -73,7 +74,9 @@ func TestVideoReferenceMeteringAdmissionSkipsZhiqiWhenJSONSupplierCanMeter(t *te
 			accounts := []Account{*videoProtocolAccount(20, videoprovider.ProviderZhiqiV1, videoReferenceMeteringCapability(videoprovider.ProviderZhiqiV1)),
 				*videoProtocolAccount(21, videoprovider.ProviderVideoTasksJSONV1, videoReferenceMeteringCapability(videoprovider.ProviderVideoTasksJSONV1))}
 			for i := range accounts {
-				accounts[i].Extra[AccountModelCostPricingExtraKey] = []ChannelModelPricing{purchase}
+				accountPurchase := purchase
+				accountPurchase.Models = []string{accounts[i].GetModelMapping()["studio-video"]}
+				accounts[i].Extra[AccountModelCostPricingExtraKey] = []ChannelModelPricing{accountPurchase}
 			}
 			svc, key := videoTasksGatewayPricingService(sales)
 			svc.accountRepo = &videoCatalogAccountRepo{accounts: accounts}
@@ -106,6 +109,7 @@ func TestVideoReferenceMeteringCatalogHidesOnlyUnsupportedReferenceContracts(t *
 			capability := videoReferenceMeteringCapability(videoprovider.ProviderZhiqiV1)
 			sales, purchase := videoReferenceMeteringPrices(side)
 			account := videoProtocolAccount(20, videoprovider.ProviderZhiqiV1, capability)
+			purchase.Models = []string{account.GetModelMapping()[capability.Model]}
 			account.Extra[AccountModelCostPricingExtraKey] = []ChannelModelPricing{purchase}
 			svc, key := videoTasksGatewayPricingService(sales)
 			svc.accountRepo = &videoCatalogAccountRepo{accounts: []Account{*account}}

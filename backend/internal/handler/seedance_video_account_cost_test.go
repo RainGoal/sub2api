@@ -67,6 +67,38 @@ func (r *seedanceCostRejectionTaskRepo) BindProviderTask(context.Context, string
 	return nil
 }
 
+type seedanceCostChangingPriceAccountRepo struct {
+	openAIImagesFailoverAccountRepo
+	tasks          *seedanceCostRejectionTaskRepo
+	admissionReads int
+}
+
+func (r *seedanceCostChangingPriceAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]service.Account, error) {
+	accounts, err := r.openAIImagesFailoverAccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
+	if err != nil || r.tasks.created > 0 {
+		return accounts, err
+	}
+	r.admissionReads++
+	// Simulate prices becoming unavailable after admission, preserving coverage
+	// of selected-slot cleanup and account switching after task reservation.
+	for i := range accounts {
+		original := accounts[i].Extra
+		accounts[i].Extra = make(map[string]any, len(original))
+		for key, value := range original {
+			accounts[i].Extra[key] = value
+		}
+		prices := append([]service.ChannelModelPricing(nil), original[service.AccountModelCostPricingExtraKey].([]service.ChannelModelPricing)...)
+		for j := range prices {
+			prices[j].Intervals = append([]service.PricingInterval(nil), prices[j].Intervals...)
+			for k := range prices[j].Intervals {
+				prices[j].Intervals[k].TierLabel = "720p"
+			}
+		}
+		accounts[i].Extra[service.AccountModelCostPricingExtraKey] = prices
+	}
+	return accounts, nil
+}
+
 type seedanceCostSuccessUpstream struct {
 	openAIImagesFailoverHTTPUpstream
 }
@@ -113,8 +145,12 @@ func runSeedanceAccountCostRequest(t *testing.T, accounts []service.Account, tas
 	concurrencyCache := &seedanceCostRejectionConcurrencyCache{}
 	concurrency := service.NewConcurrencyService(concurrencyCache)
 	upstream := &seedanceCostSuccessUpstream{}
+	accountRepo := &seedanceCostChangingPriceAccountRepo{
+		openAIImagesFailoverAccountRepo: openAIImagesFailoverAccountRepo{accounts: accounts},
+		tasks:                           tasks,
+	}
 	gateway := service.NewOpenAIGatewayService(
-		openAIImagesFailoverAccountRepo{accounts: accounts},
+		accountRepo,
 		nil, nil, nil, nil, nil, nil, cfg, nil, concurrency, &service.BillingService{},
 		nil, billingCache, upstream, nil, nil, nil, nil, channelService, nil, nil, nil,
 	)
@@ -134,6 +170,7 @@ func runSeedanceAccountCostRequest(t *testing.T, accounts []service.Account, tas
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
 
 	h.SeedanceVideoGeneration(c)
+	require.Positive(t, accountRepo.admissionReads, "the request must pass the initial purchase-price admission check")
 	cancel()
 	return recorder, concurrencyCache, upstream, gateway
 }

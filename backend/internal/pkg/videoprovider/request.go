@@ -117,6 +117,13 @@ func validateKnownModelRequest(request *CreateRequest, supported map[string]stri
 	if !ok {
 		return ModelSpec{}, "", fmt.Errorf("video model %q is not supported by this provider", request.RequestedModel)
 	}
+	if request.UpstreamModel != "" {
+		mapped, known := CanonicalModel(request.UpstreamModel)
+		if !known || mapped != canonical {
+			return ModelSpec{}, "", fmt.Errorf("video upstream model differs from the validated model")
+		}
+		upstreamModel = request.UpstreamModel
+	}
 	spec, _ := LookupModel(canonical)
 	if request.Duration < spec.MinDuration || request.Duration > spec.MaxDuration {
 		return ModelSpec{}, "", fmt.Errorf("duration for %s must be between %d and %d seconds", canonical, spec.MinDuration, spec.MaxDuration)
@@ -125,6 +132,29 @@ func validateKnownModelRequest(request *CreateRequest, supported map[string]stri
 		return ModelSpec{}, "", fmt.Errorf("resolution %q is not supported by %s", request.Resolution, canonical)
 	}
 	return spec, upstreamModel, nil
+}
+
+// ResolveLegacyUpstreamModel preserves each legacy driver's default wire name.
+// Account mappings may override that name after validating their target model.
+func ResolveLegacyUpstreamModel(provider ID, model string) (string, error) {
+	canonical, ok := CanonicalModel(model)
+	if !ok {
+		return "", fmt.Errorf("unsupported video model %q", model)
+	}
+	var upstream string
+	switch provider {
+	case ProviderBBLabuV1:
+		upstream = bblabuModels[canonical]
+	case ProviderFFLinkV1:
+		upstream = fflinkModels[canonical]
+		if canonical == ModelSeedance25 && strings.EqualFold(model, "bytedance/seedance-2.5") {
+			upstream = "bytedance/seedance-2.5"
+		}
+	}
+	if upstream == "" {
+		return "", fmt.Errorf("video model %q is not supported by this provider", model)
+	}
+	return upstream, nil
 }
 
 func canonicalResolution(value string) string {
