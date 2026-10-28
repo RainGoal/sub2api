@@ -503,25 +503,19 @@ func validateOpenAIImagesModel(model string) error {
 	return fmt.Errorf("images endpoint requires an image model, got %q", model)
 }
 
-// Keep this separate from isOpenAIImageGenerationModel: that predicate also
-// drives native Responses tool conversion, pricing and rate-limit policy.
-func isGeminiCompatibleImageModel(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(model, "gemini-") &&
-		(strings.HasSuffix(model, "-image") || strings.Contains(model, "-image-"))
-}
-
+// API-key Images passthrough accepts provider-defined model IDs. Keep native
+// Responses model detection separate for conversion, pricing and rate limits.
 func validateCompatibleImagesModel(model string) error {
-	if isGeminiCompatibleImageModel(model) {
-		return nil
+	if strings.TrimSpace(model) == "" {
+		return fmt.Errorf("images endpoint requires an image model")
 	}
-	return validateOpenAIImagesModel(model)
+	return nil
 }
 
 // RequiredCapabilityForModel also applies the API-key-only fence when channel
 // mapping introduces a compatible provider model after request parsing.
 func (req *OpenAIImagesRequest) RequiredCapabilityForModel(model string) OpenAIImagesCapability {
-	if isGeminiCompatibleImageModel(model) {
+	if strings.TrimSpace(model) != "" && !isOpenAIImageGenerationModel(model) {
 		return OpenAIImagesCapabilityAPIKey
 	}
 	return req.RequiredCapability
@@ -543,7 +537,7 @@ func classifyOpenAIImagesCapability(req *OpenAIImagesRequest) OpenAIImagesCapabi
 	if req == nil {
 		return OpenAIImagesCapabilityNative
 	}
-	if isGeminiCompatibleImageModel(req.Model) {
+	if !isOpenAIImageGenerationModel(req.Model) {
 		return OpenAIImagesCapabilityAPIKey
 	}
 	if req.ExplicitModel || req.ExplicitSize {
