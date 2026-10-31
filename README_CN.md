@@ -501,7 +501,7 @@ cd sub2api/deploy
 #### 前置条件
 
 - Go 1.21+
-- Node.js 18+
+- Node.js 22+（推荐 Node.js 24，与 CI 和 Docker 构建保持一致）
 - PostgreSQL 15+
 - Redis 7+
 
