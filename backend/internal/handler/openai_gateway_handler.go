@@ -1752,6 +1752,27 @@ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, 
 		h.anthropicStreamingAwareError(c, status, "api_error", failoverErr.ClientMessage, streamStarted)
 		return
 	}
+	if failoverErr.IsOpenAIConfiguredAccountModelError() && h.errorPassthroughService != nil {
+		if rule := h.errorPassthroughService.MatchRule("openai", failoverErr.StatusCode, failoverErr.ResponseBody); rule != nil {
+			status := failoverErr.StatusCode
+			if !rule.PassthroughCode && rule.ResponseCode != nil {
+				status = *rule.ResponseCode
+			}
+			message := service.ExtractUpstreamErrorMessage(failoverErr.ResponseBody)
+			service.SetOpsUpstreamError(c, failoverErr.StatusCode, message, "")
+			if !rule.PassthroughBody && rule.CustomMessage != nil {
+				message = *rule.CustomMessage
+			}
+			if rule.SkipMonitoring {
+				c.Set(service.OpsSkipPassthroughKey, true)
+			}
+			if service.HasOpenAIClientRequestedModel(c) {
+				message = service.OpenAIClientErrorMessage(status, failoverErr.ResponseBody, message)
+			}
+			h.anthropicStreamingAwareError(c, status, "upstream_error", message, streamStarted)
+			return
+		}
+	}
 	status, errType, errMsg := h.mapUpstreamError(failoverErr.StatusCode)
 	h.anthropicStreamingAwareError(c, status, errType, errMsg, streamStarted)
 }

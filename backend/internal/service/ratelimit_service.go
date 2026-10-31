@@ -2507,7 +2507,7 @@ const tempUnschedMessageMaxBytes = 2048
 // (account, model) pair via IsSchedulableForModelWithContext until the
 // cooldown expires, instead of re-selecting an account that can never serve
 // the model.
-func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string, statusCode int, responseBody []byte) bool {
+func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string, statusCode int, responseBody []byte, canonicalModel ...string) bool {
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
@@ -2517,7 +2517,8 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 	var cooldown time.Duration
 	var reason string
 	switch {
-	case isUpstreamModelNotFoundError(statusCode, responseBody):
+	case isUpstreamModelNotFoundError(statusCode, responseBody) ||
+		(account.IsOpenAICompatible() && isOpenAIConfiguredAccountModelError(statusCode, responseBody)):
 		cooldown, reason = upstreamModelNotFoundCooldown, upstreamModelNotFoundReason
 	case statusCode == http.StatusUnauthorized && account.Type == AccountTypeAPIKey && account.IsOpenAICompatible() && isOpenAICompatibleModelNotFoundBody(responseBody):
 		cooldown, reason = upstreamModelNotFoundCooldown, upstreamModelNotFound401Reason
@@ -2527,6 +2528,12 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 		return false
 	}
 	modelKey := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, requestedModel)
+	if account.IsOpenAICompatible() && isOpenAIConfiguredAccountModelError(statusCode, responseBody) {
+		// Gateway callers already supplied the account-mapped scheduling model.
+		if model := firstRequestedModel(canonicalModel); model != "" {
+			modelKey = model
+		}
+	}
 	if modelKey == "" {
 		return false
 	}

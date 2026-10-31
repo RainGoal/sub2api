@@ -279,6 +279,10 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 		isOpenAICompatibleModelNotFound400(upstreamBody) {
 		return true
 	}
+	if s != nil && s.accountRepo != nil && account != nil && account.IsOpenAICompatible() &&
+		isOpenAIConfiguredAccountModelError(statusCode, upstreamBody) {
+		return true
+	}
 	if s.shouldFailoverUpstreamError(statusCode) {
 		return true
 	}
@@ -359,6 +363,12 @@ func newOpenAIUpstreamFailoverError(
 		// retries are exhausted, but expose it as a retryable server_error.
 		failoverErr.ClientStatusCode = http.StatusServiceUnavailable
 		failoverErr.ClientMessage = openAICapacityShedClientMessage(upstreamMsg, responseBody)
+	}
+	// This provider cannot serve the model. Even an explicitly configured pool
+	// retry must move to another account rather than replay the same failure.
+	if isOpenAIConfiguredAccountModelError(statusCode, responseBody) {
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.RequestScopedTransient = false
 	}
 	return failoverErr
 }
