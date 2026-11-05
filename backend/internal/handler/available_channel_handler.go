@@ -69,17 +69,21 @@ type userAvailableGroup struct {
 
 // userSupportedModelPricing 用户可见的定价字段白名单。
 type userSupportedModelPricing struct {
-	BillingMode                string                   `json:"billing_mode"`
-	InputPrice                 *float64                 `json:"input_price"`
-	OutputPrice                *float64                 `json:"output_price"`
-	CacheWritePrice            *float64                 `json:"cache_write_price"`
-	CacheWrite1hPrice          *float64                 `json:"cache_write_1h_price"`
-	CacheReadPrice             *float64                 `json:"cache_read_price"`
-	ReasoningEffortMultipliers map[string]float64       `json:"reasoning_effort_multipliers,omitempty"`
-	ImageInputPrice            *float64                 `json:"image_input_price"`
-	ImageOutputPrice           *float64                 `json:"image_output_price"`
-	PerRequestPrice            *float64                 `json:"per_request_price"`
-	Intervals                  []userPricingIntervalDTO `json:"intervals"`
+	BillingMode                string                      `json:"billing_mode"`
+	VideoPricingVersion        int                         `json:"video_pricing_version,omitempty"`
+	VideoBillingUnit           service.VideoBillingUnit    `json:"video_billing_unit,omitempty"`
+	VideoQuantityPolicy        service.VideoQuantityPolicy `json:"video_quantity_policy,omitempty"`
+	VideoMaxBillableSeconds    float64                     `json:"video_max_billable_seconds,omitempty"`
+	InputPrice                 *float64                    `json:"input_price"`
+	OutputPrice                *float64                    `json:"output_price"`
+	CacheWritePrice            *float64                    `json:"cache_write_price"`
+	CacheWrite1hPrice          *float64                    `json:"cache_write_1h_price"`
+	CacheReadPrice             *float64                    `json:"cache_read_price"`
+	ReasoningEffortMultipliers map[string]float64          `json:"reasoning_effort_multipliers,omitempty"`
+	ImageInputPrice            *float64                    `json:"image_input_price"`
+	ImageOutputPrice           *float64                    `json:"image_output_price"`
+	PerRequestPrice            *float64                    `json:"per_request_price"`
+	Intervals                  []userPricingIntervalDTO    `json:"intervals"`
 }
 
 // userPricingIntervalDTO 定价区间白名单（去掉内部 ID、SortOrder 等前端不渲染的字段）。
@@ -344,7 +348,7 @@ func toUserPricing(p *service.ChannelModelPricing) *userSupportedModelPricing {
 	if billingMode == "" {
 		billingMode = string(service.BillingModeToken)
 	}
-	return &userSupportedModelPricing{
+	out := &userSupportedModelPricing{
 		BillingMode:                billingMode,
 		InputPrice:                 p.InputPrice,
 		OutputPrice:                p.OutputPrice,
@@ -357,4 +361,16 @@ func toUserPricing(p *service.ChannelModelPricing) *userSupportedModelPricing {
 		PerRequestPrice:            p.PerRequestPrice,
 		Intervals:                  intervals,
 	}
+	if p.BillingMode == service.BillingModeVideo {
+		out.VideoPricingVersion = p.VideoPricingVersion
+		out.VideoBillingUnit = p.VideoBillingUnit
+		out.VideoQuantityPolicy = p.VideoQuantityPolicy
+		out.VideoMaxBillableSeconds = p.VideoMaxBillableSeconds
+		// Unversioned Seedance sales pricing is USD/second. Emit this explicitly
+		// so clients can distinguish it from an older server omitting unit metadata.
+		if p.Platform == service.PlatformSeedance && p.VideoPricingVersion == 0 {
+			out.VideoBillingUnit = service.VideoBillingPerSecond
+		}
+	}
+	return out
 }
