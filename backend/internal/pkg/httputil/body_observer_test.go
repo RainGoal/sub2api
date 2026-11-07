@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -53,5 +54,37 @@ func TestRequestBodyObserverRejectionPropagatesWithoutMutatingRequest(t *testing
 	}
 	if req.ContentLength != int64(len(samplePayload)) {
 		t.Fatalf("request content length changed: %d", req.ContentLength)
+	}
+}
+
+func TestRequestBodyObserverRejectionReleasesOwnedMemory(t *testing.T) {
+	for _, encoding := range []string{"", "gzip"} {
+		t.Run(encoding, func(t *testing.T) {
+			payload := []byte(samplePayload)
+			if encoding == "gzip" {
+				var compressed bytes.Buffer
+				writer := gzip.NewWriter(&compressed)
+				if _, err := writer.Write(payload); err != nil {
+					t.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				payload = compressed.Bytes()
+			}
+			req := httptest.NewRequest("POST", "/", bytes.NewReader(payload))
+			req.Header.Set("Content-Encoding", encoding)
+			budget := NewBodyMemoryBudget(4096)
+			ctx, release := WithRequestBodyMemoryBudget(req.Context(), budget)
+			defer release()
+			req = req.WithContext(WithRequestBodyObserver(ctx, func([]byte) error { return ErrBodyObserverRejected }))
+			body, err := ReadRequestBodyWithPrealloc(req)
+			if !errors.Is(err, ErrBodyObserverRejected) || body != nil {
+				t.Fatalf("rejected read = %q, %v", body, err)
+			}
+			if budget.used != 0 {
+				t.Fatalf("rejection retained %d bytes", budget.used)
+			}
+		})
 	}
 }

@@ -86,14 +86,11 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 	if endpoint == service.SeedanceVideoEndpointCreate {
 		body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
-			if requestAuditReadRejected(err) {
+			if handleRequestBodyReadError(c, reqLog, err) {
 				return
 			}
-			if maxErr, ok := extractMaxBytesError(err); ok {
-				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-				return
-			}
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+			status, message := requestBodyReadFailure(reqLog, c.Request, err)
+			h.errorResponse(c, status, "invalid_request_error", message)
 			return
 		}
 		createRequest, body, requestInfo, err = h.gatewayService.PrepareVideoRequestForKey(c.Request.Context(), apiKey, body)
@@ -936,6 +933,9 @@ func recordSeedanceVideoUsage(c *gin.Context, h *OpenAIGatewayHandler, reqLog *z
 	result.ResponseID = pending.PublicID()
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+	userAgent := c.GetHeader("User-Agent")
+	clientIP := ip.GetClientIP(c)
+	sessionID := service.ExtractClientSessionID(c)
 	channelUsageFields := service.ChannelUsageFields{
 		OriginalModel:      clientRequestedModel(c, result.Model),
 		ChannelMappedModel: result.Model,
@@ -946,12 +946,12 @@ func recordSeedanceVideoUsage(c *gin.Context, h *OpenAIGatewayHandler, reqLog *z
 		if err := h.gatewayService.RecordSeedanceVideoUsage(ctx, pending, &service.OpenAIRecordUsageInput{
 			Result: result, APIKey: apiKey, User: apiKey.User, Account: account,
 			Subscription: subscription, InboundEndpoint: inboundEndpoint, UpstreamEndpoint: upstreamEndpoint,
-			UserAgent: c.GetHeader("User-Agent"), IPAddress: ip.GetClientIP(c),
+			UserAgent: userAgent, IPAddress: clientIP,
 			RequestPayloadHash: pending.RequestPayloadHash, CostOverride: billing.Cost,
 			RateMultiplierOverride: &rateMultiplier, BalanceHoldID: pending.HoldID, BalanceHoldAmount: pending.HoldAmount,
 			SubscriptionBillingOverride: &subscriptionBilling, APIKeyService: h.apiKeyService,
 			QuotaPlatform: service.PlatformSeedance,
-			SessionID:     service.ExtractClientSessionID(c), ChannelUsageFields: channelUsageFields,
+			SessionID:     sessionID, ChannelUsageFields: channelUsageFields,
 		}); err != nil {
 			if releaseErr := h.gatewayService.RetrySeedanceVideoBillingWithLease(ctx, pending, "settlement retry"); releaseErr != nil {
 				reqLog.Warn("seedance_video.billing_claim_release_failed", zap.Error(releaseErr))

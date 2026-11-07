@@ -27,7 +27,7 @@ func TestLockAndMergeAccountProbeExtraPreservesCostPricingWithOpenCodeUsage(t *t
 	mock.ExpectQuery(`(?s)SELECT.*extra -> 'model_cost_pricing'.*FOR NO KEY UPDATE`).
 		WithArgs(account.ID, account.Platform, account.Type, string(credentials), nil).
 		WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
-			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, true, "true", openCodeGoSnapshotJSON(), pricing))
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, true, "true", openCodeGoSnapshotJSON(), pricing, nil, nil))
 
 	got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestLockAndMergeAccountProbeExtraPreservesModelCostPricing(t *testing.T) {
 			mock.ExpectQuery(`(?s)SELECT.*extra -> 'model_cost_pricing'.*FOR NO KEY UPDATE`).
 				WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{}`, nil).
 				WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
-					AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, tt.database))
+					AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, tt.database, nil, nil))
 			account := &service.Account{ID: 27, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Extra: tt.input}
 			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
 			require.NoError(t, err)
