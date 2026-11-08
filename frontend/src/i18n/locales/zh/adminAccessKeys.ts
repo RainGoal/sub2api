@@ -278,6 +278,22 @@ export default {
       "label": "创建、发布与修改公告",
       "category": "内容"
     },
+    "docs_dread": {
+      "label": "读取文档目录与草稿",
+      "category": "内容"
+    },
+    "docs_dwrite": {
+      "label": "编辑文档草稿与目录",
+      "category": "内容"
+    },
+    "docs_dpublish": {
+      "label": "发布与下线文档",
+      "category": "内容"
+    },
+    "docs_ddelete": {
+      "label": "删除文档与分组",
+      "category": "内容"
+    },
     "announcements_ddelete": {
       "label": "删除公告",
       "category": "内容"

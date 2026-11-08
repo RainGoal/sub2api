@@ -597,6 +597,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/docs',
+    name: 'AdminDocs',
+    component: () => import('@/views/admin/DocsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Documentation', titleKey: 'docsAdmin.title', descriptionKey: 'docsAdmin.description' }
+  },
+  {
+    path: '/admin/docs/:id',
+    name: 'AdminDocsEditor',
+    component: () => import('@/views/admin/DocsEditorView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Edit article', titleKey: 'docsAdmin.editPage', descriptionKey: 'docsAdmin.description' }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

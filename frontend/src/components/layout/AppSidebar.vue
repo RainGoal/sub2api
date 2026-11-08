@@ -803,6 +803,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/video-task-reviews', label: t('admin.videoTaskReviews.title'), icon: ShieldIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
+    { path: '/admin/docs', label: t('docsAdmin.title'), icon: FolderIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {
       path: '/admin/security-audit',

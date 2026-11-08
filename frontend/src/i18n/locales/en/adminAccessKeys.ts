@@ -278,6 +278,22 @@ export default {
       "label": "Create, publish, and edit announcements",
       "category": "Content"
     },
+    "docs_dread": {
+      "label": "Read documentation navigation and drafts",
+      "category": "Content"
+    },
+    "docs_dwrite": {
+      "label": "Edit documentation drafts and navigation",
+      "category": "Content"
+    },
+    "docs_dpublish": {
+      "label": "Publish and unpublish documentation",
+      "category": "Content"
+    },
+    "docs_ddelete": {
+      "label": "Delete documentation and groups",
+      "category": "Content"
+    },
     "announcements_ddelete": {
       "label": "Delete announcements",
       "category": "Content"

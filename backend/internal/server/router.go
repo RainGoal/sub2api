@@ -132,6 +132,7 @@ func registerRoutes(
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService, panelRateLimiter)
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService, panelRateLimiter, activeConnectionService)
 	routes.RegisterModelPlazaRoutes(v1, h, optionalJWTAuth, settingService, panelRateLimiter)
+	routes.RegisterDocsRoutes(v1, h, panelRateLimiter)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService, panelRateLimiter)
 	routes.RegisterMCPRoutes(v1, h, auditLog, stepUpAuth, settingService, panelRateLimiter, cfg.CORS.AllowedOrigins, redisClient)
 	routes.RegisterMCPOAuthRoutes(r, v1, h, redisClient)
