@@ -233,6 +233,10 @@ func TestShouldStripOpenAIResponsesInputItemID_Reasoning(t *testing.T) {
 }
 
 func TestSanitizeOpenAIResponsesInputItemIDs_AllocationGrowthIsLinear(t *testing.T) {
+	if runAllocationTestInSubprocess(t) {
+		return
+	}
+
 	makeBody := func(itemCount int) []byte {
 		items := make([]string, itemCount)
 		for i := range items {

@@ -31,6 +31,10 @@ func buildReplayTurnPayload(turn, itemBytes int) []byte {
 // 正文而非逐轮深拷贝，否则累计分配为 O(T²)（本场景 >160MB）；共享实现的累计
 // 分配与客户端重发总量同阶（~85MB payload 本身之外仅头数组与解析开销）。
 func TestOpenAIWSReplayStateBuildAllocationBounded(t *testing.T) {
+	if runAllocationTestInSubprocess(t) {
+		return
+	}
+
 	const (
 		turns     = 128
 		itemBytes = 10 * 1024
