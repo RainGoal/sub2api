@@ -1087,12 +1087,16 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 
-	if err := s.groupRepo.Update(ctx, group); err != nil {
+	grantedUserIDs, err := s.saveGroupWithAccessGrants(ctx, group, input.GrantUserIDs)
+	if err != nil {
 		return nil, err
 	}
 
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
+		for _, userID := range grantedUserIDs {
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+		}
 	}
 
 	// 平台变了就失效渠道缓存：该缓存持有 groupID → platform，而渠道定价 / 模型映射 /

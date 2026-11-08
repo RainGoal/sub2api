@@ -97,7 +97,8 @@ func (r *userGroupRateRepository) GetByUserIDs(ctx context.Context, userIDs []in
 // GetByGroupID 获取指定分组下所有用户的专属配置（rate 与 rpm_override 任一非 NULL 即返回）
 func (r *userGroupRateRepository) GetByGroupID(ctx context.Context, groupID int64) ([]service.UserGroupRateEntry, error) {
 	query := `
-		SELECT ugr.user_id, u.username, u.email, COALESCE(u.notes, ''), u.status, ugr.rate_multiplier, ugr.rpm_override
+		SELECT ugr.user_id, u.username, u.email, COALESCE(u.notes, ''), u.status, ugr.rate_multiplier, ugr.rpm_override,
+			EXISTS (SELECT 1 FROM user_allowed_groups uag WHERE uag.user_id = ugr.user_id AND uag.group_id = ugr.group_id)
 		FROM user_group_rate_multipliers ugr
 		JOIN users u ON u.id = ugr.user_id AND u.deleted_at IS NULL
 		WHERE ugr.group_id = $1
@@ -114,7 +115,7 @@ func (r *userGroupRateRepository) GetByGroupID(ctx context.Context, groupID int6
 		var entry service.UserGroupRateEntry
 		var rate sql.NullFloat64
 		var rpm sql.NullInt32
-		if err := rows.Scan(&entry.UserID, &entry.UserName, &entry.UserEmail, &entry.UserNotes, &entry.UserStatus, &rate, &rpm); err != nil {
+		if err := rows.Scan(&entry.UserID, &entry.UserName, &entry.UserEmail, &entry.UserNotes, &entry.UserStatus, &rate, &rpm, &entry.HasExplicitAccess); err != nil {
 			return nil, err
 		}
 		if rate.Valid {

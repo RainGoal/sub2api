@@ -338,6 +338,7 @@ export interface GroupRateMultiplierEntry {
   user_status: string
   rate_multiplier?: number | null
   rpm_override?: number | null
+  has_explicit_access?: boolean
 }
 
 /**

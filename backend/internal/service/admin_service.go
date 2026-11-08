@@ -399,6 +399,8 @@ type UpdateGroupInput struct {
 	ProfitSafetyBuffer   *float64
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
 	CopyAccountsFromGroupIDs []int64
+	// GrantUserIDs 仅增量授予最终专属标准分组的访问权限；空列表不修改授权。
+	GrantUserIDs []int64
 }
 
 type CreateAccountInput struct {

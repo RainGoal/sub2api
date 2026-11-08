@@ -2345,7 +2345,7 @@
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <Toggle v-model="editForm.is_exclusive" />
+            <Toggle v-model="editForm.is_exclusive" data-testid="edit-group-exclusive" />
             <span class="text-sm text-gray-500 dark:text-gray-400">
               {{
                 editForm.is_exclusive
@@ -2355,6 +2355,15 @@
             </span>
           </div>
         </div>
+        <GroupAccessUsersSelector
+          v-if="editGroupAccessEnabled"
+          :key="editingGroup.id"
+          :group-id="editingGroup.id"
+          :select-by-default="!editingGroup.is_exclusive"
+          :disabled="submitting"
+          @selection-change="editGrantUserIds = $event"
+          @ready-change="editGroupAccessReady = $event"
+        />
         <div>
           <label class="input-label">{{ t("admin.groups.form.status") }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
@@ -3769,7 +3778,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting"
+            :disabled="submitting || (editGroupAccessEnabled && !editGroupAccessReady)"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -3793,7 +3802,7 @@
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
-            {{ submitting ? t("admin.groups.updating") : t("common.update") }}
+            {{ submitting ? t("admin.groups.updating") : editGroupAccessEnabled ? t("admin.groups.accessUsers.saveAndGrant") : t("common.update") }}
           </button>
         </div>
       </template>
@@ -4340,6 +4349,7 @@ import { platformLabel } from "@/utils/platformColors";
 import Icon from "@/components/icons/Icon.vue";
 import GroupI18nField from "@/components/admin/group/GroupI18nField.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
+import GroupAccessUsersSelector from "@/components/admin/group/GroupAccessUsersSelector.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
@@ -4877,6 +4887,12 @@ const showSortModal = ref(false);
 const submitting = ref(false);
 const sortSubmitting = ref(false);
 const editingGroup = ref<AdminGroup | null>(null);
+const editGrantUserIds = ref<number[]>([]);
+const editGroupAccessReady = ref(false);
+const editGroupAccessEnabled = computed(() =>
+  !authStore.isSimpleMode && showEditModal.value && editingGroup.value !== null &&
+  editForm.is_exclusive && editForm.subscription_type === "standard",
+);
 const deletingGroup = ref<AdminGroup | null>(null);
 const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
@@ -6109,6 +6125,8 @@ const handleCreateGroup = async () => {
 };
 
 const handleEdit = async (group: AdminGroup) => {
+  editGrantUserIds.value = [];
+  editGroupAccessReady.value = false;
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -6244,6 +6262,8 @@ const closeEditModal = () => {
   clearAllAccountSearchState();
   showEditModal.value = false;
   editingGroup.value = null;
+  editGrantUserIds.value = [];
+  editGroupAccessReady.value = false;
   editForm.max_reasoning_effort = "";
   editForm.max_reasoning_effort_over_limit = reasoningEffortOverLimitDowngrade;
   editForm.reasoning_effort_mappings = [];
@@ -6281,7 +6301,11 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
-  if (!editingGroup.value) return;
+  if (!editingGroup.value || submitting.value) return;
+  if (editGroupAccessEnabled.value && !editGroupAccessReady.value) {
+    appStore.showError(t("admin.groups.accessUsers.notReady"));
+    return;
+  }
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -6321,6 +6345,7 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
+      ...(editGroupAccessEnabled.value ? { grant_user_ids: [...editGrantUserIds.value] } : {}),
       force_openai_fast: normalizeGroupOpenAIFast(
         editForm.platform,
         editForm.force_openai_fast,

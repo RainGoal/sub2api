@@ -5,13 +5,14 @@ import "context"
 // UserGroupRateEntry 分组下用户专属倍率/RPM 条目。
 // RateMultiplier 与 RPMOverride 均为指针以支持"未设置"语义（NULL）。
 type UserGroupRateEntry struct {
-	UserID         int64    `json:"user_id"`
-	UserName       string   `json:"user_name"`
-	UserEmail      string   `json:"user_email"`
-	UserNotes      string   `json:"user_notes"`
-	UserStatus     string   `json:"user_status"`
-	RateMultiplier *float64 `json:"rate_multiplier,omitempty"`
-	RPMOverride    *int     `json:"rpm_override,omitempty"`
+	UserID            int64    `json:"user_id"`
+	UserName          string   `json:"user_name"`
+	UserEmail         string   `json:"user_email"`
+	UserNotes         string   `json:"user_notes"`
+	UserStatus        string   `json:"user_status"`
+	HasExplicitAccess bool     `json:"has_explicit_access"`
+	RateMultiplier    *float64 `json:"rate_multiplier,omitempty"`
+	RPMOverride       *int     `json:"rpm_override,omitempty"`
 }
 
 // GroupRateMultiplierInput 批量设置分组倍率的输入条目
