@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 )
@@ -12,12 +14,21 @@ func configuredMinOutputTokens(cfg *config.Config) int {
 	return apicompat.DefaultMinMaxOutputTokens
 }
 
-func chatCompletionsToResponses(cfg *config.Config, req *apicompat.ChatCompletionsRequest) (*apicompat.ResponsesRequest, error) {
-	return apicompat.ChatCompletionsToResponsesWithMinOutputTokens(req, configuredMinOutputTokens(cfg))
+func chatCompletionsToResponses(cfg *config.Config, req *apicompat.ChatCompletionsRequest, contexts ...context.Context) (*apicompat.ResponsesRequest, error) {
+	return apicompat.ChatCompletionsToResponsesWithMinOutputTokens(req, requestMinOutputTokens(cfg, contexts...))
 }
 
-func anthropicToResponses(cfg *config.Config, req *apicompat.AnthropicRequest) (*apicompat.ResponsesRequest, error) {
-	return apicompat.AnthropicToResponsesWithMinOutputTokens(req, configuredMinOutputTokens(cfg))
+func anthropicToResponses(cfg *config.Config, req *apicompat.AnthropicRequest, contexts ...context.Context) (*apicompat.ResponsesRequest, error) {
+	return apicompat.AnthropicToResponsesWithMinOutputTokens(req, requestMinOutputTokens(cfg, contexts...))
+}
+
+func requestMinOutputTokens(cfg *config.Config, contexts ...context.Context) int {
+	for _, ctx := range contexts {
+		if IsModelPlazaMonitorProbe(ctx) {
+			return 1
+		}
+	}
+	return configuredMinOutputTokens(cfg)
 }
 
 func settingServiceConfig(settingService *SettingService) *config.Config {

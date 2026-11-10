@@ -42,6 +42,9 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 }
 
 func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	if IsModelPlazaMonitorProbe(ctx) {
+		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Low-budget monitoring cannot use an upstream that requires extra identity instructions")
+	}
 	beginUpstreamResponseModelObservation(c)
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}

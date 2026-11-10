@@ -73,7 +73,7 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 	}
 
-	responsesRequest, err := chatCompletionsToResponses(settingServiceConfig(s.settingService), &request)
+	responsesRequest, err := chatCompletionsToResponses(settingServiceConfig(s.settingService), &request, ctx)
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -251,6 +251,9 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 	account *Account,
 	request antigravityCompatRequest,
 ) (*antigravityCompatUpstreamCall, error) {
+	if IsModelPlazaMonitorProbe(ctx) {
+		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Low-budget monitoring cannot use an upstream that requires extra identity instructions")
+	}
 	var claudeRequest antigravity.ClaudeRequest
 	if json.Unmarshal(request.claudeBody, &claudeRequest) != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request body")

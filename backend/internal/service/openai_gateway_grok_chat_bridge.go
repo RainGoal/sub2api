@@ -541,7 +541,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 
-	responsesReq, err := chatCompletionsToResponses(s.cfg, &chatReq)
+	responsesReq, err := chatCompletionsToResponses(s.cfg, &chatReq, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("convert grok chat completions to responses: %w", err)
 	}

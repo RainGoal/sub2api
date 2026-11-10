@@ -7343,6 +7343,7 @@
                 class="input font-mono text-sm"
               ></textarea>
             </div>
+            <ModelPlazaMonitorSettings />
           </div>
         </div>
 
@@ -9004,6 +9005,7 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import CommunityContactSettings from "@/views/admin/settings/CommunityContactSettings.vue";
+import ModelPlazaMonitorSettings from "@/components/admin/settings/ModelPlazaMonitorSettings.vue";
 import {
   normalizeCommunityContact,
   validateCommunityContact,

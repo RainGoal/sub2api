@@ -408,6 +408,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if service.VerifyChannelMonitorProbeHeader(c.GetHeader(service.ChannelMonitorProbeHeaderName), apiKey.Key, time.Now()) {
 		c.Request = c.Request.WithContext(service.WithChannelMonitorProbe(c.Request.Context()))
 	}
+	service.ApplyModelPlazaMonitorProbe(c, apiKey.Key)
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -1242,6 +1243,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	if service.VerifyChannelMonitorProbeHeader(c.GetHeader(service.ChannelMonitorProbeHeaderName), apiKey.Key, time.Now()) {
 		c.Request = c.Request.WithContext(service.WithChannelMonitorProbe(c.Request.Context()))
 	}
+	service.ApplyModelPlazaMonitorProbe(c, apiKey.Key)
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {

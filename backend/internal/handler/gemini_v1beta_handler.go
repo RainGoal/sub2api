@@ -326,6 +326,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusUnauthorized, "Invalid API key")
 		return
 	}
+	service.ApplyModelPlazaMonitorProbe(c, apiKey.Key)
 	authSubject, ok := middleware.GetAuthSubjectFromContext(c)
 	if !ok {
 		googleError(c, http.StatusInternalServerError, "User context not found")

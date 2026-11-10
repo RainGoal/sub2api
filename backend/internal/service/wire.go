@@ -992,6 +992,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
 	NewModelPlazaService,
+	ProvideModelPlazaMonitorService,
 	NewContentModerationService,
 	NewAffiliateService,
 	ProvideSalesService,
@@ -1039,6 +1040,13 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.SetLeaderLock(lockCache, db)
+	svc.Start()
+	return svc
+}
+
+// ProvideModelPlazaMonitorService starts the independently configured plaza probes.
+func ProvideModelPlazaMonitorService(repo ModelPlazaMonitorRepository, settings SettingRepository, plaza *ModelPlazaService, keys APIKeyRepository, cfg *config.Config) *ModelPlazaMonitorService {
+	svc := NewModelPlazaMonitorService(repo, settings, plaza, keys, cfg)
 	svc.Start()
 	return svc
 }

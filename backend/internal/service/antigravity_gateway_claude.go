@@ -28,6 +28,9 @@ import (
 //	          ├─ 成功 → 正常返回
 //	          └─ 失败 → 设置模型限流 + 清除粘性绑定 → 切换账号
 func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte, isStickySession bool) (*ForwardResult, error) {
+	if IsModelPlazaMonitorProbe(ctx) {
+		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Low-budget monitoring cannot use an upstream that requires extra identity instructions")
+	}
 	beginUpstreamResponseModelObservation(c)
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
@@ -289,7 +292,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		// Budget 整流：检测 budget_tokens 约束错误并自动修正重试
 		if resp.StatusCode == http.StatusBadRequest && respBody != nil && !isSignatureRelatedError(respBody) {
 			errMsg := strings.TrimSpace(extractAntigravityErrorMessage(respBody))
-			if isThinkingBudgetConstraintError(errMsg) && s.settingService.IsBudgetRectifierEnabled(ctx) {
+			if !IsModelPlazaMonitorProbe(ctx) && isThinkingBudgetConstraintError(errMsg) && s.settingService.IsBudgetRectifierEnabled(ctx) {
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(account),
 					ProxyName:          opsUpstreamProxyName(account),

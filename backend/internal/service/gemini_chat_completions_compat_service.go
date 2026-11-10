@@ -50,7 +50,7 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		}
 	}
 
-	responsesReq, err := chatCompletionsToResponses(s.cfg, &ccReq)
+	responsesReq, err := chatCompletionsToResponses(s.cfg, &ccReq, ctx)
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}

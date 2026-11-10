@@ -91,6 +91,7 @@ var ProviderSet = wire.NewSet(
 	NewUsageCleanupRepository,
 	NewDashboardAggregationRepository,
 	NewSettingRepository,
+	NewModelPlazaMonitorRepository,
 	NewUpstreamBalanceRepository,
 	NewUpstreamBalanceHTTPUpstream,
 	NewScopedAdminKeyRepository,

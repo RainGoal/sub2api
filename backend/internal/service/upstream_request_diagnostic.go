@@ -129,7 +129,8 @@ func isDiagnosticSensitiveName(name string) bool {
 		strings.Contains(lower, "token") ||
 		strings.Contains(lower, "secret") ||
 		strings.Contains(lower, "cookie") ||
-		strings.EqualFold(lower, strings.ToLower(ChannelMonitorProbeHeaderName))
+		strings.EqualFold(lower, strings.ToLower(ChannelMonitorProbeHeaderName)) ||
+		strings.EqualFold(lower, strings.ToLower(ModelPlazaMonitorProbeHeaderName))
 }
 
 func truncateDiagnosticPreview(value string) string {

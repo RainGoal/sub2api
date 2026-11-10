@@ -52,33 +52,34 @@ type AdminHandlers struct {
 
 // Handlers contains all HTTP handlers
 type Handlers struct {
-	Auth             *AuthHandler
-	User             *UserHandler
-	MCPOAuth         *MCPOAuthHandler
-	APIKey           *APIKeyHandler
-	Usage            *UsageHandler
-	Redeem           *RedeemHandler
-	Subscription     *SubscriptionHandler
-	Announcement     *AnnouncementHandler
-	Docs             *DocsHandler
-	ChannelMonitor   *ChannelMonitorUserHandler
-	ChannelMonitorV2 *ChannelMonitorV2Handler
-	Admin            *AdminHandlers
-	RequestAudit     *requestaudit.Manager
-	Gateway          *GatewayHandler
-	OpenAIGateway    *OpenAIGatewayHandler
-	Setting          *SettingHandler
-	Totp             *TotpHandler
-	Passkey          *PasskeyHandler
-	Payment          *PaymentHandler
-	PaymentWebhook   *PaymentWebhookHandler
-	AvailableChannel *AvailableChannelHandler
-	ModelPlaza       *ModelPlazaHandler
-	AsyncImage       *AsyncImageHandler
-	BatchImage       *BatchImageHandler
-	VideoAsset       *VideoAssetHandler
-	Studio           *StudioHandler
-	Sales            *SalesHandler
+	Auth              *AuthHandler
+	User              *UserHandler
+	MCPOAuth          *MCPOAuthHandler
+	APIKey            *APIKeyHandler
+	Usage             *UsageHandler
+	Redeem            *RedeemHandler
+	Subscription      *SubscriptionHandler
+	Announcement      *AnnouncementHandler
+	Docs              *DocsHandler
+	ChannelMonitor    *ChannelMonitorUserHandler
+	ChannelMonitorV2  *ChannelMonitorV2Handler
+	Admin             *AdminHandlers
+	RequestAudit      *requestaudit.Manager
+	Gateway           *GatewayHandler
+	OpenAIGateway     *OpenAIGatewayHandler
+	Setting           *SettingHandler
+	Totp              *TotpHandler
+	Passkey           *PasskeyHandler
+	Payment           *PaymentHandler
+	PaymentWebhook    *PaymentWebhookHandler
+	AvailableChannel  *AvailableChannelHandler
+	ModelPlaza        *ModelPlazaHandler
+	ModelPlazaMonitor *ModelPlazaMonitorHandler
+	AsyncImage        *AsyncImageHandler
+	BatchImage        *BatchImageHandler
+	VideoAsset        *VideoAssetHandler
+	Studio            *StudioHandler
+	Sales             *SalesHandler
 }
 
 // BuildInfo contains build-time information

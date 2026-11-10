@@ -8,11 +8,12 @@ import (
 
 func TestUpstreamRequestDiagnosticRedactsSecretsAndKeepsClaudeIdentity(t *testing.T) {
 	headers := http.Header{
-		"User-Agent":                  {"claude-cli/2.1.220 (external, cli)"},
-		"Anthropic-Beta":              {"claude-code-20250219"},
-		"X-Api-Key":                   {"sk-ant-secret-value"},
-		"Authorization":               {"Bearer secret-value"},
-		ChannelMonitorProbeHeaderName: {"v1.timestamp.signature"},
+		"User-Agent":                     {"claude-cli/2.1.220 (external, cli)"},
+		"Anthropic-Beta":                 {"claude-code-20250219"},
+		"X-Api-Key":                      {"sk-ant-secret-value"},
+		"Authorization":                  {"Bearer secret-value"},
+		ChannelMonitorProbeHeaderName:    {"v1.timestamp.signature"},
+		ModelPlazaMonitorProbeHeaderName: {"v1.timestamp.plaza-signature"},
 	}
 	body := []byte(`{"model":"claude-test","api_key":"body-secret","messages":[{"role":"user","content":"hi"}]}`)
 
@@ -21,7 +22,7 @@ func TestUpstreamRequestDiagnosticRedactsSecretsAndKeepsClaudeIdentity(t *testin
 	gotURL := diagnosticURL("https://example.com/v1/messages?beta=true&api_key=query-secret")
 	combined := gotHeaders + gotBody + gotURL
 
-	for _, secret := range []string{"sk-ant-secret-value", "Bearer secret-value", "v1.timestamp.signature", "body-secret", "query-secret"} {
+	for _, secret := range []string{"sk-ant-secret-value", "Bearer secret-value", "v1.timestamp.signature", "v1.timestamp.plaza-signature", "body-secret", "query-secret"} {
 		if strings.Contains(combined, secret) {
 			t.Fatalf("diagnostic output leaked %q: %s", secret, combined)
 		}

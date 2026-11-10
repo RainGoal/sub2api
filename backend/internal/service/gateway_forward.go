@@ -221,6 +221,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		systemRaw, _ := parsed.SystemValue()
 		systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 		if systemPromptInjectionEnabled {
+			if IsModelPlazaMonitorProbe(ctx) {
+				err := errors.New("low-budget monitoring cannot use an upstream that requires extra identity instructions")
+				c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+				return nil, err
+			}
 			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
 				return nil, err
 			}
@@ -561,7 +566,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				}
 				// 不是签名错误（或整流器已关闭），继续检查 budget 约束
 				errMsg := extractUpstreamErrorMessage(respBody)
-				if isThinkingBudgetConstraintError(errMsg) && s.settingService.IsBudgetRectifierEnabled(ctx) {
+				if !IsModelPlazaMonitorProbe(ctx) && isThinkingBudgetConstraintError(errMsg) && s.settingService.IsBudgetRectifierEnabled(ctx) {
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						ProxyID:            opsUpstreamProxyID(account),
 						ProxyName:          opsUpstreamProxyName(account),

@@ -26,5 +26,8 @@ func RegisterModelPlazaRoutes(
 	plaza.Use(middleware.BackendModeUserGuard(settingService))
 	{
 		plaza.GET("", h.ModelPlaza.Get)
+		if h.ModelPlazaMonitor != nil {
+			plaza.GET("/status", h.ModelPlazaMonitor.Status)
+		}
 	}
 }

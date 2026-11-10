@@ -160,7 +160,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
 	anthropicReq.Model = upstreamModel
-	responsesReq, err := anthropicToResponses(s.cfg, &anthropicReq)
+	responsesReq, err := anthropicToResponses(s.cfg, &anthropicReq, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}

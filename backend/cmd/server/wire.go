@@ -128,6 +128,7 @@ func provideCleanup(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	channelMonitorV2Aggregator *service.ChannelMonitorV2Aggregator,
+	modelPlazaMonitor *service.ModelPlazaMonitorService,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	upstreamBalance *service.UpstreamBalanceService,
@@ -399,6 +400,12 @@ func provideCleanup(
 			{"ChannelMonitorV2Aggregator", func() error {
 				if channelMonitorV2Aggregator != nil {
 					channelMonitorV2Aggregator.Stop()
+				}
+				return nil
+			}},
+			{"ModelPlazaMonitor", func() error {
+				if modelPlazaMonitor != nil {
+					modelPlazaMonitor.Stop()
 				}
 				return nil
 			}},
