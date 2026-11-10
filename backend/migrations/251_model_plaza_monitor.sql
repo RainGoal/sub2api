@@ -1,6 +1,6 @@
 -- Independent opt-in model-plaza monitoring. Configuration stays in settings;
 -- leases and results are durable so multiple application instances do not probe
--- the same target concurrently. Credentials are references to existing keys.
+-- the same target at the same time. Credentials reference existing keys.
 CREATE TABLE IF NOT EXISTS model_plaza_monitor_targets (
     id BIGSERIAL PRIMARY KEY,
     group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,

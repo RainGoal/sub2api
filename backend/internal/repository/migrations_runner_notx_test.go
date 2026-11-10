@@ -7,8 +7,19 @@ import (
 	"testing/fstest"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
+
+func TestModelPlazaMonitorMigrationExecutionMode(t *testing.T) {
+	const name = "251_model_plaza_monitor.sql"
+	content, err := migrations.FS.ReadFile(name)
+	require.NoError(t, err)
+
+	nonTx, err := validateMigrationExecutionMode(name, string(content))
+	require.NoError(t, err)
+	require.False(t, nonTx)
+}
 
 func TestValidateMigrationExecutionMode(t *testing.T) {
 	t.Run("事务迁移包含CONCURRENTLY会被拒绝", func(t *testing.T) {
