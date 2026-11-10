@@ -149,8 +149,27 @@
       </div>
 
       <div>
-        <label class="input-label">{{ t('admin.channelMonitor.form.groupName') }}</label>
-        <input v-model="form.group_name" type="text" class="input" :placeholder="t('admin.channelMonitor.form.groupNamePlaceholder')" />
+        <label class="input-label" for="monitor-group-select">{{ t('admin.channelMonitor.form.linkedGroup') }}</label>
+        <div data-testid="monitor-linked-group">
+          <Select
+            id="monitor-group-select"
+            v-model="groupSelectValue"
+            :options="groupOptions"
+            :placeholder="t('admin.channelMonitor.form.linkedGroupPlaceholder')"
+            :aria-label="t('admin.channelMonitor.form.linkedGroup')"
+            searchable
+            :disabled="groupsLoading"
+            :loading="groupsLoading"
+          />
+        </div>
+        <p class="mt-1 text-xs text-gray-400">{{ t('admin.channelMonitor.form.linkedGroupHint') }}</p>
+        <p v-if="!form.group_id && form.group_name" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          {{ t('admin.channelMonitor.form.legacyGroupHint', { name: form.group_name }) }}
+        </p>
+        <p v-if="groupsLoadFailed" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          {{ t('admin.channelMonitor.form.linkedGroupsLoadFailed') }}
+          <button type="button" class="underline underline-offset-2" @click="loadGroups">{{ t('common.tryAgain') }}</button>
+        </p>
       </div>
 
       <div>
@@ -250,7 +269,7 @@ import type {
   UpdateParams,
 } from '@/api/admin/channelMonitor'
 import type { ChannelMonitorTemplate } from '@/api/admin/channelMonitorTemplate'
-import type { ApiKey } from '@/types'
+import type { AdminGroup, ApiKey } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Select from '@/components/common/Select.vue'
@@ -328,6 +347,7 @@ interface MonitorForm {
   api_key: string
   primary_model: string
   extra_models: string[]
+  group_id: number | null
   group_name: string
   interval_seconds: number
   jitter_seconds: number
@@ -349,6 +369,7 @@ const form = reactive<MonitorForm>({
   api_key: '',
   primary_model: '',
   extra_models: [],
+  group_id: null,
   group_name: '',
   interval_seconds: systemDefaultInterval.value,
   jitter_seconds: 0,
@@ -365,6 +386,44 @@ const usesProbePart = computed(() => form.check_mode !== CHECK_MODE_QUOTA)
 
 // jitter 上限与后端校验一致：interval - jitter 不得低于最小检测间隔 15 秒。
 const maxJitterSeconds = computed<number>(() => Math.max(0, (form.interval_seconds || 0) - 15))
+
+const linkedGroups = ref<AdminGroup[]>([])
+const groupsLoading = ref(false)
+const groupsLoadFailed = ref(false)
+let groupsRequestID = 0
+
+const groupOptions = computed(() => {
+  const options = linkedGroups.value.map(group => ({ value: String(group.id), label: `${group.name} (#${group.id})` }))
+  // A failed refresh must not silently remove an existing binding.
+  if (form.group_id && !linkedGroups.value.some(group => group.id === form.group_id)) {
+    options.unshift({ value: String(form.group_id), label: `${form.group_name || t('admin.channelMonitor.form.linkedGroup')} (#${form.group_id})` })
+  }
+  return [{ value: '', label: t('admin.channelMonitor.form.linkedGroupNone') }, ...options]
+})
+
+const groupSelectValue = computed<string>({
+  get: () => form.group_id == null ? '' : String(form.group_id),
+  set: (raw: string) => {
+    const id = raw === '' ? null : Number(raw)
+    if (id !== null && (!Number.isSafeInteger(id) || id <= 0)) return
+    form.group_id = id
+    form.group_name = ''
+  },
+})
+
+async function loadGroups() {
+  const requestID = ++groupsRequestID
+  groupsLoading.value = true
+  groupsLoadFailed.value = false
+  try {
+    const groups = await adminAPI.groups.getAllIncludingInactive()
+    if (requestID === groupsRequestID) linkedGroups.value = groups
+  } catch {
+    if (requestID === groupsRequestID) groupsLoadFailed.value = true
+  } finally {
+    if (requestID === groupsRequestID) groupsLoading.value = false
+  }
+}
 
 let suppressFormWatchers = false
 
@@ -736,6 +795,7 @@ function resetForm() {
   form.api_key = ''
   form.primary_model = ''
   form.extra_models = []
+  form.group_id = null
   form.group_name = ''
   form.interval_seconds = systemDefaultInterval.value
   form.jitter_seconds = 0
@@ -758,6 +818,7 @@ function loadFromMonitor(m: ChannelMonitor) {
   form.api_key = ''
   form.primary_model = m.primary_model
   form.extra_models = [...(m.extra_models || [])]
+  form.group_id = m.group_id ?? null
   form.group_name = m.group_name || ''
   form.interval_seconds = m.interval_seconds || systemDefaultInterval.value
   form.jitter_seconds = m.jitter_seconds || 0
@@ -778,6 +839,7 @@ watch(
     void loadTemplates()
     if (m) loadFromMonitor(m)
     else resetForm()
+    void loadGroups()
   },
   { immediate: true },
 )
@@ -826,7 +888,8 @@ function buildPayload(): CreateParams {
     api_key: usesProbePart.value ? form.api_key.trim() : '',
     primary_model: usesProbePart.value ? form.primary_model.trim() : 'quota',
     extra_models: usesProbePart.value ? form.extra_models : [],
-    group_name: form.group_name.trim(),
+    group_id: form.group_id ?? undefined,
+    group_name: form.group_id ? undefined : form.group_name.trim(),
     enabled: form.enabled,
     interval_seconds: form.interval_seconds,
     jitter_seconds: form.jitter_seconds || 0,
@@ -868,6 +931,7 @@ async function handleSubmit() {
       // account_id 同理：probe 模式不带账号，update 发 0 显式解绑存量关联
       // （后端 0=清空、null=不动）。仅 update——create 发 0 会落 &0 触发 FK 违约。
       if (!usesQuotaMode.value) req.account_id = 0
+      if (form.group_id == null) req.group_id = 0
       await adminAPI.channelMonitor.update(target.id, req)
       appStore.showSuccess(t('admin.channelMonitor.updateSuccess'))
     } else {

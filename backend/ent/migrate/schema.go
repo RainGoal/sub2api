@@ -647,6 +647,7 @@ var (
 		{Name: "body_override_mode", Type: field.TypeString, Size: 10, Default: "off"},
 		{Name: "body_override", Type: field.TypeJSON, Nullable: true},
 		{Name: "template_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
 	}
 	// ChannelMonitorsTable holds the schema information for the "channel_monitors" table.
 	ChannelMonitorsTable = &schema.Table{
@@ -658,6 +659,12 @@ var (
 				Symbol:     "channel_monitors_channel_monitor_request_templates_request_template",
 				Columns:    []*schema.Column{ChannelMonitorsColumns[21]},
 				RefColumns: []*schema.Column{ChannelMonitorRequestTemplatesColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+			{
+				Symbol:     "channel_monitors_groups_group",
+				Columns:    []*schema.Column{ChannelMonitorsColumns[22]},
+				RefColumns: []*schema.Column{GroupsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 		},
@@ -681,6 +688,11 @@ var (
 				Name:    "channelmonitor_group_name",
 				Unique:  false,
 				Columns: []*schema.Column{ChannelMonitorsColumns[12]},
+			},
+			{
+				Name:    "channelmonitor_group_id",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelMonitorsColumns[22]},
 			},
 			{
 				Name:    "channelmonitor_template_id",
@@ -2181,6 +2193,7 @@ func init() {
 		Table: "batch_image_jobs",
 	}
 	ChannelMonitorsTable.ForeignKeys[0].RefTable = ChannelMonitorRequestTemplatesTable
+	ChannelMonitorsTable.ForeignKeys[1].RefTable = GroupsTable
 	ChannelMonitorsTable.Annotation = &entsql.Annotation{
 		Table: "channel_monitors",
 	}

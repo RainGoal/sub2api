@@ -11,6 +11,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
+	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -39,6 +40,9 @@ func NewChannelMonitorRepository(client *dbent.Client, db *sql.DB) service.Chann
 
 func (r *channelMonitorRepository) Create(ctx context.Context, m *service.ChannelMonitor) error {
 	client := clientFromContext(ctx, r.client)
+	if err := resolveMonitorGroup(ctx, client, m); err != nil {
+		return err
+	}
 	builder := client.ChannelMonitor.Create().
 		SetName(m.Name).
 		SetProvider(channelmonitor.Provider(m.Provider)).
@@ -47,7 +51,7 @@ func (r *channelMonitorRepository) Create(ctx context.Context, m *service.Channe
 		SetAPIKeyEncrypted(m.APIKey). // 调用方传入的已是密文
 		SetPrimaryModel(m.PrimaryModel).
 		SetExtraModels(emptySliceIfNil(m.ExtraModels)).
-		SetGroupName(m.GroupName).
+		SetGroupName(monitorGroupNameForPersistence(m)).
 		SetEnabled(m.Enabled).
 		SetIntervalSeconds(m.IntervalSeconds).
 		SetJitterSeconds(m.JitterSeconds).
@@ -60,6 +64,9 @@ func (r *channelMonitorRepository) Create(ctx context.Context, m *service.Channe
 	}
 	if m.AccountID != nil {
 		builder = builder.SetAccountID(*m.AccountID)
+	}
+	if m.GroupID != nil {
+		builder = builder.SetGroupID(*m.GroupID)
 	}
 	if m.BodyOverride != nil {
 		builder = builder.SetBodyOverride(m.BodyOverride)
@@ -81,6 +88,7 @@ func (r *channelMonitorRepository) FindByDuplicateOperationID(ctx context.Contex
 	}
 	client := clientFromContext(ctx, r.client)
 	row, err := client.ChannelMonitor.Query().
+		WithGroup().
 		Where(func(selector *entsql.Selector) {
 			selector.Where(sqljson.ValueEQ(
 				channelmonitor.FieldExtraHeaders,
@@ -101,6 +109,7 @@ func (r *channelMonitorRepository) FindByDuplicateOperationID(ctx context.Contex
 
 func (r *channelMonitorRepository) GetByID(ctx context.Context, id int64) (*service.ChannelMonitor, error) {
 	row, err := r.client.ChannelMonitor.Query().
+		WithGroup().
 		Where(channelmonitor.IDEQ(id)).
 		Only(ctx)
 	if err != nil {
@@ -111,6 +120,9 @@ func (r *channelMonitorRepository) GetByID(ctx context.Context, id int64) (*serv
 
 func (r *channelMonitorRepository) Update(ctx context.Context, m *service.ChannelMonitor) error {
 	client := clientFromContext(ctx, r.client)
+	if err := resolveMonitorGroup(ctx, client, m); err != nil {
+		return err
+	}
 	updater := client.ChannelMonitor.UpdateOneID(m.ID).
 		SetName(m.Name).
 		SetProvider(channelmonitor.Provider(m.Provider)).
@@ -119,7 +131,7 @@ func (r *channelMonitorRepository) Update(ctx context.Context, m *service.Channe
 		SetAPIKeyEncrypted(m.APIKey).
 		SetPrimaryModel(m.PrimaryModel).
 		SetExtraModels(emptySliceIfNil(m.ExtraModels)).
-		SetGroupName(m.GroupName).
+		SetGroupName(monitorGroupNameForPersistence(m)).
 		SetEnabled(m.Enabled).
 		SetIntervalSeconds(m.IntervalSeconds).
 		SetJitterSeconds(m.JitterSeconds).
@@ -135,6 +147,11 @@ func (r *channelMonitorRepository) Update(ctx context.Context, m *service.Channe
 		updater = updater.SetAccountID(*m.AccountID)
 	} else {
 		updater = updater.ClearAccountID()
+	}
+	if m.GroupID != nil {
+		updater = updater.SetGroupID(*m.GroupID)
+	} else {
+		updater = updater.ClearGroupID()
 	}
 	if m.BodyOverride != nil {
 		updater = updater.SetBodyOverride(m.BodyOverride)
@@ -159,7 +176,7 @@ func (r *channelMonitorRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *channelMonitorRepository) List(ctx context.Context, params service.ChannelMonitorListParams) ([]*service.ChannelMonitor, int64, error) {
-	q := r.client.ChannelMonitor.Query()
+	q := r.client.ChannelMonitor.Query().WithGroup()
 	if params.Provider != "" {
 		q = q.Where(channelmonitor.ProviderEQ(channelmonitor.Provider(params.Provider)))
 	}
@@ -170,6 +187,7 @@ func (r *channelMonitorRepository) List(ctx context.Context, params service.Chan
 		q = q.Where(channelmonitor.Or(
 			channelmonitor.NameContainsFold(s),
 			channelmonitor.GroupNameContainsFold(s),
+			channelmonitor.HasGroupWith(group.NameContainsFold(s), group.DeletedAtIsNil()),
 			channelmonitor.PrimaryModelContainsFold(s),
 		))
 	}
@@ -208,6 +226,7 @@ func (r *channelMonitorRepository) List(ctx context.Context, params service.Chan
 
 func (r *channelMonitorRepository) ListEnabled(ctx context.Context) ([]*service.ChannelMonitor, error) {
 	rows, err := r.client.ChannelMonitor.Query().
+		WithGroup().
 		Where(channelmonitor.EnabledEQ(true)).
 		All(ctx)
 	if err != nil {
@@ -779,6 +798,7 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		PrimaryModel:         row.PrimaryModel,
 		ExtraModels:          extras,
 		GroupName:            row.GroupName,
+		GroupID:              row.GroupID,
 		Enabled:              row.Enabled,
 		IntervalSeconds:      row.IntervalSeconds,
 		JitterSeconds:        row.JitterSeconds,
@@ -796,11 +816,45 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		id := *row.TemplateID
 		out.TemplateID = &id
 	}
+	if row.GroupID != nil {
+		out.GroupName = ""
+		if bound := row.Edges.Group; bound != nil && bound.DeletedAt == nil {
+			out.GroupName = bound.Name
+		} else {
+			out.GroupID = nil
+		}
+	}
 	if row.AccountID != nil {
 		id := *row.AccountID
 		out.AccountID = &id
 	}
 	return out
+}
+
+// Bound names are read from groups, never copied into the legacy label column.
+func monitorGroupNameForPersistence(m *service.ChannelMonitor) string {
+	if m.GroupID != nil {
+		return ""
+	}
+	return m.GroupName
+}
+
+func resolveMonitorGroup(ctx context.Context, client *dbent.Client, m *service.ChannelMonitor) error {
+	if m.GroupID == nil {
+		return nil
+	}
+	if *m.GroupID <= 0 {
+		return service.ErrChannelMonitorInvalidGroup
+	}
+	bound, err := client.Group.Query().Where(group.IDEQ(*m.GroupID), group.DeletedAtIsNil()).Only(ctx)
+	if dbent.IsNotFound(err) {
+		return service.ErrChannelMonitorInvalidGroup
+	}
+	if err != nil {
+		return fmt.Errorf("resolve monitor group: %w", err)
+	}
+	m.GroupName = bound.Name
+	return nil
 }
 
 func channelMonitorHeadersForPersistence(m *service.ChannelMonitor) map[string]string {

@@ -2260,6 +2260,22 @@ func (c *ChannelMonitorClient) QueryRequestTemplate(_m *ChannelMonitor) *Channel
 	return query
 }
 
+// QueryGroup queries the group edge of a ChannelMonitor.
+func (c *ChannelMonitorClient) QueryGroup(_m *ChannelMonitor) *GroupQuery {
+	query := (&GroupClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(channelmonitor.Table, channelmonitor.FieldID, id),
+			sqlgraph.To(group.Table, group.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, channelmonitor.GroupTable, channelmonitor.GroupColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *ChannelMonitorClient) Hooks() []Hook {
 	return c.hooks.ChannelMonitor

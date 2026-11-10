@@ -74,6 +74,8 @@ export interface ChannelMonitor {
   api_key_decrypt_failed?: boolean
   primary_model: string
   extra_models: string[]
+  /** Bound group; omitted on older servers. Its current name is returned as group_name. */
+  group_id?: number | null
   group_name: string
   enabled: boolean
   interval_seconds: number
@@ -142,6 +144,8 @@ export interface CreateParams {
   account_id?: number | null
   primary_model: string
   extra_models?: string[]
+  /** Positive group ID; update accepts 0 to remove the binding. */
+  group_id?: number | null
   group_name?: string
   enabled?: boolean
   interval_seconds: number

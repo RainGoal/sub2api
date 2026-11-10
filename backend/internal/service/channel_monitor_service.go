@@ -172,6 +172,7 @@ func (s *ChannelMonitorService) Create(ctx context.Context, p ChannelMonitorCrea
 		PrimaryModel:     normalizeMonitorPrimaryModel(p.Provider, checkMode, p.PrimaryModel),
 		ExtraModels:      normalizeModels(p.ExtraModels),
 		GroupName:        strings.TrimSpace(p.GroupName),
+		GroupID:          cloneInt64Pointer(p.GroupID),
 		Enabled:          p.Enabled,
 		IntervalSeconds:  p.IntervalSeconds,
 		JitterSeconds:    p.JitterSeconds,
@@ -239,6 +240,7 @@ func (s *ChannelMonitorService) Duplicate(
 		PrimaryModel:         source.PrimaryModel,
 		ExtraModels:          append([]string{}, source.ExtraModels...),
 		GroupName:            source.GroupName,
+		GroupID:              cloneInt64Pointer(source.GroupID),
 		Enabled:              false,
 		IntervalSeconds:      source.IntervalSeconds,
 		JitterSeconds:        source.JitterSeconds,
@@ -370,6 +372,9 @@ func cloneChannelMonitorJSONMap(source map[string]any) (map[string]any, error) {
 // 按 check_mode 分支：probe 沿用 endpoint+api_key 必填；quota 只需关联账号；
 // quota_probe 两者皆需。
 func validateCreateParams(p ChannelMonitorCreateParams) error {
+	if p.GroupID != nil && *p.GroupID <= 0 {
+		return ErrChannelMonitorInvalidGroup
+	}
 	if err := validateProvider(p.Provider); err != nil {
 		return err
 	}
@@ -943,6 +948,17 @@ func applyMonitorUpdate(existing *ChannelMonitor, p ChannelMonitorUpdateParams) 
 	}
 	if p.GroupName != nil {
 		existing.GroupName = strings.TrimSpace(*p.GroupName)
+	}
+	if p.GroupID != nil {
+		if *p.GroupID < 0 {
+			return ErrChannelMonitorInvalidGroup
+		}
+		existing.GroupID = nil
+		if *p.GroupID > 0 {
+			existing.GroupID = cloneInt64Pointer(p.GroupID)
+		} else if p.GroupName == nil {
+			existing.GroupName = ""
+		}
 	}
 	if p.Enabled != nil {
 		existing.Enabled = *p.Enabled

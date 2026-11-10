@@ -9,12 +9,14 @@ const {
   listTemplates,
   accountsList,
   accountsGetById,
+  groupsGetAll,
   monitorCreate,
   monitorUpdate,
 } = vi.hoisted(() => ({
   listTemplates: vi.fn(),
   accountsList: vi.fn(),
   accountsGetById: vi.fn(),
+  groupsGetAll: vi.fn(),
   monitorCreate: vi.fn(),
   monitorUpdate: vi.fn(),
 }))
@@ -43,6 +45,7 @@ vi.mock('@/api/admin', () => ({
       list: (...args: unknown[]) => accountsList(...args),
       getById: (...args: unknown[]) => accountsGetById(...args),
     },
+    groups: { getAllIncludingInactive: groupsGetAll },
   },
 }))
 
@@ -166,6 +169,7 @@ describe('MonitorFormDialog linked account selector', () => {
     listTemplates.mockReset().mockResolvedValue({ items: [] })
     accountsList.mockReset().mockResolvedValue({ items: [] })
     accountsGetById.mockReset()
+    groupsGetAll.mockReset().mockResolvedValue([])
     monitorCreate.mockReset().mockResolvedValue({})
     monitorUpdate.mockReset().mockResolvedValue({})
   })
@@ -403,5 +407,64 @@ describe('MonitorFormDialog linked account selector', () => {
       check_mode: 'probe',
       account_id: null,
     }))
+  })
+
+  it('uses the selected group ID when creating a monitor', async () => {
+    groupsGetAll.mockResolvedValue([{ id: 7, name: 'API production' }, { id: 8, name: 'API production' }])
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.findAll('input[type="text"]')[0].setValue('primary monitor')
+    await wrapper.get('[data-testid="monitor-primary-model"]').setValue('claude-sonnet-4-5')
+    await wrapper.get('[data-testid="monitor-linked-group"] button').trigger('click')
+    await nextTick()
+    const dropdown = document.body.querySelector<HTMLElement>('.select-dropdown-portal')!
+    clickOption(dropdown, 'API production (#8)')
+    await wrapper.get('#channel-monitor-form').trigger('submit')
+    await flushPromises()
+    expect(monitorCreate).toHaveBeenCalledWith(expect.objectContaining({ group_id: 8 }))
+    expect(monitorCreate.mock.calls[0][0].group_name).toBeUndefined()
+  })
+
+  it('shows the current group name and keeps its ID when editing', async () => {
+    groupsGetAll.mockResolvedValue([{ id: 7, name: 'renamed group' }])
+    const wrapper = mountDialog(makeMonitor({ group_id: 7, group_name: 'old group' }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="monitor-linked-group"] button').text()).toContain('renamed group (#7)')
+    await wrapper.get('#channel-monitor-form').trigger('submit')
+    await flushPromises()
+    expect(monitorUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ group_id: 7 }))
+  })
+
+  it('sends zero to explicitly remove a group binding', async () => {
+    groupsGetAll.mockResolvedValue([{ id: 7, name: 'production' }])
+    const wrapper = mountDialog(makeMonitor({ group_id: 7, group_name: 'production' }))
+    await flushPromises()
+    await wrapper.get('[data-testid="monitor-linked-group"] button').trigger('click')
+    await nextTick()
+    clickOption(document.body.querySelector<HTMLElement>('.select-dropdown-portal')!, 'admin.channelMonitor.form.linkedGroupNone')
+    await wrapper.get('#channel-monitor-form').trigger('submit')
+    await flushPromises()
+    expect(monitorUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ group_id: 0, group_name: '' }))
+  })
+
+  it('preserves an existing group binding when loading groups fails', async () => {
+    groupsGetAll.mockRejectedValue(new Error('network'))
+    const wrapper = mountDialog(makeMonitor({ group_id: 7, group_name: 'production' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.channelMonitor.form.linkedGroupsLoadFailed')
+    expect(wrapper.get('[data-testid="monitor-linked-group"] button').text()).toContain('production (#7)')
+    await wrapper.get('#channel-monitor-form').trigger('submit')
+    await flushPromises()
+    expect(monitorUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ group_id: 7 }))
+  })
+
+  it('keeps legacy unbound group names without converting them to a guessed ID', async () => {
+    groupsGetAll.mockResolvedValue([{ id: 7, name: 'legacy' }])
+    const wrapper = mountDialog(makeMonitor({ group_name: 'legacy' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.channelMonitor.form.legacyGroupHint')
+    await wrapper.get('#channel-monitor-form').trigger('submit')
+    await flushPromises()
+    expect(monitorUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ group_id: 0, group_name: 'legacy' }))
   })
 })
