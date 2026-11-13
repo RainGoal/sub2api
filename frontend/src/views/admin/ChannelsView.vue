@@ -460,6 +460,7 @@
                   enable-time-pricing
                   enable-tier-multipliers
                   @update="updatePricingEntry(sIdx, idx, $event)"
+                  enable-video-capabilities
                   @remove="removePricingEntry(sIdx, idx)"
                 />
               </div>

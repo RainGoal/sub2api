@@ -100,7 +100,11 @@ func (s *OpenAIGatewayService) ListVideoMediaModels(ctx context.Context, key *AP
 			continue
 		}
 		for model := range account.GetModelMapping() {
-			capability, ok := account.VideoModelCapability(model)
+			limits, err := s.videoChannelLimits(ctx, key, model)
+			if err != nil {
+				return nil, err
+			}
+			capability, ok := effectiveVideoAccountCapability(account, model, limits)
 			if !ok || !account.isSeedanceModelSupported(model) || !key.Group.ModelAllowlist.Allows(model) {
 				continue
 			}
@@ -116,6 +120,9 @@ func (s *OpenAIGatewayService) ListVideoMediaModels(ctx context.Context, key *AP
 			for _, resolution := range resolutions {
 				info := SeedanceVideoRequestInfo{Model: model, Resolution: resolution, DurationSeconds: capability.DefaultDuration, Capability: &capability}
 				quote, quoteErr := s.ResolveSeedanceVideoPricingSnapshot(ctx, key, info)
+				if key.User == nil {
+					quote, quoteErr = s.resolveVideoTasksPricingSnapshot(ctx, key, info, 1)
+				}
 				if quoteErr != nil || quote.SalesSnapshot == nil {
 					continue
 				}

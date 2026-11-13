@@ -45,20 +45,21 @@ type StudioTask struct {
 }
 
 type StudioPayload struct {
-	Model           string   `json:"model"`
-	Prompt          string   `json:"prompt"`
-	Size            string   `json:"size,omitempty"`
-	Quality         string   `json:"quality,omitempty"`
-	N               int      `json:"n,omitempty"`
-	Resolution      string   `json:"resolution,omitempty"`
-	Duration        int      `json:"duration,omitempty"`
-	AspectRatio     string   `json:"aspect_ratio,omitempty"`
-	Audio           *bool    `json:"audio,omitempty"`
-	StartFrameURL   string   `json:"start_frame_url,omitempty"`
-	EndFrameURL     string   `json:"end_frame_url,omitempty"`
-	ReferenceImages []string `json:"referenceImages,omitempty"`
-	ReferenceVideos []string `json:"referenceVideos,omitempty"`
-	ReferenceAudios []string `json:"referenceAudios,omitempty"`
+	Model                   string   `json:"model"`
+	Prompt                  string   `json:"prompt"`
+	Size                    string   `json:"size,omitempty"`
+	Quality                 string   `json:"quality,omitempty"`
+	N                       int      `json:"n,omitempty"`
+	Resolution              string   `json:"resolution,omitempty"`
+	Duration                int      `json:"duration,omitempty"`
+	AspectRatio             string   `json:"aspect_ratio,omitempty"`
+	Audio                   *bool    `json:"audio,omitempty"`
+	StartFrameURL           string   `json:"start_frame_url,omitempty"`
+	EndFrameURL             string   `json:"end_frame_url,omitempty"`
+	ReferenceImages         []string `json:"referenceImages,omitempty"`
+	ReferenceVideos         []string `json:"referenceVideos,omitempty"`
+	ReferenceAudios         []string `json:"referenceAudios,omitempty"`
+	ReferenceVideoDurations []int    `json:"reference_video_durations,omitempty"`
 }
 
 type StudioTaskError struct {
@@ -256,6 +257,16 @@ func validateStudioTask(task *StudioTask) error {
 		return ErrStudioInvalidTask
 	}
 	urls := []string{payload.StartFrameURL, payload.EndFrameURL}
+	if len(payload.ReferenceVideoDurations) > 0 {
+		if len(payload.ReferenceVideoDurations) != len(payload.ReferenceVideos) {
+			return ErrStudioInvalidTask
+		}
+		for _, seconds := range payload.ReferenceVideoDurations {
+			if seconds <= 0 || seconds > 3600 {
+				return ErrStudioInvalidTask
+			}
+		}
+	}
 	for _, refs := range [][]string{payload.ReferenceImages, payload.ReferenceVideos, payload.ReferenceAudios} {
 		if len(refs) > 32 {
 			return ErrStudioInvalidTask

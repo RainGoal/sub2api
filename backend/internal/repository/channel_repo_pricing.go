@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -378,10 +379,11 @@ func unmarshalChannelTimePricing(data []byte) (*service.ChannelTimePricing, erro
 }
 
 type videoPricingConfig struct {
-	Version            int                         `json:"version"`
-	Unit               service.VideoBillingUnit    `json:"unit"`
-	QuantityPolicy     service.VideoQuantityPolicy `json:"quantity_policy"`
-	MaxBillableSeconds float64                     `json:"max_billable_seconds"`
+	Capabilities       *videoprovider.VideoCapabilityLimits `json:"capabilities,omitempty"`
+	Version            int                                  `json:"version"`
+	Unit               service.VideoBillingUnit             `json:"unit"`
+	QuantityPolicy     service.VideoQuantityPolicy          `json:"quantity_policy"`
+	MaxBillableSeconds float64                              `json:"max_billable_seconds"`
 }
 
 func marshalVideoPricingConfig(pricing *service.ChannelModelPricing) (any, error) {
@@ -389,7 +391,7 @@ func marshalVideoPricingConfig(pricing *service.ChannelModelPricing) (any, error
 		return nil, nil
 	}
 	config := videoPricingConfig{Version: pricing.VideoPricingVersion, Unit: pricing.VideoBillingUnit,
-		QuantityPolicy: pricing.VideoQuantityPolicy, MaxBillableSeconds: pricing.VideoMaxBillableSeconds}
+		QuantityPolicy: pricing.VideoQuantityPolicy, MaxBillableSeconds: pricing.VideoMaxBillableSeconds, Capabilities: pricing.VideoCapabilities}
 	data, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("marshal video pricing: %w", err)
@@ -408,6 +410,7 @@ func unmarshalVideoPricingConfig(pricing *service.ChannelModelPricing, data []by
 		return fmt.Errorf("unmarshal video pricing: %w", err)
 	}
 	pricing.VideoPricingVersion, pricing.VideoBillingUnit = config.Version, config.Unit
+	pricing.VideoCapabilities = config.Capabilities
 	pricing.VideoQuantityPolicy, pricing.VideoMaxBillableSeconds = config.QuantityPolicy, config.MaxBillableSeconds
 	return nil
 }

@@ -1,4 +1,4 @@
-import type { BillingMode, ChannelTimePricing, PricingInterval, VideoBillingUnit, VideoQuantityPolicy } from '@/api/admin/channels'
+import type { BillingMode, ChannelTimePricing, PricingInterval, VideoBillingUnit, VideoQuantityPolicy, VideoCapabilityLimits } from '@/api/admin/channels'
 import { REASONING_EFFORT_LEVELS } from '@/constants/channel'
 
 type TranslateFn = (key: string, params?: Record<string, unknown>) => string
@@ -21,6 +21,7 @@ export interface IntervalFormEntry {
 }
 
 export interface PricingFormEntry {
+  video_capabilities?: VideoCapabilityLimits | null
   models: string[]
   billing_mode: BillingMode
   video_pricing_version?: number
@@ -42,9 +43,10 @@ export interface PricingFormEntry {
   time_pricing: TimePricingFormEntry
 }
 
-export function videoPricingFieldsToAPI(entry: Pick<PricingFormEntry, 'video_pricing_version' | 'video_billing_unit' | 'video_quantity_policy' | 'video_max_billable_seconds'>) {
+export function videoPricingFieldsToAPI(entry: Pick<PricingFormEntry, 'video_pricing_version' | 'video_billing_unit' | 'video_quantity_policy' | 'video_max_billable_seconds' | 'video_capabilities'>) {
   return entry.video_pricing_version ? {
     video_pricing_version: entry.video_pricing_version,
+    video_capabilities: entry.video_capabilities ? JSON.parse(JSON.stringify(entry.video_capabilities)) as VideoCapabilityLimits : null,
     video_billing_unit: entry.video_billing_unit,
     video_quantity_policy: entry.video_quantity_policy,
     video_max_billable_seconds: Number(entry.video_max_billable_seconds || 0),

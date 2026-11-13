@@ -270,6 +270,9 @@
           </div>
         </div>
 
+        <VideoCapabilityLimitsEditor v-if="platform === 'seedance' && entry.video_pricing_version === 1 && enableVideoCapabilities"
+          :model-value="entry.video_capabilities" @update:model-value="emit('update', { ...entry, video_capabilities: $event })" />
+
         <div v-if="platform !== 'seedance'" class="mt-3 border-t border-gray-200 pt-3 dark:border-dark-600" data-testid="reasoning-effort-multipliers">
           <div class="flex items-center justify-between gap-2">
             <label class="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -319,6 +322,7 @@ import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
 import ModelTagInput from './ModelTagInput.vue'
 import TimePricingSection from './TimePricingSection.vue'
+import VideoCapabilityLimitsEditor from './VideoCapabilityLimitsEditor.vue'
 import type { PricingFormEntry, IntervalFormEntry } from './types'
 import { perTokenToMTok, getPlatformTagClass, isValidPositiveMultiplier, validateReasoningEffortMultipliers } from './types'
 import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from '@/constants/channel'
@@ -334,6 +338,7 @@ const props = withDefaults(defineProps<{
   platform?: string
   hideTokenIntervals?: boolean
   enableTimePricing?: boolean
+  enableVideoCapabilities?: boolean
   enableTierMultipliers?: boolean
   autoFillDefaultPricing?: boolean
   allowedBillingModes?: BillingMode[]

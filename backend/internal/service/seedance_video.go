@@ -186,9 +186,10 @@ type SeedanceVideoPendingBilling struct {
 	ReviewDeadline        *time.Time                `json:"review_deadline,omitempty"`
 	ReviewDecisions       []VideoTaskReviewDecision `json:"review_decisions,omitempty"`
 
-	AccountCost       *SeedanceAccountCostSnapshot `json:"account_cost,omitempty"`
-	SalesSnapshot     *VideoTaskSalesSnapshot      `json:"sales_snapshot,omitempty"`
-	ExecutionSnapshot *VideoTasksExecutionSnapshot `json:"execution_snapshot,omitempty"`
+	AccountCost       *SeedanceAccountCostSnapshot         `json:"account_cost,omitempty"`
+	SalesSnapshot     *VideoTaskSalesSnapshot              `json:"sales_snapshot,omitempty"`
+	ExecutionSnapshot *VideoTasksExecutionSnapshot         `json:"execution_snapshot,omitempty"`
+	ChannelLimits     *videoprovider.VideoCapabilityLimits `json:"channel_limits,omitempty"`
 }
 
 const (
@@ -266,10 +267,15 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if err != nil {
 		return err
 	}
+	if pending.ChannelLimits != nil {
+		if _, ok := effectiveVideoAccountCapability(account, pending.Model, pending.ChannelLimits); !ok {
+			return fmt.Errorf("%w: channel capabilities are unsupported", ErrVideoTaskSalesCapabilityMismatch)
+		}
+	}
 	if pending.SalesSnapshot != nil && videoTaskReferenceMeteringUnsupported(normalizedProviderID, pending.ReferenceVideoCount, pending.SalesSnapshot.BillingUnit, pending.SalesSnapshot.QuantityPolicy) {
 		return fmt.Errorf("%w: provider does not supply actual reference video metering", ErrVideoTaskSalesCapabilityMismatch)
 	}
-	if capability, ok := account.VideoModelCapability(pending.Model); ok && pending.SalesSnapshot != nil {
+	if capability, ok := effectiveVideoAccountCapability(account, pending.Model, pending.ChannelLimits); ok && pending.SalesSnapshot != nil {
 		requiredHold, err := videoTaskSalesHoldForCapability(pending.SalesSnapshot, capability, pending.DurationSeconds, pending.ReferenceVideoCount)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrVideoTaskSalesCapabilityMismatch, err)
@@ -283,7 +289,7 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if pending.IDVersion != 0 && pending.SalesSnapshot != nil {
 		policy := VideoQuantityOutputSeconds
 		maximum := float64(0)
-		if capability, ok := account.VideoModelCapability(pending.Model); ok {
+		if capability, ok := effectiveVideoAccountCapability(account, pending.Model, pending.ChannelLimits); ok {
 			policy = VideoQuantityRequestedSeconds
 			if capability.MeteringPolicy != videoprovider.VideoMeteringPerVideo {
 				policy = VideoQuantityPolicy(capability.MeteringPolicy)
@@ -310,7 +316,7 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 	if accountCost != nil && videoTaskReferenceMeteringUnsupported(normalizedProviderID, pending.ReferenceVideoCount, accountCost.BillingUnit, accountCost.QuantityPolicy) {
 		return fmt.Errorf("%w: provider does not supply actual reference video metering", ErrSeedanceAccountCostMissing)
 	}
-	if capability, ok := account.VideoModelCapability(pending.Model); ok {
+	if capability, ok := effectiveVideoAccountCapability(account, pending.Model, pending.ChannelLimits); ok {
 		if err := validateVideoTaskPurchaseCapability(capability, pending.DurationSeconds, accountCost); err != nil {
 			return err
 		}
@@ -319,7 +325,7 @@ func (s *OpenAIGatewayService) AssignSeedanceVideoTaskAccount(ctx context.Contex
 		execution := &VideoTasksExecutionSnapshot{Version: 1, Protocol: string(normalizedProviderID),
 			BaseURL: account.GetVideoProviderBaseURL(string(normalizedProviderID)), UpstreamModel: upstreamModel,
 			SupportsContent: true, SupportsCancel: normalizedProviderID == videoprovider.ProviderFFLinkV1}
-		if capability, ok := account.VideoModelCapability(pending.Model); ok {
+		if capability, ok := effectiveVideoAccountCapability(account, pending.Model, pending.ChannelLimits); ok {
 			execution.Capability = &capability
 			if capability.UpstreamModel != "" {
 				execution.UpstreamModel = capability.UpstreamModel

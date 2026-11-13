@@ -10,6 +10,28 @@ export type { BillingMode } from '@/constants/channel'
 export type VideoBillingUnit = 'per_second' | 'per_video'
 export type VideoQuantityPolicy = 'requested_seconds' | 'output_seconds' | 'output_and_reference_seconds'
 
+export interface VideoCapabilityLimits {
+  min_duration?: number
+  max_duration?: number
+  default_duration?: number
+  allowed_durations?: number[]
+  resolutions?: string[]
+  default_resolution?: string
+  ratios?: string[]
+  default_ratio?: string
+  max_images?: number
+  max_videos?: number
+  max_audios?: number
+  max_total_assets?: number
+  max_reference_video_seconds?: number
+  max_combined_video_seconds?: number
+  frames?: boolean
+  allow_first_only?: boolean
+  allow_frames_with_references?: boolean
+  generate_audio?: boolean
+  supports_cancel?: boolean
+}
+
 export interface PricingInterval {
   id?: number
   min_tokens: number
@@ -41,6 +63,7 @@ export interface ChannelTimePricing {
 }
 
 export interface ChannelModelPricing {
+  video_capabilities?: VideoCapabilityLimits | null
   id?: number
   platform: string
   models: string[]

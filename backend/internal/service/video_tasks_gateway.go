@@ -38,6 +38,10 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 		return nil, nil, SeedanceVideoRequestInfo{}, err
 	}
 	var capabilityError, purchaseError error
+	limits, err := s.videoChannelLimits(ctx, key, input.Model)
+	if err != nil {
+		return nil, nil, SeedanceVideoRequestInfo{}, err
+	}
 	legacyAvailable := false
 	var selected *SeedanceVideoCreateRequest
 	var selectedInfo SeedanceVideoRequestInfo
@@ -53,6 +57,9 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 			continue
 		}
 		if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
+			if limits != nil {
+				continue
+			}
 			legacyAvailable = true
 			legacy, info, parseErr := prepareLegacyVideoRequestForAccount(body, account)
 			if parseErr != nil {
@@ -92,7 +99,7 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 		if !s.VideoTasksEnabled() {
 			continue
 		}
-		capability, ok := account.VideoModelCapability(input.Model)
+		capability, ok := effectiveVideoAccountCapability(account, input.Model, limits)
 		if !ok {
 			continue
 		}
@@ -131,6 +138,7 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForKey(ctx context.Context, ke
 		// Reserve against a complete eligible contract, never a union of separate
 		// suppliers' limits. The largest hold makes account ordering irrelevant.
 		if selected == nil || quote.HoldAmount > selectedHold {
+			request.ChannelLimits = limits
 			selected, selectedInfo, selectedHold = request, info, quote.HoldAmount
 			selectedLegacyRemapped = false
 		}
@@ -344,6 +352,9 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForAccount(request *SeedanceVi
 		return nil, fmt.Errorf("video request and account are required")
 	}
 	if !videoprovider.SupportsModelCapabilities(account.GetVideoProviderID()) {
+		if request.ChannelLimits != nil {
+			return nil, fmt.Errorf("channel capability rules require a capability-aware video provider")
+		}
 		public := request.RequestedModel
 		if public == "" {
 			public = request.Model
@@ -375,7 +386,7 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForAccount(request *SeedanceVi
 	if !s.VideoTasksEnabled() {
 		return nil, fmt.Errorf("video tasks JSON v1 is disabled")
 	}
-	capability, ok := account.VideoModelCapability(request.RequestedModel)
+	capability, ok := effectiveVideoAccountCapability(account, request.RequestedModel, request.ChannelLimits)
 	if !ok || !account.isSeedanceModelSupported(request.RequestedModel) {
 		return nil, fmt.Errorf("video model is not enabled on this account")
 	}
@@ -405,6 +416,9 @@ func (s *OpenAIGatewayService) PrepareVideoRequestForAccount(request *SeedanceVi
 		return nil, err
 	}
 	validated, _, err := videoprovider.ParseCreateRequestWithCapabilities(body, []videoprovider.VideoModelCapability{capability})
+	if validated != nil {
+		validated.ChannelLimits = request.ChannelLimits
+	}
 	if err == nil && (validated.Duration != request.Duration || !strings.EqualFold(validated.Resolution, request.Resolution) || !strings.EqualFold(validated.AspectRatio, request.AspectRatio)) {
 		return nil, fmt.Errorf("video parameters differ on this account")
 	}

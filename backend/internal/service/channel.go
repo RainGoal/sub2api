@@ -3,9 +3,12 @@ package service
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/videoprovider"
 )
 
 // BillingMode 计费模式
@@ -88,30 +91,31 @@ type AccountStatsPricingRule struct {
 
 // ChannelModelPricing 渠道模型定价条目
 type ChannelModelPricing struct {
-	ID                         int64               `json:"id,omitempty"`
-	ChannelID                  int64               `json:"channel_id,omitempty"`
-	Platform                   string              `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
-	Models                     []string            `json:"models"`
-	BillingMode                BillingMode         `json:"billing_mode"`
-	VideoPricingVersion        int                 `json:"video_pricing_version,omitempty"`
-	VideoBillingUnit           VideoBillingUnit    `json:"video_billing_unit,omitempty"`
-	VideoQuantityPolicy        VideoQuantityPolicy `json:"video_quantity_policy,omitempty"`
-	VideoMaxBillableSeconds    float64             `json:"video_max_billable_seconds,omitempty"`
-	InputPrice                 *float64            `json:"input_price"`
-	OutputPrice                *float64            `json:"output_price"`
-	CacheWritePrice            *float64            `json:"cache_write_price"`
-	CacheWrite1hPrice          *float64            `json:"cache_write_1h_price"`
-	CacheReadPrice             *float64            `json:"cache_read_price"`
-	FastMultiplier             *float64            `json:"fast_multiplier"`
-	FlexMultiplier             *float64            `json:"flex_multiplier"`
-	ReasoningEffortMultipliers map[string]float64  `json:"reasoning_effort_multipliers,omitempty"`
-	ImageInputPrice            *float64            `json:"image_input_price"`
-	ImageOutputPrice           *float64            `json:"image_output_price"`
-	PerRequestPrice            *float64            `json:"per_request_price"`
-	Intervals                  []PricingInterval   `json:"intervals"`
-	TimePricing                *ChannelTimePricing `json:"time_pricing,omitempty"`
-	CreatedAt                  time.Time           `json:"created_at,omitempty"`
-	UpdatedAt                  time.Time           `json:"updated_at,omitempty"`
+	VideoCapabilities          *videoprovider.VideoCapabilityLimits `json:"video_capabilities,omitempty"`
+	ID                         int64                                `json:"id,omitempty"`
+	ChannelID                  int64                                `json:"channel_id,omitempty"`
+	Platform                   string                               `json:"platform"` // 所属平台（anthropic/openai/gemini/...）
+	Models                     []string                             `json:"models"`
+	BillingMode                BillingMode                          `json:"billing_mode"`
+	VideoPricingVersion        int                                  `json:"video_pricing_version,omitempty"`
+	VideoBillingUnit           VideoBillingUnit                     `json:"video_billing_unit,omitempty"`
+	VideoQuantityPolicy        VideoQuantityPolicy                  `json:"video_quantity_policy,omitempty"`
+	VideoMaxBillableSeconds    float64                              `json:"video_max_billable_seconds,omitempty"`
+	InputPrice                 *float64                             `json:"input_price"`
+	OutputPrice                *float64                             `json:"output_price"`
+	CacheWritePrice            *float64                             `json:"cache_write_price"`
+	CacheWrite1hPrice          *float64                             `json:"cache_write_1h_price"`
+	CacheReadPrice             *float64                             `json:"cache_read_price"`
+	FastMultiplier             *float64                             `json:"fast_multiplier"`
+	FlexMultiplier             *float64                             `json:"flex_multiplier"`
+	ReasoningEffortMultipliers map[string]float64                   `json:"reasoning_effort_multipliers,omitempty"`
+	ImageInputPrice            *float64                             `json:"image_input_price"`
+	ImageOutputPrice           *float64                             `json:"image_output_price"`
+	PerRequestPrice            *float64                             `json:"per_request_price"`
+	Intervals                  []PricingInterval                    `json:"intervals"`
+	TimePricing                *ChannelTimePricing                  `json:"time_pricing,omitempty"`
+	CreatedAt                  time.Time                            `json:"created_at,omitempty"`
+	UpdatedAt                  time.Time                            `json:"updated_at,omitempty"`
 }
 
 // ChannelTimePricing 渠道模型定价的分时倍率配置。
@@ -216,6 +220,13 @@ func (p *ChannelModelPricing) GetTierByLabel(label string) *PricingInterval {
 // Clone 返回 ChannelModelPricing 的拷贝（切片和映射独立，价格指针字段共享，调用方只读安全）
 func (p ChannelModelPricing) Clone() ChannelModelPricing {
 	cp := p
+	if p.VideoCapabilities != nil {
+		limits := *p.VideoCapabilities
+		limits.AllowedDurations = slices.Clone(limits.AllowedDurations)
+		limits.Resolutions = slices.Clone(limits.Resolutions)
+		limits.Ratios = slices.Clone(limits.Ratios)
+		cp.VideoCapabilities = &limits
+	}
 	cp.ReasoningEffortMultipliers = maps.Clone(p.ReasoningEffortMultipliers)
 	if p.Models != nil {
 		cp.Models = make([]string, len(p.Models))

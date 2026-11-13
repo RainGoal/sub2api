@@ -682,6 +682,16 @@ func validateChannelConfig(pricing []ChannelModelPricing, mapping map[string]map
 // validatePricingEntries 校验定价条目（冲突检测 + 区间校验 + 计费模式校验），
 // 同时用于主渠道定价和 account_stats_pricing_rules 的内部定价。
 func validatePricingEntries(pricing []ChannelModelPricing) error {
+	for _, p := range pricing {
+		if p.VideoCapabilities != nil {
+			if p.Platform != PlatformSeedance || p.VideoPricingVersion != VideoPricingVersion || p.BillingMode != BillingModeVideo {
+				return fmt.Errorf("video capabilities require explicit video pricing")
+			}
+			if err := p.VideoCapabilities.Validate(); err != nil {
+				return err
+			}
+		}
+	}
 	if err := validateNoConflictingModels(pricing); err != nil {
 		return err
 	}

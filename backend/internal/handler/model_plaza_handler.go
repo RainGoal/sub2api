@@ -18,6 +18,7 @@ import (
 //   - 登录：非专属分组 + user_allowed_groups 授权或持有有效订阅的专属分组；
 //     若该用户开启了公开分组限制，则公开分组同样需要落在授权集合内。
 type ModelPlazaHandler struct {
+	gatewayService *service.OpenAIGatewayService
 	plazaService   *service.ModelPlazaService
 	apiKeyService  *service.APIKeyService
 	settingService *service.SettingService
@@ -28,8 +29,10 @@ func NewModelPlazaHandler(
 	plazaService *service.ModelPlazaService,
 	apiKeyService *service.APIKeyService,
 	settingService *service.SettingService,
+	gatewayService *service.OpenAIGatewayService,
 ) *ModelPlazaHandler {
 	return &ModelPlazaHandler{
+		gatewayService: gatewayService,
 		plazaService:   plazaService,
 		apiKeyService:  apiKeyService,
 		settingService: settingService,
@@ -64,10 +67,11 @@ type modelPlazaTimePricing struct {
 
 // modelPlazaModel 广场模型条目：实收口径展示定价（白名单形态）+ 官方参考价。
 type modelPlazaModel struct {
-	Name            string                     `json:"name"`
-	Platform        string                     `json:"platform"`
-	Pricing         *userSupportedModelPricing `json:"pricing"`
-	OfficialPricing *modelPlazaOfficialPricing `json:"official_pricing"`
+	VideoCapabilities []service.VideoMediaVariant `json:"video_capabilities,omitempty"`
+	Name              string                      `json:"name"`
+	Platform          string                      `json:"platform"`
+	Pricing           *userSupportedModelPricing  `json:"pricing"`
+	OfficialPricing   *modelPlazaOfficialPricing  `json:"official_pricing"`
 	// LongContextBasis 多档时的计价基准："whole_request"（整单按档）| "marginal"（仅超出部分）。
 	LongContextBasis string `json:"long_context_basis,omitempty"`
 	// TimePricing 分时倍率时段，落在时段内的请求整单乘倍率；无分时省略。
@@ -155,6 +159,28 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	// 追加而非覆盖：CORS 中间件已为具体来源写入 Vary: Origin。
 	c.Writer.Header().Add("Vary", "Accept-Language")
 	out := toLocalizedModelPlazaGroups(visible, userRates, c.GetHeader("Accept-Language"))
+	if h.gatewayService != nil {
+		for i := range visible {
+			if visible[i].Platform != service.PlatformSeedance {
+				continue
+			}
+			catalog, err := h.gatewayService.ListVideoMediaModelsForGroup(c.Request.Context(), visible[i].Group)
+			if err != nil {
+				slog.Warn("model_plaza_video_capabilities_failed", "group_id", visible[i].ID, "error", err)
+				continue
+			}
+			for _, model := range catalog {
+				for j := range out[i].Models {
+					if out[i].Models[j].Name == model.ID {
+						for k := range model.Variants {
+							model.Variants[k].Prices = nil
+						}
+						out[i].Models[j].VideoCapabilities = model.Variants
+					}
+				}
+			}
+		}
+	}
 	response.Success(c, modelPlazaResponse{
 		Description: rt.Description,
 		Groups:      out,

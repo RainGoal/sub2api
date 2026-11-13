@@ -334,7 +334,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentWebhookHandler := handler.NewPaymentWebhookHandler(paymentService, registry)
 	availableChannelHandler := handler.NewAvailableChannelHandler(channelService, apiKeyService, settingService)
 	modelPlazaService := service.NewModelPlazaService(channelRepository, groupRepository, pricingService, billingService, modelPricingResolver)
-	modelPlazaHandler := handler.NewModelPlazaHandler(modelPlazaService, apiKeyService, settingService)
+	modelPlazaHandler := handler.NewModelPlazaHandler(modelPlazaService, apiKeyService, settingService, openAIGatewayService)
 	modelPlazaMonitorRepository := repository.NewModelPlazaMonitorRepository(db)
 	modelPlazaMonitorService := service.ProvideModelPlazaMonitorService(modelPlazaMonitorRepository, settingRepository, modelPlazaService, apiKeyRepository, configConfig)
 	modelPlazaMonitorHandler := handler.NewModelPlazaMonitorHandler(modelPlazaMonitorService, modelPlazaService, apiKeyService, settingService)

@@ -53,23 +53,24 @@ const (
 )
 
 type CreateRequest struct {
-	RequestedModel          string                `json:"requested_model"`
-	Model                   string                `json:"model"`
-	UpstreamModel           string                `json:"-"`
-	Prompt                  string                `json:"prompt"`
-	AspectRatio             string                `json:"aspect_ratio"`
-	Duration                int                   `json:"duration"`
-	Resolution              string                `json:"resolution"`
-	Audio                   bool                  `json:"audio,omitempty"`
-	StartFrameURL           string                `json:"start_frame_url,omitempty"`
-	EndFrameURL             string                `json:"end_frame_url,omitempty"`
-	ReferenceImages         []string              `json:"reference_images,omitempty"`
-	ReferenceVideos         []string              `json:"reference_videos,omitempty"`
-	ReferenceAudios         []string              `json:"reference_audios,omitempty"`
-	Guidances               map[string]any        `json:"guidances,omitempty"`
-	Raw                     map[string]any        `json:"raw,omitempty"`
-	Capability              *VideoModelCapability `json:"capability,omitempty"`
-	ReferenceVideoDurations []int                 `json:"reference_video_durations,omitempty"`
+	RequestedModel          string                 `json:"requested_model"`
+	Model                   string                 `json:"model"`
+	UpstreamModel           string                 `json:"-"`
+	Prompt                  string                 `json:"prompt"`
+	AspectRatio             string                 `json:"aspect_ratio"`
+	Duration                int                    `json:"duration"`
+	Resolution              string                 `json:"resolution"`
+	Audio                   bool                   `json:"audio,omitempty"`
+	StartFrameURL           string                 `json:"start_frame_url,omitempty"`
+	EndFrameURL             string                 `json:"end_frame_url,omitempty"`
+	ReferenceImages         []string               `json:"reference_images,omitempty"`
+	ReferenceVideos         []string               `json:"reference_videos,omitempty"`
+	ReferenceAudios         []string               `json:"reference_audios,omitempty"`
+	Guidances               map[string]any         `json:"guidances,omitempty"`
+	Raw                     map[string]any         `json:"raw,omitempty"`
+	Capability              *VideoModelCapability  `json:"capability,omitempty"`
+	ChannelLimits           *VideoCapabilityLimits `json:"-"`
+	ReferenceVideoDurations []int                  `json:"reference_video_durations,omitempty"`
 }
 
 type RequestInfo struct {

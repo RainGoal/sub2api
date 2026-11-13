@@ -27,3 +27,13 @@ func TestChannelVideoPricingUnitContractRoundTrip(t *testing.T) {
 	require.NotContains(t, string(legacy), "video_billing_unit")
 	require.NotContains(t, string(legacy), "video_pricing_version")
 }
+
+func TestChannelVideoCapabilitiesContractRoundTrip(t *testing.T) {
+	var request channelModelPricingRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"platform":"seedance","models":["custom-video"],"video_capabilities":{"max_duration":8,"max_videos":0,"generate_audio":false,"resolutions":["720p"]}}`), &request))
+	prices := pricingRequestToService([]channelModelPricingRequest{request}, true)
+	response := pricingToResponse(&prices[0])
+	require.Equal(t, request.VideoCapabilities, response.VideoCapabilities)
+	require.Zero(t, *response.VideoCapabilities.MaxVideos)
+	require.False(t, *response.VideoCapabilities.GenerateAudio)
+}

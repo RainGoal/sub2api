@@ -365,6 +365,7 @@ func (h *OpenAIGatewayHandler) handleSeedanceVideo(c *gin.Context, endpoint serv
 				return
 			}
 			createRequest = validated
+			pendingTemplate.ChannelLimits = validated.ChannelLimits
 			taskProviderID = string(account.GetVideoProviderID())
 			if assignErr := h.gatewayService.AssignSeedanceVideoTaskAccount(requestCtx, &pendingTemplate, account, taskProviderID); assignErr != nil {
 				if selection.ReleaseFunc != nil {
