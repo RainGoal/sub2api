@@ -9,11 +9,11 @@
       <!-- Account Info Header -->
       <div
         v-if="account"
-        class="flex items-center justify-between rounded-xl border border-primary-200 bg-gradient-to-r from-primary-50 to-primary-100 p-3 dark:border-primary-700/50 dark:from-primary-900/20 dark:to-primary-800/20"
+        class="admin-identity-panel flex items-center justify-between rounded-xl border border-primary-200 bg-gradient-to-r from-primary-50 to-primary-100 p-3 dark:border-primary-700/50 dark:from-primary-900/20 dark:to-primary-800/20"
       >
         <div class="flex items-center gap-3">
           <div
-            class="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-600"
+            class="admin-identity-symbol flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary-500 to-primary-600"
           >
             <Icon name="chartBar" size="md" class="text-white" />
           </div>
@@ -468,6 +468,7 @@ import ModelDistributionChart from '@/components/charts/ModelDistributionChart.v
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
+import { adminChartColor, adminChartFill, adminChartTooltip } from '@/brand/charts'
 import type { Account, AccountUsageStatsResponse } from '@/types'
 
 ChartJS.register(
@@ -502,8 +503,10 @@ const isDarkMode = computed(() => {
 
 // Chart colors
 const chartColors = computed(() => ({
-  text: isDarkMode.value ? '#e5e7eb' : '#374151',
-  grid: isDarkMode.value ? '#374151' : '#e5e7eb'
+  text: adminChartColor('text', isDarkMode.value ? '#e5e7eb' : '#374151'),
+  grid: adminChartColor('grid', isDarkMode.value ? '#374151' : '#e5e7eb'),
+  accountCost: adminChartColor('accent', '#3b82f6'),
+  requests: adminChartColor('secondary', '#f97316')
 }))
 
 // Line chart data
@@ -516,8 +519,8 @@ const trendChartData = computed(() => {
       {
         label: t('usage.accountBilled') + ' (USD)',
         data: stats.value.history.map((h) => h.actual_cost),
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        borderColor: chartColors.value.accountCost,
+        backgroundColor: adminChartFill(chartColors.value.accountCost, 'rgba(59, 130, 246, 0.1)'),
         fill: true,
         tension: 0.3,
         yAxisID: 'y'
@@ -535,8 +538,8 @@ const trendChartData = computed(() => {
       {
         label: t('admin.accounts.stats.requests'),
         data: stats.value.history.map((h) => h.requests),
-        borderColor: '#f97316',
-        backgroundColor: 'rgba(249, 115, 22, 0.1)',
+        borderColor: chartColors.value.requests,
+        backgroundColor: adminChartFill(chartColors.value.requests, 'rgba(249, 115, 22, 0.1)'),
         fill: false,
         tension: 0.3,
         yAxisID: 'y1'
@@ -567,6 +570,7 @@ const lineChartOptions = computed(() => ({
       }
     },
     tooltip: {
+      ...adminChartTooltip(),
       callbacks: {
         label: (context: any) => {
           const label = context.dataset.label || ''
@@ -601,7 +605,7 @@ const lineChartOptions = computed(() => ({
         color: chartColors.value.grid
       },
       ticks: {
-        color: '#3b82f6',
+        color: chartColors.value.accountCost,
         font: {
           size: 10
         },
@@ -610,7 +614,7 @@ const lineChartOptions = computed(() => ({
       title: {
         display: true,
         text: t('usage.accountBilled') + ' (USD)',
-        color: '#3b82f6',
+        color: chartColors.value.accountCost,
         font: {
           size: 11
         }
@@ -624,7 +628,7 @@ const lineChartOptions = computed(() => ({
         drawOnChartArea: false
       },
       ticks: {
-        color: '#f97316',
+        color: chartColors.value.requests,
         font: {
           size: 10
         },
@@ -633,7 +637,7 @@ const lineChartOptions = computed(() => ({
       title: {
         display: true,
         text: t('admin.accounts.stats.requests'),
-        color: '#f97316',
+        color: chartColors.value.requests,
         font: {
           size: 11
         }

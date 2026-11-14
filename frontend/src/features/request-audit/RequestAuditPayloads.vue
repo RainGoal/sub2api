@@ -170,7 +170,7 @@ onBeforeUnmount(() => { disposed = true; generation++ })
 
 <template>
   <div class="space-y-4" data-test="audit-payloads">
-    <section v-for="part in parts" :key="part" :data-test="`payload-panel-${part}`" :aria-label="t(`admin.requestAudit.parts.${part}`)" :aria-busy="panels[part].loading || panels[part].downloading || (part === 'body' && bodyContent.loading)" class="overflow-hidden rounded-lg border border-slate-700/80 bg-[#0b1220] text-slate-100">
+    <section v-for="part in parts" :key="part" :data-test="`payload-panel-${part}`" :aria-label="t(`admin.requestAudit.parts.${part}`)" :aria-busy="panels[part].loading || panels[part].downloading || (part === 'body' && bodyContent.loading)" class="request-audit-payload-panel overflow-hidden rounded-lg border border-slate-700/80 bg-[#0b1220] text-slate-100">
       <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/70 px-4 py-3">
         <div class="flex min-w-0 flex-wrap items-center gap-2">
           <h3 class="font-mono text-sm font-semibold">{{ t(`admin.requestAudit.parts.${part}`) }}</h3>
@@ -192,7 +192,7 @@ onBeforeUnmount(() => { disposed = true; generation++ })
         <label v-if="canAllowPartial(part)" class="flex items-center gap-2 text-amber-300"><input v-model="panels[part].allowPartial" type="checkbox" :data-test="`partial-${part}`" class="rounded border-slate-600 accent-amber-500" @change="loadPart(part)" />{{ t('admin.requestAudit.allowPartial') }}</label>
         <label v-if="pretty[part] !== null && (part !== 'body' || bodyMode === 'raw')" class="flex items-center gap-2" :title="t('admin.requestAudit.formatJson')"><input v-model="panels[part].formatted" type="checkbox" :data-test="`format-${part}`" class="rounded border-slate-600 accent-primary-500" />{{ t('admin.requestAudit.payloads.pretty') }}</label>
       </div>
-      <div class="bg-[#070c15]">
+      <div class="request-audit-payload-content bg-[#070c15]">
         <p v-if="panels[part].loading" role="status" class="px-4 py-10 text-center text-xs text-slate-400">{{ t('common.loading') }}</p>
         <div v-else-if="panels[part].error" role="alert" class="space-y-3 px-4 py-5">
           <p class="break-words text-sm text-red-300">{{ panels[part].error }}</p>

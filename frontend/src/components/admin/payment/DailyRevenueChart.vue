@@ -33,6 +33,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { adminChartColor, adminChartFill, adminChartPalette, adminChartTooltip } from '@/brand/charts'
 import type { DailyPaymentStats } from '@/types/payment'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
@@ -50,6 +51,7 @@ const colors = [
   ['rgb(245, 158, 11)', 'rgba(245, 158, 11, 0.1)'],
   ['rgb(239, 68, 68)', 'rgba(239, 68, 68, 0.1)'],
 ]
+const revenueColors = adminChartPalette(colors.map(([color]) => color))
 
 const chartData = computed(() => {
   if (!props.data || props.data.length === 0) return null
@@ -58,7 +60,8 @@ const chartData = computed(() => {
     labels: props.data.map(d => d.date),
     datasets: [
       ...currencies.map((currency, index) => {
-        const [borderColor, backgroundColor] = colors[index % colors.length]
+        const borderColor = revenueColors[index % revenueColors.length]
+        const backgroundColor = adminChartFill(borderColor, colors[index % colors.length][1])
         return {
           label: `${currency} ${t('payment.admin.revenue')}`,
           data: props.data.map(day => day.amount[currency] || 0),
@@ -90,22 +93,30 @@ const chartOptions = {
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
   scales: {
+    x: {
+      ticks: { color: adminChartColor('text', ChartJS.defaults.color as string) },
+      grid: { color: adminChartColor('grid', 'rgba(0, 0, 0, 0.1)') },
+    },
     y: {
       type: 'linear' as const,
       display: true,
       position: 'left' as const,
-      title: { display: true, text: t('payment.admin.revenue') },
+      title: { display: true, text: t('payment.admin.revenue'), color: adminChartColor('text', ChartJS.defaults.color as string) },
+      ticks: { color: adminChartColor('text', ChartJS.defaults.color as string) },
+      grid: { color: adminChartColor('grid', 'rgba(0, 0, 0, 0.1)') },
     },
     y1: {
       type: 'linear' as const,
       display: true,
       position: 'right' as const,
-      title: { display: true, text: t('payment.admin.orderCount') },
+      title: { display: true, text: t('payment.admin.orderCount'), color: adminChartColor('text', ChartJS.defaults.color as string) },
+      ticks: { color: adminChartColor('text', ChartJS.defaults.color as string) },
       grid: { drawOnChartArea: false },
     }
   },
   plugins: {
-    legend: { position: 'top' as const },
+    legend: { position: 'top' as const, labels: { color: adminChartColor('text', ChartJS.defaults.color as string) } },
+    tooltip: { ...adminChartTooltip() },
   }
 }
 </script>

@@ -1,0 +1,37 @@
+html[data-admin-brand='wsapi'],
+html[data-admin-brand='wsapi'] body {
+  background: var(--ws-bg);
+  color: var(--ws-text);
+  font-family: var(--ws-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+html[data-admin-brand='wsapi'] body { font-size: 14px; }
+
+html[data-admin-brand='wsapi'] :is(.font-mono, code, pre) {
+  font-family: var(--ws-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-admin-brand='wsapi'] ::selection {
+  background: rgb(229 83 45 / 0.24);
+  color: inherit;
+}
+
+html[data-admin-brand='wsapi'] :is(a, button, input, select, textarea, [role='button']):focus-visible {
+  outline: 2px solid var(--ws-accent);
+  outline-offset: 2px;
+}
+
+html[data-admin-brand='wsapi'] .page-header { margin-bottom: 16px; }
+html[data-admin-brand='wsapi'] .page-title { font-size: 22px; font-weight: 600; line-height: 1.3; }
+html[data-admin-brand='wsapi'] .page-description { font-size: 13px; color: var(--ws-muted); }
+html[data-admin-brand='wsapi'] .sidebar-section-title { letter-spacing: normal; text-transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-admin-brand='wsapi'] { scroll-behavior: auto; }
+  html[data-admin-brand='wsapi'] :is(.btn, .card, .sidebar, .sidebar-link, .modal-content) {
+    transition: none;
+    animation: none;
+  }
+}

@@ -1,0 +1,318 @@
+/* Shared components retain their behavior and default appearance outside admin. */
+html.dark[data-admin-brand="wsapi"] .btn {
+  min-height: 36px;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--ws-radius-control);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  background-image: none;
+  box-shadow: none;
+  transform: none;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.btn-primary, .confirm-primary, .date-picker-apply, .announcement-primary) {
+  border: 1px solid var(--ws-text);
+  border-radius: var(--ws-radius-control);
+  background: var(--ws-text);
+  color: var(--ws-bg);
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.btn-primary, .confirm-primary, .date-picker-apply, .announcement-primary):hover:not(:disabled) {
+  border-color: var(--ws-text-strong);
+  background: var(--ws-text-strong);
+  color: var(--ws-bg);
+  box-shadow: none;
+  transform: none;
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.btn-secondary, .confirm-cancel) {
+  border: 1px solid var(--ws-line-strong);
+  border-radius: var(--ws-radius-control);
+  background: var(--ws-panel);
+  color: var(--ws-text);
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.btn-secondary, .confirm-cancel):hover:not(:disabled) {
+  border-color: var(--ws-line-strong);
+  background: var(--ws-hover);
+  color: var(--ws-text);
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand="wsapi"] .btn-ghost {
+  background: transparent;
+  color: var(--ws-text-soft);
+}
+
+html.dark[data-admin-brand="wsapi"] .btn-ghost:hover:not(:disabled) {
+  background: var(--ws-hover);
+  color: var(--ws-text);
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.btn-danger, .confirm-danger) {
+  border: 1px solid transparent;
+  border-radius: var(--ws-radius-control);
+  background: rgb(255 123 114 / 14%);
+  color: #ff7b72;
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.btn-danger, .confirm-danger):hover:not(:disabled) {
+  background: rgb(255 123 114 / 22%);
+  color: #ff9a93;
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand="wsapi"] .btn-success { background: #166534; color: #f0fdf4; }
+html.dark[data-admin-brand="wsapi"] .btn-success:hover:not(:disabled) { background: #15803d; }
+html.dark[data-admin-brand="wsapi"] .btn-warning { background: #854d0e; color: #fefce8; }
+html.dark[data-admin-brand="wsapi"] .btn-warning:hover:not(:disabled) { background: #a16207; }
+html.dark[data-admin-brand="wsapi"] .btn-sm { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+html.dark[data-admin-brand="wsapi"] .btn-lg { min-height: 42px; padding: 10px 18px; font-size: 14px; }
+html.dark[data-admin-brand="wsapi"] .btn-icon { min-height: 36px; min-width: 36px; padding: 8px; border-radius: var(--ws-radius-control); }
+html.dark[data-admin-brand="wsapi"] .btn:disabled { opacity: .45; }
+
+html.dark[data-admin-brand="wsapi"] :is(.input, .select-trigger, .date-picker-trigger, .date-picker-input) {
+  min-height: 38px;
+  padding-block: 8px;
+  border: 1px solid var(--ws-line-strong);
+  border-radius: var(--ws-radius-control);
+  background: var(--ws-input);
+  color: var(--ws-text);
+  font-size: 14px;
+  line-height: 20px;
+  transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+/* Keep existing prefix/suffix padding utilities so labels never collide with icons. */
+html.dark[data-admin-brand="wsapi"] :is(.select-trigger, .date-picker-trigger) { padding-inline: 12px; }
+html.dark[data-admin-brand="wsapi"] :is(.input, .select-search-input)::placeholder { color: var(--ws-muted); }
+html.dark[data-admin-brand="wsapi"] :is(.input-label, .date-picker-label) { color: var(--ws-text-soft); font-size: 13px; }
+html.dark[data-admin-brand="wsapi"] :is(.input-hint, .select-value-placeholder) { color: var(--ws-muted); }
+
+html.dark[data-admin-brand="wsapi"] :is(.input, .select-trigger, .date-picker-trigger, .date-picker-input):focus,
+html.dark[data-admin-brand="wsapi"] :is(.select-trigger-open, .date-picker-trigger-open) {
+  outline: none;
+  border-color: var(--ws-accent);
+  box-shadow: var(--ws-focus-ring);
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.input.input-error, .select-trigger-error) { border-color: #ff7b72; }
+html.dark[data-admin-brand="wsapi"] :is(.input.input-error, .select-trigger-error):focus {
+  border-color: #ff7b72;
+  box-shadow: 0 0 0 3px rgb(255 123 114 / 20%);
+}
+html.dark[data-admin-brand="wsapi"] .input-error-text { color: #ff7b72; }
+html.dark[data-admin-brand="wsapi"] :is(.input:disabled, .select-trigger-disabled) { background: var(--ws-bg); opacity: .5; }
+html.dark[data-admin-brand="wsapi"] textarea.input { min-height: 110px; }
+html.dark[data-admin-brand="wsapi"] .select-trigger-open.select-trigger-error { box-shadow: 0 0 0 3px rgb(255 123 114 / 20%); }
+html.dark[data-admin-brand="wsapi"] :is(.toggle-control, .switch) { transition: background-color 150ms ease-out; }
+html.dark[data-admin-brand="wsapi"] .toggle-control[aria-checked="false"] { background: var(--ws-line-strong); }
+html.dark[data-admin-brand="wsapi"] .toggle-control[aria-checked="true"] { background: var(--ws-accent); }
+
+html.dark[data-admin-brand="wsapi"] :is(.card, .card-glass, .glass-card, .stat-card) {
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+html.dark[data-admin-brand="wsapi"] .card-hover:hover { border-color: var(--ws-line-strong); box-shadow: none; transform: none; }
+html.dark[data-admin-brand="wsapi"] :is(.card-header, .card-footer) { padding: 12px 16px; border-color: var(--ws-line); }
+html.dark[data-admin-brand="wsapi"] .card-body { padding: 16px; }
+html.dark[data-admin-brand="wsapi"] .stat-card { padding: 16px; gap: 10px; }
+html.dark[data-admin-brand="wsapi"] .stat-icon { width: 20px; height: 20px; border-radius: 0; background: none; color: var(--ws-muted); }
+html.dark[data-admin-brand="wsapi"] .stat-icon > svg { width: 18px; height: 18px; }
+html.dark[data-admin-brand="wsapi"] .stat-value { font: 500 26px/1.2 var(--ws-font-mono); font-variant-numeric: tabular-nums; }
+html.dark[data-admin-brand="wsapi"] .stat-label { color: var(--ws-muted); font-size: 12px; font-weight: 500; }
+
+html.dark[data-admin-brand="wsapi"] :is(.table-container, .data-table-card) {
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+}
+html.dark[data-admin-brand="wsapi"] :is(.table, .data-table) { color: var(--ws-text); font-size: 13px; }
+html.dark[data-admin-brand="wsapi"] :is(.table, .data-table) th {
+  height: 36px;
+  padding: 8px 12px;
+  border-color: var(--ws-line);
+  background: var(--ws-panel);
+  color: var(--ws-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  text-transform: none;
+  letter-spacing: normal;
+  backdrop-filter: none;
+}
+html.dark[data-admin-brand="wsapi"] .data-table .table-body { background: var(--ws-panel); }
+html.dark[data-admin-brand="wsapi"] .data-table-row { background: var(--ws-panel); }
+html.dark[data-admin-brand="wsapi"] :is(.table td, .data-table-row > td) {
+  height: 40px;
+  padding: 6px 12px;
+  border-color: var(--ws-line);
+  color: var(--ws-text);
+  font-size: 13px;
+  line-height: 20px;
+}
+html.dark[data-admin-brand="wsapi"] .data-table tbody .sticky-col { background: var(--ws-panel); }
+/* Match the existing second sticky column's offset after compacting cell padding. */
+html.dark[data-admin-brand="wsapi"] .data-table .sticky-col-left-first {
+  width: var(--select-col-width);
+  min-width: var(--select-col-width);
+}
+html.dark[data-admin-brand="wsapi"] :is(.table tbody tr:hover, .data-table-row:hover, .data-table-row:hover .sticky-col) { background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] :is(.data-table-selected, .data-table-selected .sticky-col) { background: var(--ws-selected); }
+html.dark[data-admin-brand="wsapi"] .data-table-card.data-table-selected { border-color: var(--ws-accent); }
+html.dark[data-admin-brand="wsapi"] .data-table-field-label { color: var(--ws-muted); letter-spacing: normal; text-transform: none; }
+
+html.dark[data-admin-brand="wsapi"] .pagination {
+  gap: 12px;
+  padding: 12px 16px;
+  border-color: var(--ws-line);
+  background: transparent;
+  color: var(--ws-muted);
+  font-size: 12px;
+}
+html.dark[data-admin-brand="wsapi"] :is(.pagination-desktop, .pagination-summary) { flex-wrap: wrap; gap: 12px; }
+html.dark[data-admin-brand="wsapi"] .pagination-summary > * + * { margin-left: 0; }
+html.dark[data-admin-brand="wsapi"] .pagination-pages { gap: 4px; box-shadow: none; }
+html.dark[data-admin-brand="wsapi"] .pagination-pages > button {
+  min-width: 32px;
+  min-height: 32px;
+  margin-left: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--ws-radius-control);
+  background: transparent;
+  color: var(--ws-text-soft);
+  font: 400 12px/20px var(--ws-font-mono);
+}
+html.dark[data-admin-brand="wsapi"] .pagination-pages > button:hover:not(:disabled) { background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] .pagination-pages > button[aria-current="page"] { border-color: var(--ws-line-strong); background: var(--ws-selected); color: var(--ws-text); }
+html.dark[data-admin-brand="wsapi"] .pagination :is(.input, .select-trigger) { min-height: 32px; padding-block: 5px; font-size: 12px; }
+html.dark[data-admin-brand="wsapi"] .pagination p,
+html.dark[data-admin-brand="wsapi"] .pagination-summary > div > span { font-size: 12px; }
+
+html.dark[data-admin-brand="wsapi"] .data-table tbody .data-table-selected .sticky-col,
+html.dark[data-admin-brand="wsapi"] .data-table tbody .data-table-selected:hover { background: var(--ws-selected); }
+html.dark[data-admin-brand="wsapi"] :is(.btn, .btn-icon, .confirm-cancel, .confirm-primary, .confirm-danger, .toggle-control, .date-picker-apply, .pagination button, .announcement-primary):focus-visible {
+  outline: 2px solid var(--ws-accent);
+  outline-offset: 2px;
+}
+
+html.dark[data-admin-brand="wsapi"] :is(.dropdown, .select-dropdown-portal, .date-picker-dropdown, .help-tooltip-content) {
+  border: 1px solid var(--ws-line-strong);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  color: var(--ws-text);
+  box-shadow: var(--ws-shadow-float);
+}
+html.dark[data-admin-brand="wsapi"] :is(.dropdown-item, .select-option) { padding: 8px 12px; font-size: 13px; color: var(--ws-text-soft); }
+html.dark[data-admin-brand="wsapi"] :is(.dropdown-item:hover, .select-option:hover, .select-option-focused) { background: var(--ws-hover); color: var(--ws-text); }
+html.dark[data-admin-brand="wsapi"] .select-option-selected { background: var(--ws-selected); color: var(--ws-text); }
+html.dark[data-admin-brand="wsapi"] .select-option-group { background: var(--ws-bg); color: var(--ws-muted); font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: normal; }
+html.dark[data-admin-brand="wsapi"] .select-option-group:hover { background: var(--ws-bg); color: var(--ws-muted); }
+html.dark[data-admin-brand="wsapi"] :is(.select-search, .date-picker-divider) { border-color: var(--ws-line); }
+html.dark[data-admin-brand="wsapi"] .select-search-input { color: var(--ws-text); font-size: 13px; }
+html.dark[data-admin-brand="wsapi"] .select-empty { color: var(--ws-muted); }
+html.dark[data-admin-brand="wsapi"] .date-picker-preset { color: var(--ws-text-soft); }
+html.dark[data-admin-brand="wsapi"] .date-picker-preset:hover { background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] .date-picker-preset-active { background: var(--ws-selected); color: var(--ws-accent-ink); }
+html.dark[data-admin-brand="wsapi"] .help-tooltip-arrow { background: var(--ws-panel); }
+
+html.dark[data-admin-brand="wsapi"] :is(.modal-overlay, .dialog-overlay, .announcement-overlay) {
+  background: rgb(0 0 0 / 48%);
+  backdrop-filter: none;
+}
+html.dark[data-admin-brand="wsapi"] :is(.modal-content, .dialog-container, .announcement-panel) {
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-modal);
+  background: var(--ws-panel);
+  box-shadow: var(--ws-shadow-float);
+}
+html.dark[data-admin-brand="wsapi"] :is(.modal-header, .modal-footer, .dialog-header, .dialog-footer) { padding: 14px 20px; border-color: var(--ws-line); background: transparent; }
+html.dark[data-admin-brand="wsapi"] :is(.modal-body, .dialog-body) { padding: 16px 20px; }
+html.dark[data-admin-brand="wsapi"] .modal-title { color: var(--ws-text); font-size: 16px; font-weight: 600; }
+html.dark[data-admin-brand="wsapi"] .toast-message { border-radius: var(--ws-radius-card); background: var(--ws-panel); box-shadow: var(--ws-shadow-float); }
+html.dark[data-admin-brand="wsapi"] .toast-stack { max-width: calc(100vw - 32px); }
+html.dark[data-admin-brand="wsapi"] .toast-message { min-width: min(320px, calc(100vw - 32px)); }
+html.dark[data-admin-brand="wsapi"] .status-badge { min-height: 22px; font-size: 12px; }
+html.dark[data-admin-brand="wsapi"] .status-badge > span:last-child { font-size: 12px; color: var(--ws-text-soft); }
+html.dark[data-admin-brand="wsapi"] .status-badge > span:first-child { width: 6px; height: 6px; }
+html.dark[data-admin-brand="wsapi"] :is(.skeleton, .skeleton-block) { background: var(--ws-selected); }
+html.dark[data-admin-brand="wsapi"] .empty-state { padding: 36px 16px; }
+html.dark[data-admin-brand="wsapi"] .empty-state-symbol { width: 40px; height: 40px; margin-bottom: 15px; border: 1px solid var(--ws-line); border-radius: var(--ws-radius-card); background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] .empty-state-icon { width: 22px; height: 22px; margin: 0; color: var(--ws-muted); }
+html.dark[data-admin-brand="wsapi"] .empty-state-title { font-size: 15px; font-weight: 600; }
+html.dark[data-admin-brand="wsapi"] .empty-state-description { color: var(--ws-muted); font-size: 13px; }
+
+html.dark[data-admin-brand="wsapi"] .announcement-trigger:hover { transform: none; }
+html.dark[data-admin-brand="wsapi"] .announcement-header { padding: 20px; border-color: var(--ws-line); background: var(--ws-panel); }
+html.dark[data-admin-brand="wsapi"] .announcement-header h2 { font-size: 18px; font-weight: 600; }
+html.dark[data-admin-brand="wsapi"] .announcement-body { padding: 20px; background: var(--ws-panel); }
+html.dark[data-admin-brand="wsapi"] .announcement-footer { padding: 14px 20px; border-color: var(--ws-line); background: var(--ws-panel); }
+html.dark[data-admin-brand="wsapi"] .announcement-decoration,
+html.dark[data-admin-brand="wsapi"] :is(.announcement-panel, .announcement-trigger) .animate-ping { display: none; }
+html.dark[data-admin-brand="wsapi"] .announcement-symbol { background: var(--ws-hover); color: var(--ws-muted); box-shadow: none; }
+html.dark[data-admin-brand="wsapi"] .announcement-unread { background: var(--ws-selected); color: var(--ws-accent-ink); box-shadow: none; }
+html.dark[data-admin-brand="wsapi"] .announcement-marker { width: 2px; background: var(--ws-accent); }
+
+html.dark[data-admin-brand="wsapi"] .subscription-progress-trigger { border-radius: var(--ws-radius-control); background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] .subscription-progress-trigger:hover { background: var(--ws-selected); }
+html.dark[data-admin-brand="wsapi"] :is(.subscription-progress-symbol, .subscription-progress-count) { color: var(--ws-text-soft); }
+html.dark[data-admin-brand="wsapi"] .subscription-progress-panel { max-width: calc(100vw - 32px); border-color: var(--ws-line-strong); border-radius: var(--ws-radius-card); background: var(--ws-panel); box-shadow: var(--ws-shadow-float); }
+html.dark[data-admin-brand="wsapi"] .subscription-progress-unlimited { background: rgb(34 197 94 / 10%); }
+
+html.dark[data-admin-brand="wsapi"] .admin-identity-panel {
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-hover);
+}
+html.dark[data-admin-brand="wsapi"] .admin-identity-symbol {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  background: var(--ws-selected);
+  color: var(--ws-muted);
+  box-shadow: none;
+}
+html.dark[data-admin-brand="wsapi"] .admin-identity-symbol > :is(svg, span) { color: var(--ws-text-soft); font-size: 16px; }
+html.dark[data-admin-brand="wsapi"] .admin-identity-copy { min-width: 0; overflow-wrap: anywhere; }
+
+html.dark[data-admin-brand="wsapi"] .table-wrapper .data-table .table-header { background: var(--ws-panel); }
+html.dark[data-admin-brand="wsapi"] .announcement-panel .markdown-body { color: var(--ws-text-soft); font-size: 14px; }
+html.dark[data-admin-brand="wsapi"] .announcement-panel .markdown-body th { background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] .announcement-panel .markdown-body a,
+html.dark[data-admin-brand="wsapi"] .announcement-panel .markdown-body li::marker { color: var(--ws-accent-ink); }
+html.dark[data-admin-brand="wsapi"] .announcement-panel .markdown-body blockquote { border-color: var(--ws-line-strong); background: var(--ws-hover); }
+html.dark[data-admin-brand="wsapi"] .announcement-panel .markdown-body blockquote::before { display: none; }
+html.dark[data-admin-brand="wsapi"] .tabs { padding: 2px; border-radius: var(--ws-radius-control); background: var(--ws-selected); }
+html.dark[data-admin-brand="wsapi"] .tab { min-height: 30px; padding: 5px 12px; border-radius: 4px; color: var(--ws-muted); font-size: 13px; }
+html.dark[data-admin-brand="wsapi"] .tab-active { background: var(--ws-panel); color: var(--ws-text); box-shadow: inset 0 0 0 1px var(--ws-line-strong); }
+
+@media (max-width: 639px) {
+  html.dark[data-admin-brand="wsapi"] .pagination { padding-inline: 0; }
+  html.dark[data-admin-brand="wsapi"] :is(.btn, .input, .select-trigger, .date-picker-trigger) { min-height: 40px; }
+  html.dark[data-admin-brand="wsapi"] :is(.modal-header, .modal-footer, .dialog-header, .dialog-footer, .announcement-header, .announcement-footer) { padding: 12px 16px; }
+  html.dark[data-admin-brand="wsapi"] :is(.modal-body, .dialog-body, .announcement-body) { padding: 16px; }
+  html.dark[data-admin-brand="wsapi"] .announcement-footer > div { flex-wrap: wrap; gap: 12px; }
+  html.dark[data-admin-brand="wsapi"] .date-picker-dropdown { min-width: 0; max-width: calc(100vw - 32px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.dark[data-admin-brand="wsapi"] :is(.btn, .input, .select-trigger, .select-dropdown-enter-active, .select-dropdown-leave-active, .date-picker-dropdown-enter-active, .date-picker-dropdown-leave-active, .modal-enter-active, .modal-leave-active, .modal-content, .dropdown, .announcement-overlay, .announcement-panel, .toast-message) {
+    transition-duration: 0ms;
+    animation-duration: 0ms;
+  }
+  html.dark[data-admin-brand="wsapi"] .announcement-overlay > .announcement-panel,
+  html.dark[data-admin-brand="wsapi"] .toast-message { transform: none; }
+  html.dark[data-admin-brand="wsapi"] :is(.skeleton, .skeleton-block) { animation: none; }
+}

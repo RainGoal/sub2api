@@ -138,6 +138,7 @@ import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { adminChartPalette, adminChartTooltip } from '@/brand/charts'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { EndpointStat, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
@@ -211,7 +212,7 @@ const toggleBreakdown = async (endpoint: string) => {
   }
 }
 
-const chartColors = [
+const chartColors = adminChartPalette([
   '#3b82f6',
   '#10b981',
   '#f59e0b',
@@ -224,7 +225,7 @@ const chartColors = [
   '#84cc16',
   '#06b6d4',
   '#a855f7'
-]
+])
 
 const displayEndpointStats = computed(() => {
   const sourceStats = props.source === 'upstream'
@@ -263,6 +264,7 @@ const doughnutOptions = computed(() => ({
       display: false
     },
     tooltip: {
+      ...adminChartTooltip(),
       callbacks: {
         label: (context: any) => {
           const value = context.raw as number

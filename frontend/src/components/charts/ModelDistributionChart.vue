@@ -248,6 +248,7 @@ import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { adminChartColor, adminChartPalette, adminChartTooltip } from '@/brand/charts'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { ModelStat, UserSpendingRankingItem, UserBreakdownItem } from '@/types'
 import { getUserBreakdown } from '@/api/admin/dashboard'
@@ -339,7 +340,7 @@ const showAccountCost = computed(() => props.showAccountCost)
 const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 
-const chartColors = [
+const chartColors = adminChartPalette([
   '#3b82f6',
   '#10b981',
   '#f59e0b',
@@ -352,7 +353,7 @@ const chartColors = [
   '#84cc16',
   '#06b6d4',
   '#a855f7'
-]
+])
 
 const displayModelStats = computed(() => {
   const sourceStats = props.source === 'upstream'
@@ -391,7 +392,7 @@ const rankingChartData = computed(() => {
   if (otherRankingItem.value) {
     labels.push(t('admin.dashboard.spendingRankingOther'))
     data.push(otherRankingItem.value.actual_cost)
-    backgroundColor.push('#94a3b8')
+    backgroundColor.push(adminChartColor('neutral', '#94a3b8'))
   }
 
   return {
@@ -445,6 +446,7 @@ const doughnutOptions = computed(() => ({
       display: false
     },
     tooltip: {
+      ...adminChartTooltip(),
       callbacks: {
         label: (context: any) => {
           const value = context.raw as number
@@ -468,6 +470,7 @@ const rankingDoughnutOptions = computed(() => ({
       display: false
     },
     tooltip: {
+      ...adminChartTooltip(),
       callbacks: {
         label: (context: any) => {
           const value = context.raw as number

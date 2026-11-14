@@ -19,7 +19,7 @@
       @keydown.down.prevent="onTriggerKeyDown"
       @keydown.up.prevent="onTriggerKeyDown"
     >
-      <span class="select-value">
+      <span class="select-value" :class="{ 'select-value-placeholder': !hasValue }">
         <slot name="selected" :option="selectedOption">
           {{ selectedLabel }}
         </slot>

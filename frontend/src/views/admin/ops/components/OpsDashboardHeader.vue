@@ -1180,7 +1180,7 @@ function handleToolbarRefresh() {
               </div>
 
               <!-- Animated Pulse Line (Heart Beat Animation) -->
-              <div class="h-8 w-full overflow-hidden opacity-50">
+              <div class="ops-traffic-decoration h-8 w-full overflow-hidden opacity-50">
                 <svg class="h-full w-full" viewBox="0 0 280 32" preserveAspectRatio="none">
                   <path
                     d="M0 16 Q 20 16, 40 16 T 80 16 T 120 10 T 160 22 T 200 16 T 240 16 T 280 16"

@@ -1,3 +1,15 @@
+import colors from 'tailwindcss/colors.js'
+import defaultTheme from 'tailwindcss/defaultTheme.js'
+
+// The variables exist only inside the admin brand scope. Public/user routes
+// retain the original palette, including Tailwind's opacity modifiers.
+function brandPalette(name, palette) {
+  return Object.fromEntries(Object.entries(palette).map(([shade, hex]) => {
+    const rgb = hex.slice(1).match(/.{2}/g).map((part) => parseInt(part, 16)).join(' ')
+    return [shade, `rgb(var(--ws-color-${name}-${shade}, ${rgb}) / <alpha-value>)`]
+  }))
+}
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
@@ -6,7 +18,7 @@ export default {
     extend: {
       colors: {
         // 主色调 - Teal/Cyan 青色系
-        primary: {
+        primary: brandPalette('primary', {
           50: '#f0fdfa',
           100: '#ccfbf1',
           200: '#99f6e4',
@@ -18,9 +30,9 @@ export default {
           800: '#115e59',
           900: '#134e4a',
           950: '#042f2e'
-        },
+        }),
         // 辅助色 - 深蓝灰
-        accent: {
+        accent: brandPalette('dark', {
           50: '#f8fafc',
           100: '#f1f5f9',
           200: '#e2e8f0',
@@ -32,9 +44,9 @@ export default {
           800: '#1e293b',
           900: '#0f172a',
           950: '#020617'
-        },
+        }),
         // 深色模式背景
-        dark: {
+        dark: brandPalette('dark', {
           50: '#f8fafc',
           100: '#f1f5f9',
           200: '#e2e8f0',
@@ -46,7 +58,8 @@ export default {
           800: '#1e293b',
           900: '#0f172a',
           950: '#020617'
-        }
+        }),
+        gray: brandPalette('gray', colors.gray)
       },
       fontFamily: {
         sans: [
@@ -65,12 +78,15 @@ export default {
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
       },
       boxShadow: {
-        glass: '0 8px 32px rgba(0, 0, 0, 0.08)',
-        'glass-sm': '0 4px 16px rgba(0, 0, 0, 0.06)',
-        glow: '0 0 20px rgba(20, 184, 166, 0.25)',
-        'glow-lg': '0 0 40px rgba(20, 184, 166, 0.35)',
-        card: '0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06)',
-        'card-hover': '0 10px 40px rgba(0, 0, 0, 0.08)',
+        ...Object.fromEntries(['sm', 'DEFAULT', 'md'].map((size) => [
+          size, `var(--ws-panel-shadow, ${defaultTheme.boxShadow[size]})`
+        ])),
+        glass: 'var(--ws-panel-shadow, 0 8px 32px rgba(0, 0, 0, 0.08))',
+        'glass-sm': 'var(--ws-panel-shadow, 0 4px 16px rgba(0, 0, 0, 0.06))',
+        glow: 'var(--ws-panel-shadow, 0 0 20px rgba(20, 184, 166, 0.25))',
+        'glow-lg': 'var(--ws-panel-shadow, 0 0 40px rgba(20, 184, 166, 0.35))',
+        card: 'var(--ws-panel-shadow, 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06))',
+        'card-hover': 'var(--ws-panel-shadow, 0 10px 40px rgba(0, 0, 0, 0.08))',
         'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
       },
       backgroundImage: {
@@ -126,7 +142,11 @@ export default {
         xs: '2px'
       },
       borderRadius: {
-        '4xl': '2rem'
+        lg: 'var(--ws-radius-control, 0.5rem)',
+        xl: 'var(--ws-radius-card, 0.75rem)',
+        '2xl': 'var(--ws-radius-card, 1rem)',
+        '3xl': 'var(--ws-radius-modal, 1.5rem)',
+        '4xl': 'var(--ws-radius-modal, 2rem)'
       }
     }
   },

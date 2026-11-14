@@ -1,0 +1,265 @@
+html[data-admin-brand='wsapi'] .admin-dashboard > * + * {
+  margin-top: 20px;
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metrics {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metrics > .card {
+  min-width: 0;
+  padding: 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metrics > .card + .card {
+  border-left: 1px solid var(--ws-line);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metrics > .card > .flex {
+  align-items: flex-start;
+}
+
+html[data-admin-brand='wsapi'] :is(.dashboard-metric-icon, .admin-stat-icon) {
+  flex: none;
+  padding: 2px 0;
+  background: transparent;
+}
+
+html[data-admin-brand='wsapi'] :is(.dashboard-metric-icon, .admin-stat-icon) > svg {
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metrics .text-xl {
+  margin: 8px 0 6px;
+  color: var(--ws-text);
+  font-family: var(--ws-font-mono);
+  font-size: clamp(18px, 1.6vw, 24px);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+html[data-admin-brand='wsapi'] .dashboard-quick-action {
+  border: 1px solid var(--ws-line);
+  background: transparent;
+}
+
+html[data-admin-brand='wsapi'] .dashboard-quick-action:hover {
+  background: var(--ws-hover);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-quick-action > span:first-child {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metric-toggle {
+  min-height: 30px;
+  border-radius: var(--ws-radius-control);
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metric-toggle[aria-pressed='true'] {
+  background: var(--ws-selected);
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .dashboard-metric-toggle:hover {
+  background: var(--ws-hover);
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .admin-chart-panel {
+  padding: 16px;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  box-shadow: none;
+}
+
+html[data-admin-brand='wsapi'] .admin-chart-panel h3 {
+  font-weight: 600;
+}
+
+html[data-admin-brand='wsapi'] .admin-chart-panel h3 > svg {
+  color: var(--ws-muted);
+}
+
+html.dark[data-admin-brand='wsapi'] .settings-tabs-shell {
+  top: 64px;
+  margin-inline: 0;
+  padding: 4px;
+  border-color: var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html.dark[data-admin-brand='wsapi'] .settings-tab {
+  height: 36px;
+  border-radius: var(--ws-radius-control);
+  color: var(--ws-muted);
+}
+
+html.dark[data-admin-brand='wsapi'] .settings-tab::before {
+  border-radius: var(--ws-radius-control);
+  background: var(--ws-hover);
+}
+
+html.dark[data-admin-brand='wsapi'] .settings-tab-active {
+  border-color: var(--ws-line-strong);
+  background: var(--ws-selected);
+  color: var(--ws-text);
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand='wsapi'] .settings-tab-active::after {
+  display: none;
+}
+
+html.dark[data-admin-brand='wsapi'] .settings-tabs .settings-tab-active .settings-tab-icon {
+  background: transparent;
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .subscription-unlimited-state {
+  background: var(--ws-hover);
+}
+
+html.dark[data-admin-brand='wsapi'] .personal-balance-panel {
+  background: var(--ws-panel);
+  color: var(--ws-text);
+}
+
+html.dark[data-admin-brand='wsapi'] .personal-balance-symbol {
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+html.dark[data-admin-brand='wsapi'] :is(.personal-balance-symbol > svg, .personal-balance-label) {
+  color: var(--ws-muted);
+}
+
+html.dark[data-admin-brand='wsapi'] .personal-balance-value {
+  color: var(--ws-text);
+  font-family: var(--ws-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+html.dark[data-admin-brand='wsapi'] .personal-profile-avatar {
+  border: 1px solid var(--ws-line-strong);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-selected);
+  color: var(--ws-text);
+  box-shadow: none;
+}
+
+html.dark[data-admin-brand='wsapi'] .personal-quick-action-symbol {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  transform: none;
+}
+
+html.dark[data-admin-brand='wsapi'] .personal-quick-action-symbol > svg {
+  color: var(--ws-muted);
+}
+
+html.dark[data-admin-brand='wsapi'] :is(.custom-embed-shell, .custom-open-fab) {
+  background: var(--ws-panel);
+  backdrop-filter: none;
+}
+
+html.dark[data-admin-brand='wsapi'] .matrix-floating-tooltip {
+  border-color: var(--ws-line-strong);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  color: var(--ws-text);
+  box-shadow: var(--ws-shadow-float);
+}
+
+html.dark[data-admin-brand='wsapi'] .matrix-floating-tooltip-line {
+  color: var(--ws-text-soft);
+}
+
+html.dark[data-admin-brand='wsapi'] .matrix-floating-tooltip-title {
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .ops-traffic-decoration {
+  display: none;
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-panel {
+  border-color: var(--ws-line);
+  background: var(--ws-panel);
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-content,
+html[data-admin-brand='wsapi'] .request-audit-payload-panel .bg-slate-950\/70 {
+  background: var(--ws-input);
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-panel :is(
+  .border-slate-600,
+  .border-slate-700,
+  .border-slate-700\/50,
+  .border-slate-700\/60,
+  .border-slate-700\/70,
+  .border-slate-800
+) {
+  border-color: var(--ws-line);
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-panel :is(.text-slate-200, .text-slate-300) {
+  color: var(--ws-text-soft);
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-panel :is(.text-slate-400, .text-slate-500, .text-slate-600) {
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-panel .hover\:text-slate-100:hover {
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .request-audit-payload-panel .bg-slate-700 {
+  background: var(--ws-selected);
+}
+
+html.dark[data-admin-brand='wsapi'] .prompt-audit-savebar {
+  border-color: var(--ws-line);
+  background: var(--ws-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+@media (min-width: 1024px) {
+  html[data-admin-brand='wsapi'] .prompt-audit-savebar {
+    left: var(--ws-sidebar-width);
+  }
+}
+
+@media (max-width: 1023px) {
+  html[data-admin-brand='wsapi'] .dashboard-metrics > .card:nth-child(3) {
+    border-left: 0;
+  }
+
+  html[data-admin-brand='wsapi'] .dashboard-metrics > .card:nth-child(n + 3) {
+    border-top: 1px solid var(--ws-line);
+  }
+}

@@ -7,6 +7,7 @@ import type { OpsErrorDistributionResponse } from '@/api/admin/ops'
 import type { ChartState } from '../types'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { adminChartColor, adminChartTooltip } from '@/brand/charts'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -23,11 +24,11 @@ const { t } = useI18n()
 
 const isDarkMode = computed(() => document.documentElement.classList.contains('dark'))
 const colors = computed(() => ({
-  blue: '#3b82f6',
-  red: '#ef4444',
-  orange: '#f59e0b',
-  gray: '#9ca3af',
-  text: isDarkMode.value ? '#9ca3af' : '#6b7280'
+  blue: adminChartColor('info', '#3b82f6'),
+  red: adminChartColor('negative', '#ef4444'),
+  orange: adminChartColor('warning', '#f59e0b'),
+  gray: adminChartColor('muted', '#9ca3af'),
+  text: adminChartColor('text', isDarkMode.value ? '#9ca3af' : '#6b7280')
 }))
 
 const totalSlaErrors = computed(() =>
@@ -102,14 +103,15 @@ const options = computed(() => ({
     tooltip: {
       backgroundColor: isDarkMode.value ? '#1f2937' : '#ffffff',
       titleColor: isDarkMode.value ? '#f3f4f6' : '#111827',
-      bodyColor: isDarkMode.value ? '#d1d5db' : '#4b5563'
+      bodyColor: isDarkMode.value ? '#d1d5db' : '#4b5563',
+      ...adminChartTooltip()
     }
   }
 }))
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div class="admin-chart-panel flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
     <div class="mb-4 flex items-center justify-between">
       <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
         <svg class="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

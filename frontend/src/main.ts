@@ -7,6 +7,15 @@ import { useAppStore } from '@/stores/app'
 import { updateFavicon } from '@/utils/branding'
 import { isIOSDevice } from '@/utils/device'
 import './style.css'
+import '@fontsource-variable/inter/wght.css'
+import '@fontsource-variable/noto-sans-sc/wght.css'
+import '@fontsource/ibm-plex-mono/latin-400.css'
+import '@fontsource/ibm-plex-mono/latin-500.css'
+import './brand/tokens.css'
+import './brand/base.css'
+import './brand/shell.css'
+import './brand/components.css'
+import './brand/pages.css'
 
 function initIOSViewportZoomFix() {
   // iOS Safari 在输入框字号小于 16px 时聚焦会自动放大页面，且失焦后不会恢复。

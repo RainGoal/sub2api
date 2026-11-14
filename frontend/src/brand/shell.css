@@ -1,0 +1,301 @@
+/* Shared layouts retain their upstream appearance outside the admin scope. */
+html[data-admin-brand='wsapi'] .app-layout {
+  --ws-sidebar-width: 232px;
+  --ws-header-height: 56px;
+  --ws-page-padding: 24px;
+  background: var(--ws-bg);
+}
+
+html[data-admin-brand='wsapi'] .app-layout-collapsed {
+  --ws-sidebar-width: 68px;
+}
+
+html[data-admin-brand='wsapi'] .app-layout-decoration,
+html[data-admin-brand='wsapi'] .auth-layout-decoration {
+  display: none;
+}
+
+html[data-admin-brand='wsapi'] .app-layout-main {
+  padding: var(--ws-page-padding);
+}
+
+html[data-admin-brand='wsapi'] .sidebar {
+  width: var(--ws-sidebar-width);
+  background: var(--ws-bg);
+  border-color: var(--ws-line);
+  transition-duration: 150ms;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-header {
+  height: var(--ws-header-height);
+  flex-shrink: 0;
+  gap: 10px;
+  padding: 0 16px;
+  border-color: var(--ws-line);
+}
+
+html[data-admin-brand='wsapi'] .sidebar-header.sidebar-header-collapsed {
+  gap: 0;
+  padding-inline: 20px;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-logo {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  flex-basis: 28px;
+  border-radius: var(--ws-radius-control);
+  box-shadow: none;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-brand-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .sidebar-nav {
+  padding: 12px 10px;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-link {
+  min-height: 36px;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--ws-radius-control);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ws-muted);
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-link:hover {
+  background: var(--ws-hover);
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .sidebar-link-active,
+html[data-admin-brand='wsapi'] .sidebar-link-active:hover {
+  background: var(--ws-selected);
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .sidebar-link.sidebar-link-collapsed {
+  gap: 0;
+  padding-inline: 14px;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-section {
+  margin-bottom: 20px;
+}
+
+html[data-admin-brand='wsapi'] .sidebar-section-title {
+  padding-inline: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .sidebar-section-title::after {
+  background: var(--ws-line);
+}
+
+html[data-admin-brand='wsapi'] .sidebar-footer {
+  padding: 10px;
+  border-color: var(--ws-line);
+}
+
+html[data-admin-brand='wsapi'] .app-header {
+  background: var(--ws-bg);
+  border-color: var(--ws-line);
+  backdrop-filter: none;
+}
+
+html[data-admin-brand='wsapi'] .app-header-bar {
+  height: var(--ws-header-height);
+  padding-inline: var(--ws-page-padding);
+}
+
+html[data-admin-brand='wsapi'] .app-header-heading,
+html[data-admin-brand='wsapi'] .app-header-heading > div {
+  min-width: 0;
+}
+
+html[data-admin-brand='wsapi'] .app-header-heading {
+  flex-shrink: 1;
+}
+
+html[data-admin-brand='wsapi'] .app-header-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ws-text);
+}
+
+html[data-admin-brand='wsapi'] .app-header-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .app-header-actions {
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+html[data-admin-brand='wsapi'] .app-header-balance {
+  gap: 6px;
+  padding: 4px 10px;
+  border-left: 1px solid var(--ws-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+html[data-admin-brand='wsapi'] .app-header-balance > svg {
+  color: var(--ws-muted);
+}
+
+html[data-admin-brand='wsapi'] .app-header-balance > span:first-of-type {
+  color: var(--ws-text);
+  font-family: var(--ws-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+html[data-admin-brand='wsapi'] .app-header-avatar {
+  border: 1px solid var(--ws-line-strong);
+  border-radius: 50%;
+  background: var(--ws-selected);
+  color: var(--ws-text);
+  box-shadow: none;
+  font-size: 12px;
+}
+
+html[data-admin-brand='wsapi'] .table-page-layout {
+  gap: 16px;
+  height: calc(100vh - var(--ws-header-height) - 2 * var(--ws-page-padding));
+}
+
+html[data-admin-brand='wsapi'] .table-scroll-container {
+  border-color: var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  box-shadow: none;
+}
+
+html[data-admin-brand='wsapi'] .table-scroll-container thead {
+  background: var(--ws-panel);
+  backdrop-filter: none;
+}
+
+html[data-admin-brand='wsapi'] .table-scroll-container th {
+  height: 36px;
+  padding: 6px 12px;
+  border-color: var(--ws-line);
+  color: var(--ws-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+html[data-admin-brand='wsapi'] .table-scroll-container td {
+  height: 40px;
+  padding: 6px 12px;
+  border-color: var(--ws-line);
+  color: var(--ws-text-soft);
+  font-size: 13px;
+}
+
+html[data-admin-brand='wsapi'] .auth-layout,
+html[data-admin-brand='wsapi'] .auth-layout-background {
+  background: var(--ws-bg);
+}
+
+html[data-admin-brand='wsapi'] .auth-layout-content {
+  max-width: 420px;
+}
+
+html[data-admin-brand='wsapi'] .auth-layout-brand {
+  margin-bottom: 24px;
+}
+
+html[data-admin-brand='wsapi'] .auth-layout-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--ws-radius-card);
+  box-shadow: none;
+}
+
+html[data-admin-brand='wsapi'] .auth-layout-title {
+  background: none;
+  color: var(--ws-text);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+html[data-admin-brand='wsapi'] .auth-layout-card {
+  padding: 24px;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-admin-brand='wsapi'] .auth-layout-card h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+@media (min-width: 1024px) {
+  html[data-admin-brand='wsapi'] .app-layout-content {
+    margin-left: var(--ws-sidebar-width);
+    transition: margin-left 150ms ease-out;
+  }
+}
+
+@media (max-width: 1023px) {
+  html[data-admin-brand='wsapi'] .app-layout {
+    --ws-page-padding: 20px;
+  }
+
+  html[data-admin-brand='wsapi'] .table-page-layout {
+    height: auto;
+  }
+}
+
+@media (max-width: 639px) {
+  html[data-admin-brand='wsapi'] .app-layout {
+    --ws-page-padding: 14px;
+  }
+
+  html[data-admin-brand='wsapi'] .sidebar-link {
+    min-height: 44px;
+  }
+
+  html[data-admin-brand='wsapi'] .auth-layout-card {
+    padding: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-admin-brand='wsapi'] .app-layout-content,
+  html[data-admin-brand='wsapi'] .sidebar,
+  html[data-admin-brand='wsapi'] .sidebar-header,
+  html[data-admin-brand='wsapi'] .sidebar-link,
+  html[data-admin-brand='wsapi'] .sidebar-brand,
+  html[data-admin-brand='wsapi'] .sidebar-label,
+  html[data-admin-brand='wsapi'] .sidebar-section-title-text,
+  html[data-admin-brand='wsapi'] .sidebar-section-title::after {
+    transition: none;
+  }
+}
