@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, effectScope, h, reactive, ref, Teleport } from 'vue'
-import { isAdminBrandRoute, setAdminBrand, useAdminBrand } from '../theme'
+import { adminThemeRevision, applyPreferredTheme, isAdminBrandRoute, setAdminBrand, setThemePreference, useAdminBrand } from '../theme'
 
 afterEach(() => {
   delete document.documentElement.dataset.adminBrand
   document.documentElement.classList.remove('dark')
   localStorage.removeItem('theme')
+  localStorage.removeItem('ws_theme')
   vi.restoreAllMocks()
 })
 
@@ -22,13 +23,13 @@ describe('admin brand lifecycle', () => {
     expect(isAdminBrandRoute({ path: '/payment/result', meta: { requiresAuth: false } }, true, true)).toBe(false)
   })
 
-  it('enters dark mode synchronously and restores a saved light preference when leaving', () => {
+  it('keeps the saved light preference synchronously when entering and leaving', () => {
     localStorage.setItem('theme', 'light')
     const route = reactive({ path: '/admin/users', meta: { requiresAdmin: true } })
     const scope = effectScope()
     scope.run(() => useAdminBrand(route, () => false))
     expect(document.documentElement.dataset.adminBrand).toBe('wsapi')
-    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
     expect(localStorage.getItem('theme')).toBe('light')
 
     route.meta.requiresAdmin = false
@@ -40,6 +41,7 @@ describe('admin brand lifecycle', () => {
 
   it('keeps an administrator in the brand across management and personal account pages', () => {
     localStorage.setItem('theme', 'light')
+    localStorage.setItem('ws_theme', 'dark')
     const route = reactive({ path: '/admin/users', meta: { requiresAuth: true, requiresAdmin: true } })
     const scope = effectScope()
     scope.run(() => useAdminBrand(route, () => false, () => true))
@@ -61,6 +63,7 @@ describe('admin brand lifecycle', () => {
 
   it('reacts to administrator restoration and logout on a personal deep link', () => {
     localStorage.setItem('theme', 'light')
+    localStorage.setItem('ws_theme', 'dark')
     const isAdmin = ref(false)
     const scope = effectScope()
     scope.run(() => useAdminBrand(
@@ -86,6 +89,48 @@ describe('admin brand lifecycle', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 
+  it('shares the frontend preference and saves a toggle without changing ordinary pages', () => {
+    localStorage.setItem('theme', 'dark')
+    localStorage.setItem('ws_theme', 'light')
+    setAdminBrand(true)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    const version = adminThemeRevision.value
+    expect(setThemePreference('dark')).toBe(true)
+    expect(localStorage.getItem('ws_theme')).toBe('dark')
+    expect(adminThemeRevision.value).toBeGreaterThan(version)
+    setThemePreference('light')
+    setAdminBrand(false)
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(localStorage.getItem('theme')).toBe('dark')
+    setAdminBrand(true)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    setAdminBrand(false)
+  })
+
+  it('keeps the ordinary theme toggle independent of the shared admin preference', () => {
+    localStorage.setItem('ws_theme', 'dark')
+    expect(setThemePreference('light')).toBe(false)
+    expect(localStorage.getItem('theme')).toBe('light')
+    expect(localStorage.getItem('ws_theme')).toBe('dark')
+    expect(applyPreferredTheme(true)).toBe(true)
+    expect(applyPreferredTheme(false)).toBe(false)
+  })
+
+  it('applies preferences changed in another tab only while the brand is active', () => {
+    localStorage.setItem('theme', 'light')
+    localStorage.setItem('ws_theme', 'light')
+    const route = reactive({ path: '/admin/users', meta: { requiresAdmin: true } })
+    const scope = effectScope()
+    scope.run(() => useAdminBrand(route, () => false))
+    localStorage.setItem('ws_theme', 'dark')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'ws_theme', storageArea: localStorage }))
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    route.meta.requiresAdmin = false
+    window.dispatchEvent(new StorageEvent('storage', { key: 'ws_theme', storageArea: localStorage }))
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    scope.stop()
+  })
+
   it('uses the current system preference on exit when no preference was saved', () => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     vi.spyOn(window, 'matchMedia').mockReturnValue({ ...media, matches: false })
@@ -93,6 +138,31 @@ describe('admin brand lifecycle', () => {
     setAdminBrand(false)
     expect(document.documentElement.classList.contains('dark')).toBe(false)
     expect(localStorage.getItem('theme')).toBeNull()
+  })
+
+  it('follows system changes for system preference and removes its listener on disposal', () => {
+    let listener: (() => void) | undefined
+    const media = {
+      ...window.matchMedia('(prefers-color-scheme: dark)'),
+      matches: false,
+      addEventListener: vi.fn((_type, next: () => void) => { listener = next }),
+      removeEventListener: vi.fn()
+    }
+    vi.spyOn(window, 'matchMedia').mockReturnValue(media)
+    localStorage.setItem('theme', 'dark')
+    localStorage.setItem('ws_theme', 'system')
+    const scope = effectScope()
+    scope.run(() => useAdminBrand({ path: '/admin/users', meta: { requiresAdmin: true } }, () => false))
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    media.matches = true
+    listener?.()
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    setThemePreference('light')
+    listener?.()
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    scope.stop()
+    expect(media.removeEventListener).toHaveBeenCalledWith('change', listener)
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 
   it('responds to delayed public settings without changing non-login public pages', () => {

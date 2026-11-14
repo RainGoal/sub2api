@@ -51,7 +51,7 @@ const colors = [
   ['rgb(245, 158, 11)', 'rgba(245, 158, 11, 0.1)'],
   ['rgb(239, 68, 68)', 'rgba(239, 68, 68, 0.1)'],
 ]
-const revenueColors = adminChartPalette(colors.map(([color]) => color))
+const revenueColors = computed(() => adminChartPalette(colors.map(([color]) => color)))
 
 const chartData = computed(() => {
   if (!props.data || props.data.length === 0) return null
@@ -60,7 +60,7 @@ const chartData = computed(() => {
     labels: props.data.map(d => d.date),
     datasets: [
       ...currencies.map((currency, index) => {
-        const borderColor = revenueColors[index % revenueColors.length]
+        const borderColor = revenueColors.value[index % revenueColors.value.length]
         const backgroundColor = adminChartFill(borderColor, colors[index % colors.length][1])
         return {
           label: `${currency} ${t('payment.admin.revenue')}`,
@@ -88,7 +88,7 @@ const chartData = computed(() => {
   }
 })
 
-const chartOptions = {
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
@@ -118,5 +118,5 @@ const chartOptions = {
     legend: { position: 'top' as const, labels: { color: adminChartColor('text', ChartJS.defaults.color as string) } },
     tooltip: { ...adminChartTooltip() },
   }
-}
+}))
 </script>

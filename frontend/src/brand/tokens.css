@@ -1,4 +1,4 @@
-/* Local counterpart of wsapi's dark design tokens. Inactive outside the admin scope. */
+/* Local wsapi design tokens. Inactive outside the administrator's workspace. */
 html[data-admin-brand='wsapi'] {
   color-scheme: dark;
   --ws-bg: #181817;
@@ -19,7 +19,18 @@ html[data-admin-brand='wsapi'] {
   --ws-success: #4ade80;
   --ws-warning: #f0b84d;
   --ws-danger: #ff7b72;
+  --ws-danger-hover: #ff9a93;
+  --ws-danger-soft: rgb(255 123 114 / 14%);
+  --ws-danger-soft-hover: rgb(255 123 114 / 22%);
+  --ws-danger-ring: 0 0 0 3px rgb(255 123 114 / 20%);
   --ws-info: #66b3ff;
+  --ws-success-soft: rgb(74 222 128 / 10%);
+  --ws-success-button: #166534;
+  --ws-success-button-hover: #15803d;
+  --ws-warning-button: #854d0e;
+  --ws-warning-button-hover: #a16207;
+  --ws-status-button-text: #ffffff;
+  --ws-overlay: rgb(0 0 0 / 48%);
   --ws-font-sans: 'Inter Variable', 'Noto Sans SC Variable', system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   --ws-font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
   --ws-radius-control: 6px;
@@ -67,4 +78,50 @@ html[data-admin-brand='wsapi'] {
   --ws-color-primary-800: 126 49 27;
   --ws-color-primary-900: 91 43 28;
   --ws-color-primary-950: 49 28 22;
+}
+
+html[data-admin-brand='wsapi']:not(.dark) {
+  color-scheme: light;
+  --ws-bg: #f6f5f2;
+  --ws-panel: #ffffff;
+  --ws-input: #ffffff;
+  --ws-hover: #f6f5f2;
+  --ws-selected: #efeeeb;
+  --ws-line: #e6e4df;
+  --ws-line-strong: #cfccc5;
+  --ws-line-soft: #f0efec;
+  --ws-text: #18181b;
+  --ws-text-strong: #0b0b0c;
+  --ws-text-soft: #3f3f46;
+  --ws-muted: #696970;
+  --ws-accent-ink: #b03a1a;
+  --ws-accent-soft: #fdf0eb;
+  --ws-success: #147a3a;
+  --ws-warning: #a16207;
+  --ws-danger: #b91c1c;
+  --ws-danger-hover: #991b1b;
+  --ws-danger-soft: #fef2f2;
+  --ws-danger-soft-hover: #fee2e2;
+  --ws-danger-ring: 0 0 0 3px rgb(185 28 28 / 16%);
+  --ws-info: #1d4ed8;
+  --ws-success-soft: #ecfdf3;
+  --ws-overlay: rgb(9 9 11 / 40%);
+  --ws-shadow-float: 0 1px 3px rgb(0 0 0 / 6%), 0 16px 48px rgb(0 0 0 / 12%);
+  --ws-chart-1: #c4411d;
+  --ws-chart-2: #18181b;
+  --ws-chart-3: #71717a;
+  --ws-chart-4: #a1a1aa;
+
+  /* Keep Tailwind's light-to-dark shade order for unmodified upstream controls. */
+  --ws-color-gray-50: 250 250 250;
+  --ws-color-gray-100: 246 245 242;
+  --ws-color-gray-200: 230 228 223;
+  --ws-color-gray-300: 207 204 197;
+  --ws-color-gray-400: 161 161 170;
+  --ws-color-gray-500: 105 105 112;
+  --ws-color-gray-600: 82 82 91;
+  --ws-color-gray-700: 63 63 70;
+  --ws-color-gray-800: 39 39 42;
+  --ws-color-gray-900: 24 24 27;
+  --ws-color-gray-950: 11 11 12;
 }

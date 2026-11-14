@@ -64,9 +64,9 @@ const chartColors = computed(() => ({
   grid: adminChartColor('grid', isDarkMode.value ? '#374151' : '#e5e7eb'),
   input: adminChartColor('accent', '#3b82f6'),
   output: adminChartColor('secondary', '#10b981'),
-  cacheCreation: '#f59e0b',
-  cacheRead: '#06b6d4',
-  cacheHitRate: '#8b5cf6'
+  cacheCreation: adminChartColor('warning', '#f59e0b'),
+  cacheRead: adminChartColor('info', '#06b6d4'),
+  cacheHitRate: adminChartColor('positive', '#8b5cf6')
 }))
 
 const chartData = computed(() => {

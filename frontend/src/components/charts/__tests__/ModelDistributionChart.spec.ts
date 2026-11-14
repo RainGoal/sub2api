@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import ModelDistributionChart from '../ModelDistributionChart.vue'
+import { setAdminBrand, setThemePreference } from '@/brand/theme'
+import { nextTick } from 'vue'
 
 const messages: Record<string, string> = {
   'admin.dashboard.modelDistribution': 'Model Distribution',
@@ -72,6 +74,32 @@ describe('ModelDistributionChart', () => {
       actual_cost: 1.4,
     },
   ]
+
+  it('recolors an already mounted chart without reloading its model data', async () => {
+    localStorage.setItem('ws_theme', 'dark')
+    setAdminBrand(true)
+    document.documentElement.style.setProperty('--ws-chart-1', '#ee6a43')
+    const wrapper = mount(ModelDistributionChart, {
+      props: { modelStats }, global: { stubs: { LoadingSpinner: true } }
+    })
+    try {
+      const before = JSON.parse(wrapper.find('.chart-data').text())
+      expect(before.datasets[0].backgroundColor[0]).toBe('#ee6a43')
+      document.documentElement.style.setProperty('--ws-chart-1', '#b03a1a')
+      setThemePreference('light')
+      await nextTick()
+      const after = JSON.parse(wrapper.find('.chart-data').text())
+      expect(after.datasets[0].backgroundColor[0]).toBe('#b03a1a')
+      expect(after.datasets[0].data).toEqual(before.datasets[0].data)
+      expect(after.labels).toEqual(before.labels)
+    } finally {
+      wrapper.unmount()
+      localStorage.removeItem('ws_theme')
+      document.documentElement.style.removeProperty('--ws-chart-1')
+      setAdminBrand(false)
+      document.documentElement.classList.remove('dark')
+    }
+  })
 
   it('uses total_tokens and token ordering by default', () => {
     const wrapper = mount(ModelDistributionChart, {

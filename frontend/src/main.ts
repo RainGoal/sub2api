@@ -6,6 +6,7 @@ import i18n, { initI18n } from './i18n'
 import { useAppStore } from '@/stores/app'
 import { updateFavicon } from '@/utils/branding'
 import { isIOSDevice } from '@/utils/device'
+import { applyPreferredTheme } from '@/brand/theme'
 import './style.css'
 import '@fontsource-variable/inter/wght.css'
 import '@fontsource-variable/noto-sans-sc/wght.css'
@@ -32,11 +33,7 @@ function initIOSViewportZoomFix() {
 }
 
 function initThemeClass() {
-  const savedTheme = localStorage.getItem('theme')
-  const shouldUseDark =
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  document.documentElement.classList.toggle('dark', shouldUseDark)
+  applyPreferredTheme(/^\/admin(?:\/|$)/.test(window.location.pathname))
 }
 
 async function bootstrap() {

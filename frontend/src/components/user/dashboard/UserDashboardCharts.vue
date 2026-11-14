@@ -89,7 +89,7 @@ const modelData = computed(() => !props.models?.length ? null : {
   }]
 })
 
-const doughnutOptions = {
+const doughnutOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
@@ -101,5 +101,5 @@ const doughnutOptions = {
       }
     }
   }
-}
+}))
 </script>

@@ -151,11 +151,11 @@
     <div class="sidebar-footer mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
       <!-- Theme Toggle -->
       <button
-        v-if="!isAdminBrand"
         @click="toggleTheme"
         class="sidebar-link mb-2 w-full"
         :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
         :title="sidebarCollapsed ? (isDark ? t('nav.lightMode') : t('nav.darkMode')) : undefined"
+        :aria-label="isDark ? t('nav.lightMode') : t('nav.darkMode')"
       >
         <SunIcon v-if="isDark" class="h-5 w-5 flex-shrink-0 text-amber-500" />
         <MoonIcon v-else class="h-5 w-5 flex-shrink-0" />
@@ -200,7 +200,7 @@ import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-import { isAdminBrandRoute } from '@/brand/theme'
+import { applyPreferredTheme, setThemePreference } from '@/brand/theme'
 
 interface NavItem {
   path: string
@@ -251,9 +251,13 @@ const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
-const isAdminBrand = computed(() => isAdminBrandRoute(route, appStore.backendModeEnabled, isAdmin.value))
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
+const themeObserver = new MutationObserver(() => {
+  isDark.value = document.documentElement.classList.contains('dark')
+})
+themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+onBeforeUnmount(() => themeObserver.disconnect())
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
@@ -879,10 +883,7 @@ function toggleSidebar() {
 }
 
 function toggleTheme() {
-  if (isAdminBrand.value) return
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
+  isDark.value = setThemePreference(isDark.value ? 'light' : 'dark')
 }
 
 function closeMobile() {
@@ -949,16 +950,7 @@ function handleGroupClick(item: NavItem) {
 }
 
 // Initialize theme
-const savedTheme = localStorage.getItem('theme')
-if (isAdminBrand.value) {
-  isDark.value = true
-} else if (
-  savedTheme === 'dark' ||
-  (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-) {
-  isDark.value = true
-  document.documentElement.classList.add('dark')
-}
+isDark.value = applyPreferredTheme()
 
 // Fetch admin settings (for feature-gated nav items like Ops).
 watch(

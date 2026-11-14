@@ -1,3 +1,5 @@
+import { adminThemeRevision } from './theme'
+
 const chartTokens = {
   text: ['--ws-text-soft', '#d1d0c9'],
   muted: ['--ws-muted', '#a8a79f'],
@@ -17,6 +19,8 @@ const chartTokens = {
 type ChartToken = keyof typeof chartTokens
 
 function hasAdminBrand(): boolean {
+  // Track scope/theme changes when called from a chart's computed data or options.
+  void adminThemeRevision.value
   return typeof document !== 'undefined' && document.documentElement.dataset.adminBrand === 'wsapi'
 }
 
@@ -33,8 +37,9 @@ export function adminChartPalette(original: readonly string[]): string[] {
   const colors = [
     adminChartColor('accent', original[0] || '#ee6a43'),
     adminChartColor('secondary', original[1] || '#f0efeb'),
-    '#86b7c7', '#c7a7d7', '#a9be82', '#d8b77d',
-    '#cf8fa4', '#8cb4a2', '#a3a7d6', '#cba38c', '#a3bac7', '#b9b4a7'
+    ...(document.documentElement.classList.contains('dark')
+      ? ['#86b7c7', '#c7a7d7', '#a9be82', '#d8b77d', '#cf8fa4', '#8cb4a2', '#a3a7d6', '#cba38c', '#a3bac7', '#b9b4a7']
+      : ['#28758c', '#81549d', '#55752c', '#916510', '#a24b6a', '#39765a', '#5e64a3', '#996643', '#52768a', '#797064'])
   ]
   return original.map((_, index) => colors[index % colors.length])
 }
