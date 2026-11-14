@@ -19,6 +19,10 @@ const collaborationRecoveryMixedBody = `{"model":"gpt-5","previous_response_id":
 {"type":"message","role":"user","content":"Complete independent NEW TASK"},
 {"type":"compaction","encrypted_content":"compaction-cipher"}]}`
 
+const collaborationRecoverySingleBody = `{"model":"gpt-5","input":[
+{"type":"agent_message","id":"amsg_original","author":"/root","recipient":"/root/child","content":[{"type":"input_text","text":"Payload:\n"},{"type":"encrypted_content","encrypted_content":"opaque-old"}]},
+{"type":"message","id":"msg_new","role":"user","content":"Complete independent NEW TASK"}]}`
+
 func collaborationRecoveryError(t *testing.T, message, parameter string) []byte {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{"error": map[string]any{
@@ -86,6 +90,57 @@ func TestOpenAICollaborationRecoveryUnlocatedSelectionIsExplicit(t *testing.T) {
 	}
 	for _, omission := range result.Omissions {
 		require.Len(t, omission.Digest, 64)
+	}
+}
+
+func TestOpenAICollaborationRecoveryUnmappedMessageIDSelectsSingleCandidate(t *testing.T) {
+	t.Parallel()
+	body := []byte(collaborationRecoverySingleBody)
+	result, err := recoverOpenAICollaborationEncryptedContent(body, http.StatusBadRequest,
+		collaborationRecoveryError(t, "Cannot decrypt amsg_upstream (agent amsg_upstream)", ""), true)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "upstream_message_id_unmapped_single", result.Selection)
+	require.Equal(t, []openAICollaborationOmission{{MessageID: "amsg_original", InputIndex: 0, ContentIndex: 1, Digest: openAIEncryptedContentDigest("opaque-old")}}, result.Omissions)
+	require.Equal(t, collaborationRecoverySingleBody, string(body))
+	require.Equal(t, "message", gjson.GetBytes(result.Body, "input.0.type").String())
+	require.Equal(t, "Payload:\n", gjson.GetBytes(result.Body, "input.0.content.0.text").String())
+	notice := gjson.GetBytes(result.Body, "input.0.content.1.text").String()
+	require.Contains(t, notice, openAICollaborationMissingContentNotice)
+	require.Contains(t, notice, `id="amsg_original"; author="/root"; recipient="/root/child"`)
+	require.NotContains(t, string(result.Body), "opaque-old")
+	require.JSONEq(t, gjson.Get(collaborationRecoverySingleBody, "input.1").Raw, gjson.GetBytes(result.Body, "input.1").Raw)
+}
+
+func TestOpenAICollaborationRecoveryUnmappedMessageIDRejectsUnsafeSelection(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body, message, parameter string
+		disabled                       bool
+	}{
+		{name: "disabled", disabled: true},
+		{name: "multiple candidates", body: collaborationRecoveryMixedBody},
+		{name: "multiple IDs", message: "Cannot decrypt amsg_upstream or amsg_other"},
+		{name: "ID belongs to plaintext item", body: strings.Replace(collaborationRecoverySingleBody, "msg_new", "amsg_upstream", 1)},
+		{name: "ID belongs to reasoning item", body: `{"input":[{"type":"reasoning","id":"amsg_upstream","encrypted_content":"reasoning"},{"type":"agent_message","id":"amsg_original","content":[{"type":"encrypted_content","encrypted_content":"opaque-old"}]}]}`},
+		{name: "duplicate candidate ID", body: strings.Replace(collaborationRecoverySingleBody, "msg_new", "amsg_original", 1)},
+		{name: "conflicting exact path", parameter: "input[0].content[1]"},
+		{name: "conflicting message path", message: "Cannot decrypt amsg_upstream at input[0].content[1]"},
+		{name: "out of range path", parameter: "input[99].content[1]"},
+		{name: "malformed path", message: "Cannot decrypt amsg_upstream at input[x].content[1]"},
+		{name: "incomplete path", message: "Cannot decrypt amsg_upstream at input[0]"},
+		{name: "unrelated parameter", parameter: "model"},
+		{name: "explicit reasoning error", message: "Cannot decrypt Reasoning content for amsg_upstream"},
+		{name: "explicit compaction error", message: "Cannot decrypt compaction for amsg_upstream"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := firstNonEmptyString(tc.body, collaborationRecoverySingleBody)
+			message := firstNonEmptyString(tc.message, "Cannot decrypt amsg_upstream")
+			result, err := recoverOpenAICollaborationEncryptedContent([]byte(body), http.StatusBadRequest,
+				collaborationRecoveryError(t, message, tc.parameter), !tc.disabled)
+			require.ErrorIs(t, err, errOpenAICollaborationLocation)
+			require.Nil(t, result)
+		})
 	}
 }
 
@@ -201,4 +256,24 @@ func TestOpenAICollaborationRecoveryProtectsProvenPlaintextInMixedMessage(t *tes
 	require.ErrorIs(t, err, errOpenAICollaborationLocation)
 	require.Nil(t, result)
 	require.Equal(t, completeNewTask, gjson.GetBytes(body, "input.0.content.2.encrypted_content").String())
+}
+
+func TestOpenAICollaborationRecoveryUnmappedMessageIDProtectsProvenPlaintext(t *testing.T) {
+	t.Parallel()
+	const completeNewTask = "Current full task: independently inspect the interface"
+	body := []byte(fmt.Sprintf(`{"input":[{"type":"agent_message","id":"amsg_original","content":[{"type":"encrypted_content","encrypted_content":"opaque-old"},{"type":"encrypted_content","encrypted_content":%q}]}]}`, completeNewTask))
+	before := string(body)
+	proofs := map[string]bool{openAIEncryptedContentDigest(completeNewTask): true}
+	errorBody := collaborationRecoveryError(t, "Cannot decrypt amsg_upstream", "")
+	result, err := recoverOpenAICollaborationEncryptedContentWithPlaintext(body, http.StatusBadRequest, errorBody, true, proofs)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "upstream_message_id_unmapped_single", result.Selection)
+	require.Equal(t, []openAICollaborationOmission{{MessageID: "amsg_original", InputIndex: 0, ContentIndex: 0, Digest: openAIEncryptedContentDigest("opaque-old")}}, result.Omissions)
+	require.Equal(t, completeNewTask, gjson.GetBytes(result.Body, "input.0.content.0.text").String())
+	require.Equal(t, before, string(body))
+	proofs[openAIEncryptedContentDigest("opaque-old")] = true
+	result, err = recoverOpenAICollaborationEncryptedContentWithPlaintext(body, http.StatusBadRequest, errorBody, true, proofs)
+	require.NoError(t, err)
+	require.Nil(t, result, "proven plaintext must never be omitted")
 }

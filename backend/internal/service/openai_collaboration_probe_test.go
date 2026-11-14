@@ -222,16 +222,17 @@ func TestCollaborationProbeCancellationStopsReader(t *testing.T) {
 }
 
 func TestCollaborationProbeDeadlineFlushesBufferedPrefix(t *testing.T) {
-	for _, contentType := range []string{"text/event-stream", "application/json"} {
-		t.Run(contentType, func(t *testing.T) {
+	for _, tc := range []struct{ name, contentType, prefix string }{
+		{"SSE lifecycle", "text/event-stream", collaborationProbeCreated},
+		{"SSE blank placeholder", "text/event-stream", collaborationProbeWhitespacePrelude},
+		{"JSON", "application/json", `{"status":`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			source, upstream := io.Pipe()
-			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: source}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {tc.contentType}}, Body: source}
 			defer func() { _ = resp.Body.Close(); _ = upstream.Close() }()
-			prefix := collaborationProbeCreated
-			if contentType == "application/json" {
-				prefix = `{"status":`
-			}
+			prefix := tc.prefix
 			result := make(chan []byte, 1)
 			go func() { result <- probeOpenAICollaborationResponse(context.Background(), resp) }()
 			written := make(chan struct{})

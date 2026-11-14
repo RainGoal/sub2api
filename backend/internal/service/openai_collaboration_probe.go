@@ -18,7 +18,7 @@ const (
 )
 
 // Probe before downstream headers/events are committed. Only an empty
-// lifecycle prelude can be retried. The deadline releases buffered bytes even
+// lifecycle or verified blank text placeholder can be retried. The deadline releases buffered bytes even
 // when the upstream stalls in the middle of an event.
 func probeOpenAICollaborationResponse(ctx context.Context, resp *http.Response) []byte {
 	if resp == nil || resp.Body == nil {
@@ -102,6 +102,7 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 	}()
 	var prefix bytes.Buffer
 	var pending, bareError []byte
+	var placeholder collaborationPlaceholder
 	finish := func(failure []byte, readErr error) {
 		select {
 		case <-release:
@@ -159,18 +160,25 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 				}
 				switch kind {
 				case "response.created", "response.in_progress":
-					if collaborationPayloadHasOutput(payload) {
+					if collaborationPayloadHasOutput(payload) || !placeholder.responseMatches(payload) {
+						finish(nil, chunk.err)
+						return
+					}
+				case "response.output_item.added", "response.output_item.done",
+					"response.content_part.added", "response.content_part.done",
+					"response.output_text.delta", "response.output_text.done":
+					if !placeholder.accept(kind, payload) {
 						finish(nil, chunk.err)
 						return
 					}
 				case "error":
-					if collaborationPayloadHasOutput(payload) || !isOpenAICollaborationEncryptedContentError(status, payload) {
+					if placeholder.hasOutput(payload) || !placeholder.responseMatches(payload) || !isOpenAICollaborationEncryptedContentError(status, payload) {
 						finish(nil, chunk.err)
 						return
 					}
 					bareError = append([]byte(nil), payload...)
 				case "response.failed":
-					if isOpenAICollaborationEncryptedContentError(status, payload) && !collaborationPayloadHasOutput(payload) {
+					if isOpenAICollaborationEncryptedContentError(status, payload) && !placeholder.hasOutput(payload) && placeholder.responseMatches(payload) {
 						finish(payload, chunk.err)
 					} else {
 						finish(nil, chunk.err)

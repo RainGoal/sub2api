@@ -241,10 +241,17 @@ func selectOpenAICollaborationOmissions(input []any, failure openAICollaboration
 			return nil, "", errOpenAICollaborationLocation
 		}
 	}
-	return finishOpenAICollaborationSelection(input, candidates, selected, selectedIDs, ids, len(paths) > 0, allowUnlocated)
+	allowUnmappedSingle := allowUnlocated && len(paths) == 0 && len(failure.parameters) == 0 && len(candidates) == 1 && len(ids) == 1
+	for _, message := range failure.messages {
+		lower := strings.ToLower(message)
+		if strings.Contains(lower, "reasoning") || strings.Contains(lower, "compaction") {
+			allowUnmappedSingle = false
+		}
+	}
+	return finishOpenAICollaborationSelection(input, candidates, selected, selectedIDs, ids, len(paths) > 0, allowUnlocated, allowUnmappedSingle)
 }
 
-func finishOpenAICollaborationSelection(input []any, candidates []openAICollaborationOmission, selected map[[2]int]struct{}, selectedIDs, ids map[string]struct{}, hasPaths, allowUnlocated bool) ([]openAICollaborationOmission, string, error) {
+func finishOpenAICollaborationSelection(input []any, candidates []openAICollaborationOmission, selected map[[2]int]struct{}, selectedIDs, ids map[string]struct{}, hasPaths, allowUnlocated, allowUnmappedSingle bool) ([]openAICollaborationOmission, string, error) {
 	selection := "exact_path"
 	if !hasPaths {
 		if len(ids) > 1 {
@@ -263,9 +270,25 @@ func finishOpenAICollaborationSelection(input []any, candidates []openAICollabor
 				selectedIDs[candidate.MessageID] = struct{}{}
 			}
 		}
+		if len(selected) == 0 && allowUnmappedSingle {
+			// Some upstreams regenerate agent IDs. Only recover a single opaque
+			// candidate when the reported ID cannot identify any input item.
+			for _, raw := range input {
+				if item, ok := raw.(map[string]any); ok {
+					id, _ := item["id"].(string)
+					if _, matched := ids[id]; matched {
+						return nil, "", errOpenAICollaborationLocation
+					}
+				}
+			}
+			candidate := candidates[0]
+			selected[[2]int{candidate.InputIndex, candidate.ContentIndex}] = struct{}{}
+			selectedIDs[candidate.MessageID] = struct{}{}
+			selection = "upstream_message_id_unmapped_single"
+		}
 	}
 	for id := range ids {
-		if _, matched := selectedIDs[id]; !matched {
+		if _, matched := selectedIDs[id]; !matched && selection != "upstream_message_id_unmapped_single" {
 			return nil, "", errOpenAICollaborationLocation
 		}
 	}
