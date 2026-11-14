@@ -376,7 +376,8 @@ type UpdateSettingsRequest struct {
 	CyberSessionBlockTTLSeconds *int    `json:"cyber_session_block_ttl_seconds"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
-	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
+	OpenAIFastPolicySettings    *dto.OpenAIFastPolicySettings        `json:"openai_fast_policy_settings,omitempty"`
+	OpenAICollaborationSettings *service.OpenAICollaborationSettings `json:"openai_collaboration_settings,omitempty"`
 
 	// 系统全局 platform quota 默认值（整体替换语义：nil = 不修改，non-nil = 整体覆盖）。
 	DefaultPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"default_platform_quotas"`
@@ -513,6 +514,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	communityContact := previousSettings.CommunityContact
+	collaborationSettings := previousSettings.OpenAICollaborationSettings
+	if req.OpenAICollaborationSettings != nil {
+		collaborationSettings = *req.OpenAICollaborationSettings
+	} else {
+		omitted[service.SettingKeyOpenAICollaborationSettings] = struct{}{}
+	}
 	if req.CommunityContact != nil {
 		communityContact = *req.CommunityContact
 	} else {
@@ -1721,6 +1728,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableFingerprintUnification
 		}(),
+		OpenAICollaborationSettings: collaborationSettings,
 		OpenAITTFTMode: func() string {
 			if req.OpenAITTFTMode != nil {
 				return *req.OpenAITTFTMode
@@ -2354,6 +2362,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                                   updatedSettings.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:                            updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                                     updatedSettings.BackendModeEnabled,
+		OpenAICollaborationSettings:                            updatedSettings.OpenAICollaborationSettings,
 		EnableFingerprintUnification:                           updatedSettings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                       updatedSettings.EnableCCHSigning,

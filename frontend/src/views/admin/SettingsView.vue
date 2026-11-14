@@ -163,6 +163,7 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <OpenAICollaborationSettings :active="activeTab === 'gateway'" />
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -9006,6 +9007,7 @@ import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import CommunityContactSettings from "@/views/admin/settings/CommunityContactSettings.vue";
 import ModelPlazaMonitorSettings from "@/components/admin/settings/ModelPlazaMonitorSettings.vue";
+import OpenAICollaborationSettings from "@/components/admin/settings/OpenAICollaborationSettings.vue";
 import {
   normalizeCommunityContact,
   validateCommunityContact,

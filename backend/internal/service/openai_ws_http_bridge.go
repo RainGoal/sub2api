@@ -431,7 +431,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turn int,
 	writeClientMessage func([]byte) error,
 	clientPublicModel ...string,
-) (*OpenAIForwardResult, error) {
+) (returnResult *OpenAIForwardResult, returnErr error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
@@ -443,6 +443,32 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
+	}
+	newCollaborationTurn := false
+	if c != nil {
+		previousTurn, exists := c.Get("openai_collaboration_bridge_turn")
+		newCollaborationTurn = !exists || previousTurn != turn
+		c.Set("openai_collaboration_bridge_turn", turn)
+	}
+	attempt := s.beginCollaborationAttempt(ctx, c, account, payload, newCollaborationTurn)
+	defer func() {
+		if returnErr == nil && attempt != nil && attempt.businessFailed {
+			returnErr = errors.New("upstream collaboration response failed")
+		}
+		attempt.finish(collaborationDeliverySucceeded(ctx, c, returnResult, returnErr))
+		if attempt != nil && attempt.stopFailover && returnErr != nil {
+			returnErr = errors.New(returnErr.Error())
+		}
+	}()
+	if attempt != nil {
+		clientWriter := writeClientMessage
+		writeClientMessage = func(message []byte) error {
+			restored, restoreErr := restoreOpenAICollaborationPayload(message, attempt)
+			if restoreErr != nil {
+				return restoreErr
+			}
+			return clientWriter(restored)
+		}
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 	publicModel := strings.TrimSpace(originalModel)
@@ -467,6 +493,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
+	}
+	if attempt != nil {
+		body, err = applyRememberedCollaborationOmissions(body, attempt)
+		if err != nil {
+			return nil, err
+		}
+		body, err = prepareOpenAICollaborationBody(body, attempt)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Codex fingerprint convergence, same as Forward / forwardOpenAIPassthrough. Builders only read
 	// staged IDs; without staging, the bridge sends no account-level session_id, so clients without
@@ -595,10 +631,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
 	var resp *http.Response
 	for {
+		if err := s.collaborationRetryError(ctx, c, account); err != nil {
+			return nil, err
+		}
 		upstreamReq, buildErr := buildUpstreamRequest(body)
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		noteCollaborationUpstreamAttempt(c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
 			if turn == 1 {
@@ -610,6 +650,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				markOpenAIWSClientVisibleFailure(c, "error", clientError)
 			}
 			return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
+		}
+		if retryBody, retry := s.recoverCollaborationResponse(ctx, c, account, body, resp); retry {
+			body = retryBody
+			payloadBytes = len(body)
+			continue
 		}
 		if resp.StatusCode < 400 {
 			break
@@ -628,7 +673,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if retryErr != nil {
 			return nil, fmt.Errorf("normalize websocket http bridge rejected field retry: %w", retryErr)
 		}
-		if changed && rejectedFieldRetryState.Allow(retryBody) {
+		if changed && !collaborationRecoveryOwnsFailure(c) && rejectedFieldRetryState.Allow(retryBody) {
 			logOpenAIWSModeInfo(
 				"ingress_ws_http_bridge_rejected_field_retry account_id=%d turn=%d reason=%s",
 				account.ID,
@@ -692,6 +737,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	pendingClientMessageBytes := int64(0)
 	capacityFailoverSuppressedLogged := false
 	clientDisconnected := false
+	if attempt := collaborationAttempt(c); attempt != nil {
+		defer func() { attempt.deliveryFailed = attempt.deliveryFailed || clientDisconnected }()
+	}
 	officialOpenAIResponses := account != nil && account.Platform == PlatformOpenAI
 	bareErrorPending := false
 	var bareErrorPayload []byte
@@ -760,6 +808,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		Text() string
 		Err() error
 	} = scanner
+	if collaborationAttempt(c) != nil {
+		streamScanner = newOpenAISSEJSONDocumentScanner(scanner)
+	}
 	if openAIClientPrivacyApplies(account) {
 		streamScanner = newOpenAIClientSSEScanner(scanner, maxLineSize)
 	}

@@ -359,6 +359,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	imageCount := 0
 	var imageOutputSizes []string
 	for {
+		if err := s.collaborationRetryError(ctx, c, account); err != nil {
+			return nil, err
+		}
 		actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if actualModel == "" {
 			actualModel = reqModel
@@ -373,12 +376,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 
 		upstreamStart := time.Now()
+		noteCollaborationUpstreamAttempt(c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 			// a failover so the handler switches to a healthy account.
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+		}
+		if retryBody, retry := s.recoverCollaborationResponse(ctx, c, account, body, resp); retry {
+			body = retryBody
+			continue
 		}
 		if resp.StatusCode >= 400 {
 			// Peek only to identify an invalid task. Restore the body so the existing
@@ -388,12 +396,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
-			} else if changed && !IsModelPlazaMonitorProbe(ctx) && rejectedFieldRetryState.Allow(retryBody) {
+			} else if changed && !collaborationRecoveryOwnsFailure(c) && !IsModelPlazaMonitorProbe(ctx) && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying passthrough request after %s (account: %s)", reason, account.Name)
 				continue
 			}
-			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
+			if !collaborationRecoveryOwnsFailure(c) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if recoveryErr := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); recoveryErr != nil {
@@ -1878,6 +1886,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	responseID := ""
 	ttftMode := s.openAITTFTMode(ctx)
 	clientDisconnected := false
+	if attempt := collaborationAttempt(c); attempt != nil {
+		defer func() { attempt.deliveryFailed = attempt.deliveryFailed || clientDisconnected }()
+	}
 	sawDone := false
 	sawTerminalEvent := false
 	sawFailedEvent := false

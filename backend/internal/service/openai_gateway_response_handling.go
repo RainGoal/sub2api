@@ -254,6 +254,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// 否则下游 SDK（例如 OpenCode）会因为类型校验失败而报错。
 	errorEventSent := false
 	clientDisconnected := false // 客户端断开后继续 drain 上游以收集 usage
+	if attempt := collaborationAttempt(c); attempt != nil {
+		defer func() { attempt.deliveryFailed = attempt.deliveryFailed || clientDisconnected }()
+	}
 	sawTerminalEvent := false
 	sawFailedEvent := false
 	sawBareError := false

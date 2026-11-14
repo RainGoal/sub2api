@@ -44,7 +44,7 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 	}
 	omitted.dropFrom(updates)
 
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	if err := s.persistSettingsWithCollaborationCache(ctx, updates); err != nil {
 		return err
 	}
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
@@ -74,7 +74,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 	}
 	omitted.dropFrom(updates)
 
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	if err := s.persistSettingsWithCollaborationCache(ctx, updates); err != nil {
 		return err
 	}
 	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
@@ -478,6 +478,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyBackendModeEnabled] = strconv.FormatBool(settings.BackendModeEnabled)
 
 	// Gateway forwarding behavior
+	if err := ValidateOpenAICollaborationSettings(settings.OpenAICollaborationSettings); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_OPENAI_COLLABORATION_SETTINGS", err.Error())
+	}
+	collaborationJSON, err := json.Marshal(settings.OpenAICollaborationSettings.clone())
+	if err != nil {
+		return nil, fmt.Errorf("marshal OpenAI collaboration settings: %w", err)
+	}
+	updates[SettingKeyOpenAICollaborationSettings] = string(collaborationJSON)
 	mode := normalizeOpenAITTFTMode(settings.OpenAITTFTMode)
 	if strings.TrimSpace(settings.OpenAITTFTMode) != "" && strings.ToLower(strings.TrimSpace(settings.OpenAITTFTMode)) != OpenAITTFTModeSemantic && strings.ToLower(strings.TrimSpace(settings.OpenAITTFTMode)) != OpenAITTFTModeVisible {
 		return nil, fmt.Errorf("%s must be one of: %s/%s", SettingKeyOpenAITTFTMode, OpenAITTFTModeSemantic, OpenAITTFTModeVisible)

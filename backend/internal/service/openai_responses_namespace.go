@@ -274,15 +274,17 @@ func openAIResponsesNamespaceNames(c *gin.Context) map[string]apicompat.Response
 
 func restoreOpenAIResponsesNamespacePayload(c *gin.Context, payload []byte) ([]byte, error) {
 	names := openAIResponsesNamespaceNames(c)
-	if len(names) == 0 || !json.Valid(payload) {
-		return payload, nil
+	if len(names) > 0 && json.Valid(payload) {
+		restored, changed, err := apicompat.RestoreResponsesNamespaceCalls(payload, names)
+		if err != nil {
+			return payload, err
+		}
+		if changed {
+			payload = restored
+		}
 	}
-	restored, changed, err := apicompat.RestoreResponsesNamespaceCalls(payload, names)
-	if err != nil {
-		return payload, err
-	}
-	if changed {
-		return restored, nil
+	if attempt := collaborationAttempt(c); attempt != nil {
+		return restoreOpenAICollaborationPayload(payload, attempt)
 	}
 	return payload, nil
 }

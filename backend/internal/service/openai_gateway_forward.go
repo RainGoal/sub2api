@@ -20,6 +20,22 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	attempt := s.beginCollaborationAttempt(ctx, c, account, body, false)
+	result, err := s.forwardOpenAIRequest(ctx, c, account, body)
+	if err == nil && attempt != nil && attempt.businessFailed {
+		MarkOpsStreamFailure(c, "upstream_error", "response_failed", "Upstream response failed", http.StatusBadGateway)
+		err = errors.New("upstream response failed: collaboration response was not completed")
+	}
+	attempt.finish(collaborationDeliverySucceeded(ctx, c, result, err))
+	if attempt != nil && attempt.stopFailover && err != nil {
+		// Preserve the client-facing failure, but prevent handler account/group
+		// failover from replaying the same lossy recovery.
+		return result, errors.New(err.Error())
+	}
+	return result, err
+}
+
+func (s *OpenAIGatewayService) forwardOpenAIRequest(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	if err := rejectUnboundedMonitorCodex(ctx, c, account); err != nil {
 		return nil, err
 	}
@@ -92,6 +108,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if reasoningChanged {
 			body = reasoningBody
+		}
+	}
+	if attempt := collaborationAttempt(c); attempt != nil && account.IsOpenAI() &&
+		s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, upstreamRoutingModel(account, body, "")) == APIProtocolResponses {
+		body, err = applyRememberedCollaborationOmissions(body, attempt)
+		if err != nil {
+			return nil, err
+		}
+		body, err = prepareOpenAICollaborationBody(body, attempt)
+		if err != nil {
+			return nil, err
 		}
 	}
 	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
@@ -1088,6 +1115,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	for {
+		if err := s.collaborationRetryError(ctx, c, account); err != nil {
+			return nil, err
+		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard
@@ -1116,6 +1146,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
+		noteCollaborationUpstreamAttempt(c)
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
@@ -1144,6 +1175,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if headerGuard != nil {
 			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}
 		}
+		if retryBody, retry := s.recoverCollaborationResponse(ctx, c, account, body, resp); retry {
+			body = retryBody
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
+			httpInvalidEncryptedContentRetryTried = true
+			continue
+		}
 
 		// Handle error response
 		if resp.StatusCode >= 400 {
@@ -1154,7 +1192,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			if !collaborationRecoveryOwnsFailure(c) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -1169,13 +1207,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					strings.Contains(upstreamMsg, "The encrypted content") &&
 					strings.Contains(upstreamMsg, "could not be verified") &&
 					strings.Contains(upstreamMsg, "could not be decrypted or parsed"))
-			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && invalidEncryptedContentError {
+			if !httpInvalidEncryptedContentRetryTried && collaborationCanStartRecovery(c) && resp.StatusCode == http.StatusBadRequest && invalidEncryptedContentError {
 				decoded, decodeErr := ensureReqBody()
 				if decodeErr != nil {
 					return nil, decodeErr
 				}
 				invalidDigests := collectOpenAIEncryptedContentDigestsRaw(lineageEntryBody)
 				if trimOpenAIEncryptedReasoningItems(decoded) {
+					noteCollaborationEncryptedRecovery(c)
 					body, err = marshalOpenAIUpstreamJSON(decoded)
 					if err != nil {
 						return nil, fmt.Errorf("serialize invalid_encrypted_content retry body: %w", err)
@@ -1195,7 +1234,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
-			} else if changed && !IsModelPlazaMonitorProbe(ctx) && rejectedFieldRetryState.Allow(retryBody) {
+			} else if changed && !collaborationRecoveryOwnsFailure(c) && !IsModelPlazaMonitorProbe(ctx) && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody
 				requestView = newOpenAIRequestView(body)
 				reqBody = nil

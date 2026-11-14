@@ -766,6 +766,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
 	firstMessageResponsesLite := isOpenAIResponsesLiteWebSocketPayload(firstClientMessage)
+	if history, historyErr := s.prepareOpenAICollaborationPlaintextHistory(ctx, c, account, firstClientMessage); historyErr != nil {
+		return fmt.Errorf("normalize first websocket collaboration history: %w", historyErr)
+	} else {
+		firstClientMessage = history
+	}
 	if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, firstClientMessage, account, firstMessageResponsesLite); normalizeErr != nil {
 		return fmt.Errorf("normalize first websocket response.create: %w", normalizeErr)
 	} else if compatibilityChanged {
@@ -1032,6 +1037,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
 			if isResponseCreate {
+				if history, historyErr := s.prepareOpenAICollaborationPlaintextHistory(ctx, c, account, payload); historyErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid collaboration history", historyErr)
+				} else {
+					payload = history
+				}
 				if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, payload, account, responsesLite); normalizeErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
 				} else if compatibilityChanged {

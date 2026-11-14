@@ -2,6 +2,7 @@ package admin
 
 import (
 	"log/slog"
+	"reflect"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -457,6 +458,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAITTFTMode != after.OpenAITTFTMode {
 		changed = append(changed, "openai_ttft_mode")
+	}
+	if !reflect.DeepEqual(before.OpenAICollaborationSettings, after.OpenAICollaborationSettings) {
+		changed = append(changed, service.SettingKeyOpenAICollaborationSettings)
 	}
 	if before.EnableMetadataPassthrough != after.EnableMetadataPassthrough {
 		changed = append(changed, "enable_metadata_passthrough")

@@ -491,6 +491,7 @@ type OpenAIGatewayService struct {
 	openaiWSPassthroughDialerOnce  sync.Once
 	openaiModelTransientOnce       sync.Once
 	agentIdentityTaskMu            sync.Mutex
+	collaborationCache             openAICollaborationCache
 	openaiWSPool                   *openAIWSConnPool
 	openaiWSStateStore             OpenAIWSStateStore
 	openaiScheduler                OpenAIAccountScheduler

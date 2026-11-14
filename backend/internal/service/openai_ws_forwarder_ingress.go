@@ -117,6 +117,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	forceHTTPBridge := account.Platform == PlatformGrok ||
 		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account))
+	// Opted-in collaboration sessions use the existing HTTP bridge so every
+	// turn shares the same bounded recovery and response-identity rules.
+	if policy := s.collaborationPolicy(ctx, c, account); policy.Enabled && s.cfg != nil &&
+		account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) != OpenAIWSIngressModeOff {
+		forceHTTPBridge = true
+	}
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
 	if modeRouterV2Enabled && !forceHTTPBridge {
@@ -269,6 +275,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 		} else {
 			normalized = next
+		}
+		if history, historyErr := s.prepareOpenAICollaborationPlaintextHistory(ctx, c, account, normalized); historyErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid collaboration history", historyErr)
+		} else {
+			normalized = history
 		}
 		responsesLite := isOpenAIResponsesLiteWebSocketPayload(normalized)
 		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, normalized, account, responsesLite); compatibilityErr != nil {

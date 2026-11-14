@@ -758,6 +758,7 @@ export interface SystemSettings {
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
+  openai_collaboration_settings?: OpenAICollaborationSettings;
 
   // Allow user view error requests
   allow_user_view_error_requests: boolean;
@@ -1071,6 +1072,7 @@ export interface UpdateSettingsRequest {
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
+  openai_collaboration_settings?: OpenAICollaborationSettings;
 
   allow_user_view_error_requests?: boolean;
 }
@@ -1508,6 +1510,14 @@ export interface OpenAIFastPolicyRule {
  */
 export interface OpenAIFastPolicySettings {
   rules: OpenAIFastPolicyRule[];
+}
+
+export interface OpenAICollaborationSettings {
+  enabled: boolean;
+  plaintext_enabled: boolean;
+  legacy_cipher_recovery_enabled: boolean;
+  group_ids: number[];
+  api_key_ids: number[];
 }
 
 // ==================== Beta Policy Settings ====================

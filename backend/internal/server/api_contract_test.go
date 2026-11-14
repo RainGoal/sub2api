@@ -982,6 +982,13 @@ func TestAPIContracts(t *testing.T) {
 					"openai_fast_policy_settings": {
 						"rules": []
 					},
+					"openai_collaboration_settings": {
+						"enabled": false,
+						"plaintext_enabled": false,
+						"legacy_cipher_recovery_enabled": false,
+						"group_ids": [],
+						"api_key_ids": []
+					},
 					"custom_menu_items": [],
 					"custom_endpoints": [],
 					"payment_enabled": false,
@@ -1312,6 +1319,13 @@ func TestAPIContracts(t *testing.T) {
 					"claude_code_version_auto_sync_enabled": true,
 					"openai_fast_policy_settings": {
 						"rules": []
+					},
+					"openai_collaboration_settings": {
+						"enabled": false,
+						"plaintext_enabled": false,
+						"legacy_cipher_recovery_enabled": false,
+						"group_ids": [],
+						"api_key_ids": []
 					},
 					"payment_enabled": false,
 					"payment_min_amount": 0,
