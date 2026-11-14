@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -38,21 +39,22 @@ type openAICollaborationTool struct {
 }
 
 type openAICollaborationAttempt struct {
-	policy           OpenAICollaborationSettings
-	scope            string
-	branch           string
-	cache            *openAICollaborationCache
-	aliases          map[string]openAICollaborationTool
-	knownPlaintext   map[string]bool
-	knownOmissions   map[string]bool
-	omissions        []openAICollaborationOmission
-	recoveryUsed     bool
-	completed        bool
-	businessFailed   bool
-	deliveryFailed   bool
-	stopFailover     bool
-	preparedBodyHash string
-	upstreamAttempts int
+	policy                       OpenAICollaborationSettings
+	scope                        string
+	branch                       string
+	cache                        *openAICollaborationCache
+	aliases                      map[string]openAICollaborationTool
+	knownPlaintext               map[string]bool
+	knownOmissions               map[string]bool
+	omissions                    []openAICollaborationOmission
+	recoveryUsed                 bool
+	completed                    bool
+	businessFailed               bool
+	deliveryFailed               bool
+	stopFailover                 bool
+	preparedBodyHash             string
+	upstreamAttempts             int
+	probeResponseDeadlineReached bool
 }
 
 func collaborationHash(value string) string {
@@ -228,8 +230,11 @@ func collaborationDeliverySucceeded(ctx context.Context, c *gin.Context, result 
 
 // Called with the exact body that was sent upstream, before any downstream
 // headers or events are committed. No attempt is retried through failover.
-func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context, c *gin.Context, account *Account, body []byte, resp *http.Response) ([]byte, bool) {
+func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context, c *gin.Context, account *Account, body []byte, resp *http.Response, probeDeadlines ...time.Time) ([]byte, bool) {
 	a := collaborationAttempt(c)
+	if a != nil {
+		a.probeResponseDeadlineReached = false
+	}
 	if a == nil || !a.policy.Enabled || !a.policy.LegacyCipherRecoveryEnabled || (ctx != nil && ctx.Err() != nil) {
 		return body, false
 	}
@@ -241,8 +246,31 @@ func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context,
 	if !bytesContainAgentCipher(body) {
 		return body, false
 	}
-	failure := probeOpenAICollaborationResponse(ctx, resp)
+	blankWait := openAICollaborationPreludeWait
+	if resp != nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) &&
+		!a.recoveryUsed && !a.stopFailover && collaborationPriorUpstreamAttempts(c) <= 1 &&
+		(resp.StatusCode != http.StatusOK || !collaborationHasHostedTools(body)) &&
+		collaborationHasUnknownAgentCipher(body, a.knownPlaintext) {
+		blankWait = live.BlankPreludeWait()
+	}
+	probe := probeOpenAICollaborationResponseWithWait(ctx, resp, blankWait, probeDeadlines...)
+	a.probeResponseDeadlineReached = probe.Reason == "response_deadline"
+	if probe.BlankPrelude || probe.Reason == "prelude_deadline" || probe.Reason == "response_deadline" || probe.Reason == "prelude_size_limit" {
+		// A probe release is not necessarily a downstream write or a failed
+		// request. Keep this diagnostic out of upstream error accounting.
+		slog.Info("OpenAI collaboration prelude released", "account_id", account.ID,
+			"prelude_release_reason", probe.Reason, "probe_elapsed_ms", probe.Elapsed.Milliseconds(),
+			"blank_prelude", probe.BlankPrelude, "blank_prelude_wait_ms", blankWait.Milliseconds(),
+			"upstream_attempts", collaborationPriorUpstreamAttempts(c))
+	}
+	failure := probe.Failure
 	if len(failure) == 0 {
+		return body, false
+	}
+	// A longer prelude can span a live shutdown. Preserve the original
+	// response when recovery was disabled while waiting.
+	live = s.collaborationPolicy(ctx, c, account)
+	if (ctx != nil && ctx.Err() != nil) || !live.Enabled || !live.LegacyCipherRecoveryEnabled {
 		return body, false
 	}
 	recovery, err := recoverOpenAICollaborationEncryptedContentWithPlaintext(body, resp.StatusCode, failure, true, a.knownPlaintext)
@@ -267,7 +295,9 @@ func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context,
 	// customer bill. Diagnostics retain explicit unknown/failed accounting.
 	diagnostic := map[string]any{"selection": recovery.Selection, "omitted_blocks": len(recovery.Omissions),
 		"task_state": "needs_reassignment", "usage_known": usageKnown,
-		"accounting": accounting, "business_outcome": "failed_replaced"}
+		"accounting": accounting, "business_outcome": "failed_replaced",
+		"probe_elapsed_ms": probe.Elapsed.Milliseconds(), "prelude_release_reason": probe.Reason,
+		"recovery_attempts": 1}
 	if usageKnown {
 		diagnostic["usage"] = usage
 	}
@@ -290,6 +320,22 @@ func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context,
 
 func bytesContainAgentCipher(body []byte) bool {
 	return strings.Contains(string(body), `"agent_message"`) && strings.Contains(string(body), `"encrypted_content"`)
+}
+
+func collaborationHasUnknownAgentCipher(body []byte, knownPlaintext map[string]bool) bool {
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if item.Get("type").String() != "agent_message" {
+			continue
+		}
+		for _, part := range item.Get("content").Array() {
+			cipher := part.Get("encrypted_content")
+			if part.Get("type").String() == "encrypted_content" && cipher.Type == gjson.String &&
+				cipher.String() != "" && !knownPlaintext[collaborationHash(cipher.String())] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collaborationHasPlaintextAgentMessage(body []byte) bool {

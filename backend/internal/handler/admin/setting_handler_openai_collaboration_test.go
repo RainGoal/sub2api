@@ -29,7 +29,7 @@ func readCollaborationSettingsResponse(t *testing.T, rec *httptest.ResponseRecor
 func TestSettingsOpenAICollaborationRoundTripAndShutdown(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, nil)
 	want := service.OpenAICollaborationSettings{Enabled: true, PlaintextEnabled: true,
-		LegacyCipherRecoveryEnabled: true, GroupIDs: []int64{7}, APIKeyIDs: []int64{11}}
+		LegacyCipherRecoveryEnabled: true, BlankPreludeWaitSeconds: 10, GroupIDs: []int64{7}, APIKeyIDs: []int64{11}}
 	rec := doUpdateSettings(t, h, map[string]any{"openai_collaboration_settings": want}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, want, readCollaborationSettingsResponse(t, rec))
@@ -50,13 +50,30 @@ func TestSettingsOpenAICollaborationRoundTripAndShutdown(t *testing.T) {
 }
 
 func TestSettingsOpenAICollaborationOmittedOrNullPreservesValue(t *testing.T) {
-	stored := `{"enabled":true,"plaintext_enabled":true,"group_ids":[7],"api_key_ids":[]}`
+	stored := `{"enabled":true,"plaintext_enabled":true,"blank_prelude_wait_seconds":10,"group_ids":[7],"api_key_ids":[]}`
 	for _, body := range []map[string]any{{"site_name": "Updated"}, {"openai_collaboration_settings": nil}} {
 		h, repo := newStepUpSwitchTestHandler(t, map[string]string{service.SettingKeyOpenAICollaborationSettings: stored})
 		rec := doUpdateSettings(t, h, body, nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Equal(t, stored, repo.values[service.SettingKeyOpenAICollaborationSettings])
 		require.True(t, readCollaborationSettingsResponse(t, rec).Enabled)
+		require.Equal(t, 10, readCollaborationSettingsResponse(t, rec).BlankPreludeWaitSeconds)
+	}
+}
+
+func TestSettingsOpenAICollaborationLegacySaveDefaultsBlankPrelude(t *testing.T) {
+	for _, wait := range []any{nil, 0} {
+		h, _ := newStepUpSwitchTestHandler(t, map[string]string{
+			service.SettingKeyOpenAICollaborationSettings: `{"enabled":true,"group_ids":[7],"blank_prelude_wait_seconds":10}`,
+		})
+		settings := map[string]any{"enabled": true, "group_ids": []int64{7}}
+		if wait != nil {
+			settings["blank_prelude_wait_seconds"] = wait
+		}
+		rec := doUpdateSettings(t, h, map[string]any{"openai_collaboration_settings": settings}, nil)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Equal(t, 2, readCollaborationSettingsResponse(t, rec).BlankPreludeWaitSeconds)
+		require.Equal(t, 2, h.settingService.GetOpenAICollaborationSettingsCached(context.Background()).BlankPreludeWaitSeconds)
 	}
 }
 
@@ -66,6 +83,11 @@ func TestSettingsOpenAICollaborationRejectsInvalidBeforeWriting(t *testing.T) {
 		map[string]any{"group_ids": []int64{7, 7}},
 		map[string]any{"api_key_ids": []int64{-1}},
 		map[string]any{"enabled": "true"},
+		map[string]any{"blank_prelude_wait_seconds": -1},
+		map[string]any{"blank_prelude_wait_seconds": 1},
+		map[string]any{"blank_prelude_wait_seconds": 16},
+		map[string]any{"blank_prelude_wait_seconds": 2.5},
+		map[string]any{"blank_prelude_wait_seconds": "10"},
 	} {
 		h, repo := newStepUpSwitchTestHandler(t, map[string]string{service.SettingKeySiteName: "Existing"})
 		rec := doUpdateSettings(t, h, map[string]any{"site_name": "Do not save", "openai_collaboration_settings": value}, nil)
@@ -80,4 +102,7 @@ func TestSettingsOpenAICollaborationChangeIsAudited(t *testing.T) {
 	after := &service.SystemSettings{OpenAICollaborationSettings: service.OpenAICollaborationSettings{Enabled: true, GroupIDs: []int64{7}}}
 	require.Contains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAICollaborationSettings)
 	require.NotContains(t, diffSettings(after, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAICollaborationSettings)
+	after = &service.SystemSettings{OpenAICollaborationSettings: before.OpenAICollaborationSettings}
+	after.OpenAICollaborationSettings.BlankPreludeWaitSeconds = 10
+	require.Contains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAICollaborationSettings)
 }

@@ -14,8 +14,10 @@ import (
 const SettingKeyOpenAICollaborationSettings = "openai_collaboration_settings"
 
 const (
-	openAICollaborationCacheTTL  = 2 * time.Second
-	openAICollaborationDBTimeout = time.Second
+	openAICollaborationCacheTTL                  = 2 * time.Second
+	openAICollaborationDBTimeout                 = time.Second
+	openAICollaborationDefaultPreludeWaitSeconds = 2
+	openAICollaborationMaxPreludeWaitSeconds     = 15
 )
 
 // OpenAICollaborationSettings is opt-in per authorized group and optional API key.
@@ -24,12 +26,14 @@ type OpenAICollaborationSettings struct {
 	Enabled                     bool    `json:"enabled"`
 	PlaintextEnabled            bool    `json:"plaintext_enabled"`
 	LegacyCipherRecoveryEnabled bool    `json:"legacy_cipher_recovery_enabled"`
+	BlankPreludeWaitSeconds     int     `json:"blank_prelude_wait_seconds"`
 	GroupIDs                    []int64 `json:"group_ids"`
 	APIKeyIDs                   []int64 `json:"api_key_ids"`
 }
 
 func DefaultOpenAICollaborationSettings() OpenAICollaborationSettings {
-	return OpenAICollaborationSettings{GroupIDs: []int64{}, APIKeyIDs: []int64{}}
+	return OpenAICollaborationSettings{BlankPreludeWaitSeconds: openAICollaborationDefaultPreludeWaitSeconds,
+		GroupIDs: []int64{}, APIKeyIDs: []int64{}}
 }
 
 func (s OpenAICollaborationSettings) Allows(groupID, apiKeyID int64) bool {
@@ -38,12 +42,19 @@ func (s OpenAICollaborationSettings) Allows(groupID, apiKeyID int64) bool {
 }
 
 func (s OpenAICollaborationSettings) clone() OpenAICollaborationSettings {
+	if s.BlankPreludeWaitSeconds == 0 {
+		s.BlankPreludeWaitSeconds = openAICollaborationDefaultPreludeWaitSeconds
+	}
 	s.GroupIDs = append([]int64{}, s.GroupIDs...)
 	s.APIKeyIDs = append([]int64{}, s.APIKeyIDs...)
 	return s
 }
 
 func ValidateOpenAICollaborationSettings(settings OpenAICollaborationSettings) error {
+	if settings.BlankPreludeWaitSeconds != 0 &&
+		(settings.BlankPreludeWaitSeconds < openAICollaborationDefaultPreludeWaitSeconds || settings.BlankPreludeWaitSeconds > openAICollaborationMaxPreludeWaitSeconds) {
+		return fmt.Errorf("blank_prelude_wait_seconds must be 0 or between %d and %d", openAICollaborationDefaultPreludeWaitSeconds, openAICollaborationMaxPreludeWaitSeconds)
+	}
 	for name, ids := range map[string][]int64{"group_ids": settings.GroupIDs, "api_key_ids": settings.APIKeyIDs} {
 		seen := make(map[int64]struct{}, len(ids))
 		for _, id := range ids {
@@ -60,6 +71,16 @@ func ValidateOpenAICollaborationSettings(settings OpenAICollaborationSettings) e
 		return fmt.Errorf("group_ids must not be empty when collaboration compatibility is enabled")
 	}
 	return nil
+}
+
+// BlankPreludeWait returns the bounded delay used only after a verified blank
+// assistant placeholder. Invalid in-memory values fail closed to the default.
+func (s OpenAICollaborationSettings) BlankPreludeWait() time.Duration {
+	seconds := s.BlankPreludeWaitSeconds
+	if seconds < openAICollaborationDefaultPreludeWaitSeconds || seconds > openAICollaborationMaxPreludeWaitSeconds {
+		seconds = openAICollaborationDefaultPreludeWaitSeconds
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func parseOpenAICollaborationSettings(raw string) (OpenAICollaborationSettings, error) {

@@ -986,6 +986,7 @@ func TestAPIContracts(t *testing.T) {
 						"enabled": false,
 						"plaintext_enabled": false,
 						"legacy_cipher_recovery_enabled": false,
+						"blank_prelude_wait_seconds": 2,
 						"group_ids": [],
 						"api_key_ids": []
 					},
@@ -1324,6 +1325,7 @@ func TestAPIContracts(t *testing.T) {
 						"enabled": false,
 						"plaintext_enabled": false,
 						"legacy_cipher_recovery_enabled": false,
+						"blank_prelude_wait_seconds": 2,
 						"group_ids": [],
 						"api_key_ids": []
 					},

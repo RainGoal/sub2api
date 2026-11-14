@@ -21,34 +21,54 @@ const (
 // lifecycle or verified blank text placeholder can be retried. The deadline releases buffered bytes even
 // when the upstream stalls in the middle of an event.
 func probeOpenAICollaborationResponse(ctx context.Context, resp *http.Response) []byte {
+	return probeOpenAICollaborationResponseWithWait(ctx, resp, openAICollaborationPreludeWait).Failure
+}
+
+type collaborationProbeResult struct {
+	Failure      []byte
+	Reason       string
+	Elapsed      time.Duration
+	BlankPrelude bool
+}
+
+func probeOpenAICollaborationResponseWithWait(ctx context.Context, resp *http.Response, blankWait time.Duration, probeDeadlines ...time.Time) collaborationProbeResult {
 	if resp == nil || resp.Body == nil {
-		return nil
+		return collaborationProbeResult{Reason: "not_probed"}
 	}
 	sse := isEventStreamResponse(resp.Header)
 	if !sse && resp.StatusCode < 400 && !strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
-		return nil
+		return collaborationProbeResult{Reason: "not_probed"}
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if blankWait < openAICollaborationPreludeWait || blankWait > openAICollaborationMaxPreludeWaitSeconds*time.Second {
+		blankWait = openAICollaborationPreludeWait
+	}
+	started := time.Now()
+	var responseDeadline time.Time
+	for _, limit := range probeDeadlines {
+		if !limit.IsZero() && (responseDeadline.IsZero() || limit.Before(responseDeadline)) {
+			responseDeadline = limit
+		}
+	}
 	source := resp.Body
 	reader, writer := io.Pipe()
 	resp.Body = &responsesClientToolStreamBody{PipeReader: reader, source: source}
-	decision := make(chan []byte, 1)
+	decision := make(chan collaborationProbeResult, 1)
 	release := make(chan struct{})
-	go pumpCollaborationPrelude(source, writer, resp.StatusCode, sse, decision, release)
-	timer := time.NewTimer(openAICollaborationPreludeWait)
-	defer timer.Stop()
+	go pumpCollaborationPrelude(source, writer, resp.StatusCode, sse, decision, release, started, blankWait, responseDeadline)
 	select {
-	case failure := <-decision:
-		return failure
-	case <-timer.C:
-		close(release)
-		return nil
+	case result := <-decision:
+		if ctx.Err() != nil {
+			_ = resp.Body.Close()
+			return collaborationProbeResult{Reason: "canceled", Elapsed: time.Since(started)}
+		}
+		return result
 	case <-ctx.Done():
 		close(release)
 		_ = resp.Body.Close()
-		return nil
+		return collaborationProbeResult{Reason: "canceled", Elapsed: time.Since(started)}
 	}
 }
 
@@ -78,7 +98,7 @@ func (r *collaborationChunkReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status int, sse bool, decision chan<- []byte, release <-chan struct{}) {
+func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status int, sse bool, decision chan<- collaborationProbeResult, release <-chan struct{}, started time.Time, blankWait time.Duration, responseDeadline time.Time) {
 	defer func() { _ = source.Close() }()
 	defer func() { _ = out.Close() }()
 	stop := make(chan struct{})
@@ -103,13 +123,34 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 	var prefix bytes.Buffer
 	var pending, bareError []byte
 	var placeholder collaborationPlaceholder
+	boundedDeadline := func(wait time.Duration) time.Time {
+		limit := started.Add(wait)
+		if !responseDeadline.IsZero() && responseDeadline.Before(limit) {
+			return responseDeadline
+		}
+		return limit
+	}
+	deadline := boundedDeadline(openAICollaborationPreludeWait)
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	reason := "passthrough"
+	extended := false
 	finish := func(failure []byte, readErr error) {
+		if !time.Now().Before(deadline) {
+			failure, reason = nil, "prelude_deadline"
+			if !responseDeadline.IsZero() && !time.Now().Before(responseDeadline) {
+				reason = "response_deadline"
+			}
+		}
 		select {
 		case <-release:
-			failure = nil
+			failure, reason = nil, "canceled"
 		default:
 		}
-		decision <- failure
+		if len(failure) > 0 {
+			reason = "encrypted_failure"
+		}
+		decision <- collaborationProbeResult{Failure: failure, Reason: reason, Elapsed: time.Since(started), BlankPrelude: placeholder.part}
 		if _, err := out.Write(prefix.Bytes()); err != nil {
 			return
 		}
@@ -122,16 +163,26 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 	}
 	for {
 		select {
+		case <-timer.C:
+			reason = "prelude_deadline"
+			finish(nil, nil)
+			return
 		case <-release:
 			finish(nil, nil)
 			return
 		case chunk, ok := <-chunks:
 			if !ok {
+				reason = "eof"
 				finish(nil, io.EOF)
 				return
 			}
 			_, _ = prefix.Write(chunk.data)
+			if !time.Now().Before(deadline) {
+				finish(nil, chunk.err)
+				return
+			}
 			if prefix.Len() >= openAICollaborationPreludeBytes {
+				reason = "prelude_size_limit"
 				finish(nil, chunk.err)
 				return
 			}
@@ -149,6 +200,10 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 			}
 			pending = append(pending, chunk.data...)
 			for {
+				if !time.Now().Before(deadline) {
+					finish(nil, chunk.err)
+					return
+				}
 				end := collaborationSSEFrameEnd(pending)
 				if end == 0 {
 					break
@@ -168,8 +223,20 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 					"response.content_part.added", "response.content_part.done",
 					"response.output_text.delta", "response.output_text.done":
 					if !placeholder.accept(kind, payload) {
+						reason = "output_or_unknown_event"
 						finish(nil, chunk.err)
 						return
+					}
+					if placeholder.part && !extended && blankWait > openAICollaborationPreludeWait {
+						// A single owner updates the timer. Repeated whitespace and
+						// heartbeats never move this absolute deadline forward.
+						if !time.Now().Before(deadline) {
+							finish(nil, chunk.err)
+							return
+						}
+						extended = true
+						deadline = boundedDeadline(blankWait)
+						timer.Reset(time.Until(deadline))
 					}
 				case "error":
 					if placeholder.hasOutput(payload) || !placeholder.responseMatches(payload) || !isOpenAICollaborationEncryptedContentError(status, payload) {
@@ -190,12 +257,18 @@ func pumpCollaborationPrelude(source io.ReadCloser, out *io.PipeWriter, status i
 				default:
 					// completed overrides bare error; any text/tool/unknown event
 					// closes the recovery window before it is sent downstream.
+					reason = "output_or_unknown_event"
+					if kind == "response.completed" {
+						reason = "completed"
+					}
 					finish(nil, chunk.err)
 					return
 				}
 			}
 			if chunk.err != nil {
+				reason = "read_error"
 				if chunk.err == io.EOF && len(pending) == 0 {
+					reason = "eof"
 					finish(bareError, chunk.err)
 				} else {
 					finish(nil, chunk.err)

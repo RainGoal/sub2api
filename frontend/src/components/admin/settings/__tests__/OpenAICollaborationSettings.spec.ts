@@ -12,6 +12,7 @@ vi.mock('@/stores', () => ({ useAppStore: () => ({ showSuccess: api.showSuccess,
 
 const enabled: Settings = {
   enabled: true, plaintext_enabled: true, legacy_cipher_recovery_enabled: true,
+  blank_prelude_wait_seconds: 10,
   group_ids: [7], api_key_ids: [12]
 }
 const clone = (config: Settings): Settings => ({ ...config, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] })
@@ -92,11 +93,67 @@ describe('OpenAI collaboration settings', () => {
     api.getAll.mockRejectedValueOnce(new Error('unavailable'))
     const wrapper = await open()
     await wrapper.get('[data-test="collaboration-key-ids"]').setValue('not-an-id')
+    await wrapper.get('[data-test="collaboration-blank-wait"]').setValue('')
     await wrapper.get('[data-test="collaboration-plaintext"]').trigger('click')
     await wrapper.get('[data-test="collaboration-stop"]').trigger('click')
     await flushPromises()
     expect(api.updateSettings).toHaveBeenCalledWith({ openai_collaboration_settings: { ...enabled, enabled: false } })
     expect(wrapper.get('[data-test="collaboration-status"]').text()).toContain('关闭')
+    wrapper.unmount()
+  })
+  it('loads older settings without a wait limit as 2 seconds', async () => {
+    api.getSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, blank_prelude_wait_seconds: undefined } })
+    const wrapper = await open()
+    expect(wrapper.get('[data-test="collaboration-blank-wait"]').element).toHaveProperty('value', '2')
+    expect(wrapper.get('[data-test="collaboration-save"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="collaboration-key-ids"]').setValue('42')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    expect(api.updateSettings).toHaveBeenCalledWith({ openai_collaboration_settings: {
+      ...enabled, blank_prelude_wait_seconds: 2, api_key_ids: [42]
+    } })
+    wrapper.unmount()
+  })
+  it.each(['', '1', '0', '-1', '2.5', '16'])('rejects an invalid wait limit without saving: %s', async value => {
+    const wrapper = await open()
+    await wrapper.get('[data-test="collaboration-blank-wait"]').setValue(value)
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    expect(wrapper.get('[role="alert"]').text()).toContain('2–15 秒之间的整数')
+    expect(api.updateSettings).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('saves the wait limit and preserves it when shutting down', async () => {
+    const wrapper = await open()
+    await wrapper.get('[data-test="collaboration-blank-wait"]').setValue('15')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ openai_collaboration_settings: {
+      ...enabled, blank_prelude_wait_seconds: 15
+    } })
+    await wrapper.get('[data-test="collaboration-blank-wait"]').setValue('99')
+    await wrapper.get('[data-test="collaboration-stop"]').trigger('click')
+    await flushPromises()
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ openai_collaboration_settings: {
+      ...enabled, blank_prelude_wait_seconds: 15, enabled: false
+    } })
+    expect(wrapper.get('[data-test="collaboration-blank-wait"]').element).toHaveProperty('value', '15')
+    wrapper.unmount()
+  })
+  it('does not confirm a larger wait when an older backend omits it', async () => {
+    api.updateSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, blank_prelude_wait_seconds: undefined } })
+    const wrapper = await open()
+    await wrapper.get('[data-test="collaboration-blank-wait"]').setValue('15')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('无法确认')
+    expect(api.showSuccess).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it.each([0, 1, 16, 2.5, '10', null])('does not load an invalid server wait limit: %s', async value => {
+    api.getSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, blank_prelude_wait_seconds: value } })
+    const wrapper = await open()
+    expect(wrapper.get('[role="alert"]').text()).toContain('禁止保存')
+    expect(wrapper.find('[data-test="collaboration-blank-wait"]').exists()).toBe(false)
     wrapper.unmount()
   })
   it('requires a selected group and valid key IDs before enabling', async () => {

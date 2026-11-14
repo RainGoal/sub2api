@@ -1175,12 +1175,24 @@ func (s *OpenAIGatewayService) forwardOpenAIRequest(ctx context.Context, c *gin.
 		if headerGuard != nil {
 			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}
 		}
-		if retryBody, retry := s.recoverCollaborationResponse(ctx, c, account, body, resp); retry {
+		var collaborationProbeDeadline time.Time
+		if firstOutputTimeout > 0 {
+			collaborationProbeDeadline = startTime.Add(firstOutputTimeout)
+		}
+		if retryBody, retry := s.recoverCollaborationResponse(ctx, c, account, body, resp, collaborationProbeDeadline); retry {
 			body = retryBody
 			requestView = newOpenAIRequestView(body)
 			reqBody = nil
 			httpInvalidEncryptedContentRetryTried = true
 			continue
+		}
+		if attempt := collaborationAttempt(c); attempt != nil && attempt.probeResponseDeadlineReached {
+			_ = resp.Body.Close()
+			return nil, s.newOpenAIFirstOutputTimeoutError(
+				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+				startTime, originalModel, reasoningEffortValue,
+				firstOutputTimeout, "semantic_output", resp.Header,
+			)
 		}
 
 		// Handle error response

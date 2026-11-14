@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -51,6 +52,54 @@ func TestOpenAICollaborationSettingsRejectInvalidSelectors(t *testing.T) {
 	} {
 		require.Error(t, ValidateOpenAICollaborationSettings(settings))
 	}
+}
+
+func TestOpenAICollaborationBlankPreludeDefaultsAndBounds(t *testing.T) {
+	require.Equal(t, 2, DefaultOpenAICollaborationSettings().BlankPreludeWaitSeconds)
+	for _, raw := range []string{"", "{}", `{"enabled":true,"group_ids":[7]}`, `{"blank_prelude_wait_seconds":0}`} {
+		settings, err := parseOpenAICollaborationSettings(raw)
+		require.NoError(t, err, raw)
+		require.Equal(t, 2, settings.BlankPreludeWaitSeconds, raw)
+		require.Equal(t, 2*time.Second, settings.BlankPreludeWait(), raw)
+	}
+	for _, seconds := range []int{0, 2, 10, 15} {
+		settings := OpenAICollaborationSettings{BlankPreludeWaitSeconds: seconds}
+		require.NoError(t, ValidateOpenAICollaborationSettings(settings))
+		require.Equal(t, time.Duration(max(seconds, 2))*time.Second, settings.BlankPreludeWait())
+	}
+	for _, seconds := range []int{-1, 1, 16, 1 << 30} {
+		settings := OpenAICollaborationSettings{BlankPreludeWaitSeconds: seconds}
+		require.ErrorContains(t, ValidateOpenAICollaborationSettings(settings), "blank_prelude_wait_seconds")
+		require.Equal(t, 2*time.Second, settings.BlankPreludeWait())
+	}
+	for _, raw := range []string{`{"blank_prelude_wait_seconds":-1}`, `{"blank_prelude_wait_seconds":1}`, `{"blank_prelude_wait_seconds":16}`, `{"blank_prelude_wait_seconds":2.5}`, `{"blank_prelude_wait_seconds":"10"}`} {
+		settings, err := parseOpenAICollaborationSettings(raw)
+		require.Error(t, err, raw)
+		require.False(t, settings.Enabled)
+		require.Equal(t, 2*time.Second, settings.BlankPreludeWait())
+	}
+}
+
+func TestOpenAICollaborationBlankPreludeRoundTripAndLegacySave(t *testing.T) {
+	ctx := context.Background()
+	repo := &panelRateLimitSettingRepo{}
+	svc := NewSettingService(repo, &config.Config{})
+	settings := enabledCollaborationTestSettings()
+	settings.BlankPreludeWaitSeconds = 10
+	require.NoError(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	got, err := svc.GetOpenAICollaborationSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, settings, got)
+	require.Equal(t, 10*time.Second, svc.GetOpenAICollaborationSettingsCached(ctx).BlankPreludeWait())
+	settings.BlankPreludeWaitSeconds = 0
+	require.NoError(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	require.Equal(t, 2*time.Second, svc.GetOpenAICollaborationSettingsCached(ctx).BlankPreludeWait())
+	var stored OpenAICollaborationSettings
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyOpenAICollaborationSettings]), &stored))
+	require.Equal(t, 2, stored.BlankPreludeWaitSeconds)
+	settings.BlankPreludeWaitSeconds = 16
+	require.Error(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	require.Equal(t, 2*time.Second, svc.GetOpenAICollaborationSettingsCached(ctx).BlankPreludeWait())
 }
 
 func TestOpenAICollaborationSettingsShutdownAndCacheOwnership(t *testing.T) {

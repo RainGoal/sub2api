@@ -11,6 +11,9 @@ const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true }
 const { t } = useI18n()
 const appStore = useAppStore()
 const prefix = 'admin.settings.openaiCollaboration.'
+const defaultBlankPreludeWaitSeconds = 2
+const minBlankPreludeWaitSeconds = 2
+const maxBlankPreludeWaitSeconds = 15
 const loading = ref(false)
 const saving = ref(false)
 const loaded = ref(false)
@@ -20,6 +23,7 @@ const groupsError = ref('')
 const saved = ref<OpenAICollaborationSettings | null>(null)
 const draft = ref<OpenAICollaborationSettings>({
   enabled: false, plaintext_enabled: false, legacy_cipher_recovery_enabled: false,
+  blank_prelude_wait_seconds: defaultBlankPreludeWaitSeconds,
   group_ids: [], api_key_ids: []
 })
 const groups = ref<AdminGroup[]>([])
@@ -33,13 +37,16 @@ const availableGroups = computed(() => {
   return options
 })
 
-function isConfig(value: unknown): value is OpenAICollaborationSettings {
-  if (!value || typeof value !== 'object') return false
+function normalizeConfig(value: unknown): OpenAICollaborationSettings | null {
+  if (!value || typeof value !== 'object') return null
   const config = value as OpenAICollaborationSettings
-  return typeof config.enabled === 'boolean' && typeof config.plaintext_enabled === 'boolean' &&
-    typeof config.legacy_cipher_recovery_enabled === 'boolean' &&
-    [config.group_ids, config.api_key_ids].every(ids => Array.isArray(ids) &&
-      ids.every(id => Number.isSafeInteger(id) && id > 0))
+  if (typeof config.enabled !== 'boolean' || typeof config.plaintext_enabled !== 'boolean' ||
+    typeof config.legacy_cipher_recovery_enabled !== 'boolean' ||
+    ![config.group_ids, config.api_key_ids].every(ids => Array.isArray(ids) &&
+      ids.every(id => Number.isSafeInteger(id) && id > 0))) return null
+  const wait = config.blank_prelude_wait_seconds === undefined ? defaultBlankPreludeWaitSeconds : config.blank_prelude_wait_seconds
+  if (!Number.isInteger(wait) || wait < minBlankPreludeWaitSeconds || wait > maxBlankPreludeWaitSeconds) return null
+  return { ...config, blank_prelude_wait_seconds: wait, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] }
 }
 function copy(config: OpenAICollaborationSettings): OpenAICollaborationSettings {
   return { ...config, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] }
@@ -64,8 +71,9 @@ async function load(): Promise<void> {
   const [settingsResult, groupsResult] = await Promise.allSettled([
     adminAPI.settings.getSettings(), adminAPI.groups.getAll()
   ])
-  if (settingsResult.status === 'fulfilled' && isConfig(settingsResult.value?.openai_collaboration_settings)) {
-    accept(settingsResult.value.openai_collaboration_settings)
+  const normalized = settingsResult.status === 'fulfilled' ? normalizeConfig(settingsResult.value?.openai_collaboration_settings) : null
+  if (normalized) {
+    accept(normalized)
   } else {
     error.value = failure(settingsResult.status === 'rejected' ? settingsResult.reason : null, 'loadFailed')
   }
@@ -92,6 +100,10 @@ async function save(stop = false): Promise<void> {
       return
     }
     config.api_key_ids = [...new Set(parts.map(Number))]
+    if (!Number.isInteger(config.blank_prelude_wait_seconds) || config.blank_prelude_wait_seconds < minBlankPreludeWaitSeconds || config.blank_prelude_wait_seconds > maxBlankPreludeWaitSeconds) {
+      error.value = t(prefix + 'invalidBlankPreludeWaitSeconds')
+      return
+    }
     if (config.enabled && (!groupsLoaded.value || config.group_ids.length === 0)) {
       error.value = t(prefix + 'selectGroups')
       return
@@ -104,12 +116,13 @@ async function save(stop = false): Promise<void> {
   saving.value = true
   try {
     const result = await adminAPI.settings.updateSettings({ openai_collaboration_settings: config })
-    if (!isConfig(result?.openai_collaboration_settings)) {
+    const normalized = normalizeConfig(result?.openai_collaboration_settings)
+    if (!normalized || normalized.blank_prelude_wait_seconds !== config.blank_prelude_wait_seconds) {
       loaded.value = false
       error.value = t(prefix + 'unconfirmed')
       return
     }
-    accept(result.openai_collaboration_settings)
+    accept(normalized)
     appStore.showSuccess(t(prefix + (stop ? 'stopped' : 'saved')))
   } catch (cause) {
     error.value = failure(cause, 'saveFailed')
@@ -169,6 +182,11 @@ watch(() => props.active, active => {
             </div>
           </div>
           <p v-if="draft.legacy_cipher_recovery_enabled" class="text-sm text-amber-700 dark:text-amber-300">{{ t(prefix + 'lossyHint') }}</p>
+          <div>
+            <label for="collaboration-blank-wait" class="mb-2 block font-medium text-gray-900 dark:text-white">{{ t(prefix + 'blankPreludeWaitSeconds') }}</label>
+            <input id="collaboration-blank-wait" v-model.number="draft.blank_prelude_wait_seconds" data-test="collaboration-blank-wait" type="number" :min="minBlankPreludeWaitSeconds" :max="maxBlankPreludeWaitSeconds" step="1" class="input max-w-40" aria-describedby="collaboration-blank-wait-hint" />
+            <p id="collaboration-blank-wait-hint" class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'blankPreludeWaitHint') }}</p>
+          </div>
           <fieldset :disabled="!groupsLoaded" aria-describedby="collaboration-groups-hint">
             <legend class="font-medium text-gray-900 dark:text-white">{{ t(prefix + 'groups') }}</legend>
             <p id="collaboration-groups-hint" class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'groupsHint') }}</p>
