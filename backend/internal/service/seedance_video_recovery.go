@@ -148,6 +148,16 @@ func (s *SeedanceVideoRecoveryService) processTask(ctx context.Context, pending 
 	if pending.SettlementStatus == SeedanceVideoSettlementNeedsReview {
 		return nil
 	}
+	if metering := pending.ConfirmedReviewMetering(); metering != nil {
+		// Administrator-verified completion is durable intent. Retry accounting
+		// without another provider observation, including after the polling TTL.
+		account, err := s.accountRepo.GetByID(ctx, pending.AccountID)
+		if err != nil || account == nil || !account.IsSeedance() {
+			return errors.New("seedance recovery account is unavailable")
+		}
+		pending.UpstreamStatus = SeedanceVideoResponseStatusCompleted
+		return s.settleCompleted(ctx, pending, account, videoTaskReviewCompletionResult(metering))
+	}
 	// The terminal status is durable intent, not a fresh provider observation.
 	// Retry release directly before looking up an account or making any upstream
 	// request; this is the critical guard after a balance release whose final

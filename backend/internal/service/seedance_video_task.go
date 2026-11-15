@@ -61,10 +61,27 @@ type SeedanceVideoTaskReviewRepository interface {
 }
 
 type VideoTaskReviewDecision struct {
-	ActorID   int64     `json:"actor_id"`
-	Action    string    `json:"action"`
-	Reason    string    `json:"reason"`
-	DecidedAt time.Time `json:"decided_at"`
+	ActorID   int64                    `json:"actor_id"`
+	Action    string                   `json:"action"`
+	Reason    string                   `json:"reason"`
+	DecidedAt time.Time                `json:"decided_at"`
+	Metering  *VideoTaskReviewMetering `json:"metering,omitempty"`
+}
+
+type VideoTaskReviewMetering struct {
+	OutputSeconds    float64 `json:"output_seconds"`
+	ReferenceSeconds float64 `json:"reference_seconds"`
+}
+
+func (p *SeedanceVideoPendingBilling) ConfirmedReviewMetering() *VideoTaskReviewMetering {
+	if p == nil || len(p.ReviewDecisions) == 0 {
+		return nil
+	}
+	decision := p.ReviewDecisions[len(p.ReviewDecisions)-1]
+	if decision.Action != "confirmed_succeeded" {
+		return nil
+	}
+	return decision.Metering
 }
 
 func (s *OpenAIGatewayService) MarkSeedanceVideoTaskNeedsReview(ctx context.Context, pending *SeedanceVideoPendingBilling, reason string, deadline time.Time) error {

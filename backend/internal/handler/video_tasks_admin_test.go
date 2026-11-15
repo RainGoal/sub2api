@@ -26,6 +26,15 @@ func TestVideoTaskReviewAdminRequiresRoleAndRejectsClientMoney(t *testing.T) {
 		{"amount", "admin", `{"action":"confirmed_failed","reason":"verified","amount":1}`, http.StatusUnprocessableEntity},
 		{"missing_reason", "admin", `{"action":"confirmed_failed","reason":""}`, http.StatusUnprocessableEntity},
 		{"unsupported_completed", "admin", `{"action":"confirmed_completed","reason":"verified"}`, http.StatusUnprocessableEntity},
+		{"success_missing_metering", "admin", `{"action":"confirmed_succeeded","reason":"verified"}`, http.StatusUnprocessableEntity},
+		{"success_null_metering", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":null}`, http.StatusUnprocessableEntity},
+		{"success_empty_metering", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":{}}`, http.StatusUnprocessableEntity},
+		{"success_null_output", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":{"output_seconds":null,"reference_seconds":0}}`, http.StatusUnprocessableEntity},
+		{"success_missing_reference", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":{"output_seconds":8}}`, http.StatusUnprocessableEntity},
+		{"success_negative", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":{"output_seconds":-1,"reference_seconds":0}}`, http.StatusUnprocessableEntity},
+		{"success_unavailable", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":{"output_seconds":8.5,"reference_seconds":0}}`, http.StatusServiceUnavailable},
+		{"metering_wrong_action", "admin", `{"action":"confirmed_failed","reason":"verified","metering":{"output_seconds":8,"reference_seconds":0}}`, http.StatusUnprocessableEntity},
+		{"metering_client_money", "admin", `{"action":"confirmed_succeeded","reason":"verified","metering":{"output_seconds":8,"reference_seconds":0,"amount":1}}`, http.StatusUnprocessableEntity},
 		{"multiple_json", "admin", `{"action":"retry_poll","reason":"verified"} {}`, http.StatusUnprocessableEntity},
 		{"unavailable", "admin", `{"action":"retry_poll","reason":"verified"}`, http.StatusServiceUnavailable},
 	} {
@@ -60,4 +69,21 @@ func TestVideoTaskReviewResponseOmitsExecutionAndRawErrors(t *testing.T) {
 	require.NotContains(t, string(encoded), "supplier-private.example")
 	require.NotContains(t, string(encoded), "execution_snapshot")
 	require.NotContains(t, string(encoded), "last_error")
+}
+
+func TestVideoTaskReviewSuccessRemainsInProgressUntilAccountingSettles(t *testing.T) {
+	pending := &service.SeedanceVideoPendingBilling{StateID: "vid_task", TaskID: "supplier-task", IDVersion: 1,
+		UpstreamStatus: service.SeedanceVideoResponseStatusCompleted, SettlementStatus: service.SeedanceVideoSettlementPending,
+		ReviewDecisions: []service.VideoTaskReviewDecision{{Action: "confirmed_succeeded", Metering: &service.VideoTaskReviewMetering{OutputSeconds: 8}}}}
+	result, local := seedanceVideoLocalTerminalResult(service.SeedanceVideoEndpointStatus, pending.StateID, pending)
+	require.True(t, local)
+	require.Equal(t, service.SeedanceVideoResponseStatusInProgress, result.TaskStatus)
+	unavailable, _, _ := seedanceVideoContentUnavailable(pending)
+	require.True(t, unavailable)
+	pending.SettlementStatus = service.SeedanceVideoSettlementSettled
+	result, local = seedanceVideoLocalTerminalResult(service.SeedanceVideoEndpointStatus, pending.StateID, pending)
+	require.True(t, local)
+	require.Equal(t, service.SeedanceVideoResponseStatusCompleted, result.TaskStatus)
+	unavailable, _, _ = seedanceVideoContentUnavailable(pending)
+	require.False(t, unavailable)
 }

@@ -72,7 +72,12 @@ Seedance 账号使用 `credentials.model_mapping` 配置“客户请求模型 �
 
 创建已发出但结果未知时，网关返回 `X-Video-Task-ID` 并保留预占，进入 `needs_review`。
 不要重发生成请求或切换账号重新生成；未知提交无法保证供应商去重或找回。
-管理端“视频任务复核”支持恢复原任务轮询、确认失败、确认取消，必须填写依据和原因。
+管理端“视频任务复核”支持恢复原任务轮询、确认成功、确认失败、确认取消，必须填写依据和原因。
+上游已成功但缺失计量时，选择“已核实成功并结算”，补录实际输出与参考视频秒数（支持小数）。
+未记录销售价格快照的历史任务继续使用整数秒计费，不接受小数以避免截断计量。
+销售及采购仍使用任务原有的计费单位、规则、上限和价格，不允许直接修改金额或价格快照。
+成功复核后由恢复 worker 完成幂等结算；页面提示“已提交成功结算”，最终完成扣款才显示成功。
+没有上游任务编号、已经释放预占或已有失败/取消意图的任务不能确认成功。
 复核接口不接受金额；扣款与释放通过同一任务行锁、租约和账单去重互斥。
 若扣款已提交但任务状态写入失败，释放操作只修复为已结算，不能再次退回预占。
 扣款失败后重试复用已保存的精确计量与冻结价格；上游后补或更改时长不会重新定价。
@@ -95,12 +100,18 @@ Seedance 账号使用 `credentials.model_mapping` 配置“客户请求模型 �
 | GET | `/v1/media/models` | 当前 Key 的视频能力目录 |
 | GET | `/api/v1/admin/accounts/video-model-templates` | 管理员读取能力模板，不发起上游生成或授权 |
 | GET | `/api/v1/admin/video-tasks/reviews` | 管理员复核列表，limit/offset 分页 |
-| POST | `/api/v1/admin/video-tasks/reviews/{state_id}/resolve` | 管理员决策，action/reason |
+| POST | `/api/v1/admin/video-tasks/reviews/{state_id}/resolve` | 管理员决策，action/reason；成功时附 metering |
 
-复核 action 为 `retry_poll` / `confirmed_failed` / `confirmed_canceled`；
+复核 action 为 `retry_poll` / `confirmed_succeeded` / `confirmed_failed` / `confirmed_canceled`；
+`confirmed_succeeded` 需附 `metering: {"output_seconds": 6.75, "reference_seconds": 2.25}`。
+两项均须是非负有限数；实际秒数计费所需的值必须大于 0，且满足原销售和采购上限。
+按条或请求秒数计费且无需实际输出计量时允许输出为 0；无参考视频时参考秒数为 0。
+计量无效返回 422 / `VIDEO_TASK_REVIEW_METERING_INVALID`；成功复核的决议记录包含核实计量。
 未登录 401、非管理员 403、任务不存在 404、状态冲突 409、无效输入 422、不可用 503。
 生成/查询保留原八字段和五状态；未知规格为空字符串/0，completed 必须已在本地结算。
 Nginx 检查以上路径、下载 Range 与超时、管理端新资源，不需增加支付或 OAuth 回调。
+成功复核不新增开关或迁移；部署需同时更新内嵌前端、应用与恢复 worker，确认 worker 正常运行，
+并核对复核提交、最终 completed 状态、唯一扣款、销售/采购统计及原视频下载。
 小范围真实联调须覆盖不同 profile、768p/2K、按条型号、四种售采组合及供应商账单。
 分别观察未知提交、预占/释放、结算积压、采购统计和下载成功率；异常先停止该组合创建。
 
@@ -169,3 +180,19 @@ Tag 会触发现有 Release 流水线发布构建产物及镜像；生产部署�
   `TestRequestAuditPostgresIntegration` 报 `rootless Docker is not supported on Windows`。
   其他 Docker 用例自动跳过不算集成验证完成；发布前须在具备 PostgreSQL/Redis 容器的环境或 CI 补验。
 - 本轮未提交、发布或部署；实际供应商生成、计量与账单核对仍需部署验收。
+
+## 成功复核与选区配色验证（2026-11-15）
+
+- `go test -p 1 -parallel 1 ./...`、`go test -p 1 -parallel 1 -tags=unit ./...`：全部包通过。
+  Windows 测试进程临时加入 `D:/Environ/Git/bin`，供既有备份测试使用 `sh`。
+- `golangci-lint run --timeout=30m ./...`：通过，0 issues；修改过的 Go 文件全部经过 `gofmt`。
+  最后按 lint 提示将复核分支改为 switch 后，`go test -p 1 -tags=unit ./internal/service -run 'TestVideoTaskReview' -count=1` 再次通过。
+- `corepack pnpm@9.15.9 --dir frontend run typecheck`、`run build`：通过，构建包含 i18n 检查。
+  构建时用临时 PATH 固定子命令的 pnpm 9.15.9，避免桌面运行时的新版 pnpm 尝试重装依赖。
+- `corepack pnpm@9.15.9 --dir frontend run test:run --maxWorkers=4 --minWorkers=1`：416 文件、3607 项测试全部通过。
+- `go test -p 1 -tags embed ./internal/web`、修改前端文件的 ESLint、`git diff --check`：通过。
+- 浏览器本地 mock 验证深浅色文字选区、1440px 桌面与 390px 成功复核表单、模拟提交通过。
+  新增回归覆盖非法/缺失计量、按秒/按条和独立售采计量、冻结价格、重复提交、扣款失败重试、租约及客户端查询/取消互斥。
+- 本机没有 Docker，未运行 PostgreSQL/Redis 集成测试；发布前必须在完整环境或 CI 运行
+  `go test -tags=integration ./...`，不可将自动跳过视为通过。
+- 本地验证阶段未修改线上任务；部署后按上述复核、扣款及原视频下载检查项验收。

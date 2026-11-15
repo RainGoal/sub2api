@@ -106,6 +106,10 @@ func (r *seedanceVideoTaskRepository) RecordReviewDecisionWithLease(ctx context.
 	}
 	switch decision.Action {
 	case "retry_poll", "confirmed_failed", "confirmed_canceled":
+	case "confirmed_succeeded":
+		if decision.Metering == nil {
+			return errors.New("verified video task metering is required")
+		}
 	default:
 		return errors.New("unsupported video task review decision")
 	}
@@ -115,6 +119,18 @@ func (r *seedanceVideoTaskRepository) RecordReviewDecisionWithLease(ctx context.
 	encoded, err := json.Marshal(decision)
 	if err != nil {
 		return err
+	}
+	if decision.Action == "confirmed_succeeded" {
+		// Queue the durable success intent in the same write as its audit record;
+		// a crash cannot leave the decision stranded behind a review-only lease.
+		result, err := r.db.ExecContext(ctx, `UPDATE custom_seedance_video_tasks
+SET review_decisions = review_decisions || jsonb_build_array($2::jsonb),
+    settlement_status = 'pending', upstream_status = 'completed', review_reason = '',
+    next_poll_at = NOW(), lease_until = NULL, updated_at = NOW()
+WHERE state_id = $1 AND settlement_status = 'processing' AND provider_task_id IS NOT NULL
+  AND lease_until = $3 AND lease_until > NOW()
+  AND LOWER(TRIM(upstream_status)) NOT IN ('failed', 'error', 'canceled', 'cancelled', 'cancel_requested')`, stateID, string(encoded), leaseUntil)
+		return seedanceVideoTaskMutationResult(result, err)
 	}
 	result, err := r.db.ExecContext(ctx, `UPDATE custom_seedance_video_tasks
 SET review_decisions = review_decisions || jsonb_build_array($2::jsonb), updated_at = NOW()

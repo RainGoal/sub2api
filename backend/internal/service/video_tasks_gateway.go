@@ -305,7 +305,7 @@ func buildVideoTasksCompletionBilling(pending *SeedanceVideoPendingBilling, resu
 		if policy == VideoQuantityRequestedSeconds {
 			return float64(pending.DurationSeconds), nil
 		}
-		if pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Capability != nil && !pending.ExecutionSnapshot.Capability.MeteringTrusted {
+		if pending.ExecutionSnapshot != nil && pending.ExecutionSnapshot.Capability != nil && !pending.ExecutionSnapshot.Capability.MeteringTrusted && pending.ConfirmedReviewMetering() == nil {
 			return 0, fmt.Errorf("video actual metering is not trusted")
 		}
 		if output <= 0 || (policy == VideoQuantityOutputAndReferenceSeconds && pending.ReferenceVideoCount > 0 && reference <= 0) {

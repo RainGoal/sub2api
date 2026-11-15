@@ -48,6 +48,10 @@ func (r *videoReviewRepoStub) ClaimReviewResolution(context.Context, string, tim
 }
 func (r *videoReviewRepoStub) RecordReviewDecisionWithLease(_ context.Context, _ string, decision VideoTaskReviewDecision, _ time.Time) error {
 	r.task.ReviewDecisions = append(r.task.ReviewDecisions, decision)
+	if decision.Action == "confirmed_succeeded" {
+		r.task.SettlementStatus, r.task.UpstreamStatus = SeedanceVideoSettlementPending, SeedanceVideoResponseStatusCompleted
+		r.task.ReviewReason, r.task.LeaseUntil = "", nil
+	}
 	return nil
 }
 func (r *videoReviewRepoStub) ResumeReviewPollingWithLease(context.Context, string, time.Time) error {

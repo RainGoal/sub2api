@@ -1,6 +1,11 @@
 import { apiClient } from '../client'
 
-export type VideoTaskReviewAction = 'retry_poll' | 'confirmed_failed' | 'confirmed_canceled'
+export type VideoTaskReviewAction = 'retry_poll' | 'confirmed_succeeded' | 'confirmed_failed' | 'confirmed_canceled'
+
+export interface VideoTaskReviewMetering {
+  output_seconds: number
+  reference_seconds: number
+}
 
 export interface VideoTaskReview {
   state_id: string
@@ -12,12 +17,13 @@ export interface VideoTaskReview {
   model: string
   resolution: string
   duration: number
+  reference_video_count: number
   upstream_status: string
   settlement_status: string
   reason: string
   requested_at: string | null
   deadline: string | null
-  decisions: { actor_id: number; action: VideoTaskReviewAction; reason: string; decided_at: string }[] | null
+  decisions: { actor_id: number; action: VideoTaskReviewAction; reason: string; decided_at: string; metering?: VideoTaskReviewMetering }[] | null
   sales_snapshot: Record<string, unknown> | null
   account_cost: Record<string, unknown> | null
 }
@@ -30,10 +36,10 @@ export async function listVideoTaskReviews(limit = 20, offset = 0): Promise<Vide
 }
 
 export async function resolveVideoTaskReview(
-  stateID: string, action: VideoTaskReviewAction, reason: string
+  stateID: string, action: VideoTaskReviewAction, reason: string, metering?: VideoTaskReviewMetering
 ): Promise<VideoTaskReview> {
   const { data } = await apiClient.post<VideoTaskReview>(
-    `/admin/video-tasks/reviews/${encodeURIComponent(stateID)}/resolve`, { action, reason }
+    `/admin/video-tasks/reviews/${encodeURIComponent(stateID)}/resolve`, { action, reason, ...(metering ? { metering } : {}) }
   )
   return data
 }

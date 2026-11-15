@@ -353,6 +353,7 @@ WHERE state_id = (
   AND (settlement_status = 'pending'
        OR (settlement_status = 'processing' AND lease_until <= NOW()))
   AND review_reason = ''
+  AND COALESCE(review_decisions -> -1 ->> 'action', '') <> 'confirmed_succeeded'
   AND LOWER(TRIM(COALESCE(upstream_status, ''))) <> 'cancel_requested'`,
 		strings.TrimSpace(taskID), userID, apiKeyID, time.Now().Add(lease))
 	if err != nil {
@@ -383,7 +384,8 @@ WHERE state_id = (
            AND LOWER(TRIM(COALESCE(upstream_status, ''))) = 'cancel_requested'))
   AND LOWER(TRIM(COALESCE(upstream_status, ''))) NOT IN
       ('completed', 'succeeded', 'success', 'failed', 'error', 'canceled', 'cancelled')
-  AND review_reason = ''`,
+  AND review_reason = ''
+  AND COALESCE(review_decisions -> -1 ->> 'action', '') <> 'confirmed_succeeded'`,
 		strings.TrimSpace(taskID), userID, apiKeyID, time.Now().Add(lease))
 	if err != nil {
 		return false, err

@@ -743,6 +743,9 @@ func seedanceVideoLocalTerminalResult(endpoint service.SeedanceVideoEndpoint, ta
 			// so every completed response is immediately content-downloadable.
 			localStatus = service.SeedanceVideoResponseStatusInProgress
 		case service.SeedanceVideoSettlementPending:
+			if pending.ConfirmedReviewMetering() != nil {
+				localStatus = service.SeedanceVideoResponseStatusInProgress
+			}
 			// A pending row still owns an active billing hold. Even if a previous
 			// provider poll recorded a terminal status, let the normal handler path
 			// claim the row, release the hold, and persist the terminal state before

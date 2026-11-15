@@ -14,8 +14,8 @@ html[data-admin-brand='wsapi'] :is(.font-mono, code, pre) {
 }
 
 html[data-admin-brand='wsapi'] ::selection {
-  background: rgb(229 83 45 / 0.24);
-  color: inherit;
+  background: var(--ws-accent-ink);
+  color: var(--ws-bg);
 }
 
 html[data-admin-brand='wsapi'] :is(a, button, input, select, textarea, [role='button']):focus-visible {

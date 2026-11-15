@@ -32,7 +32,8 @@ func videoTaskReviewResponse(task *service.SeedanceVideoPendingBilling) gin.H {
 	return gin.H{"state_id": task.StateID, "public_id": task.PublicID(), "upstream_id": task.UpstreamID(),
 		"user_id": task.UserID, "api_key_id": task.APIKeyID, "account_id": task.AccountID,
 		"model": task.Model, "resolution": task.Resolution, "duration": task.DurationSeconds,
-		"upstream_status": task.UpstreamStatus, "settlement_status": task.SettlementStatus,
+		"reference_video_count": task.ReferenceVideoCount,
+		"upstream_status":       task.UpstreamStatus, "settlement_status": task.SettlementStatus,
 		"reason": task.ReviewReason, "requested_at": task.ReviewRequestedAt, "deadline": task.ReviewDeadline,
 		"decisions": task.ReviewDecisions, "sales_snapshot": task.SalesSnapshot, "account_cost": task.AccountCost}
 }
@@ -69,15 +70,27 @@ func (h *OpenAIGatewayHandler) ResolveVideoTaskReview(c *gin.Context) {
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	var request struct {
-		Action string `json:"action"`
-		Reason string `json:"reason"`
+		Action   string `json:"action"`
+		Reason   string `json:"reason"`
+		Metering *struct {
+			OutputSeconds    *float64 `json:"output_seconds"`
+			ReferenceSeconds *float64 `json:"reference_seconds"`
+		} `json:"metering"`
 	}
 	if err := decoder.Decode(&request); err != nil || decoder.Decode(new(any)) != io.EOF {
 		response.ErrorFrom(c, service.ErrVideoTaskReviewInvalid)
 		return
 	}
+	var metering *service.VideoTaskReviewMetering
+	if request.Metering != nil {
+		if request.Metering.OutputSeconds == nil || request.Metering.ReferenceSeconds == nil {
+			response.ErrorFrom(c, service.ErrVideoTaskReviewMeteringInvalid)
+			return
+		}
+		metering = &service.VideoTaskReviewMetering{OutputSeconds: *request.Metering.OutputSeconds, ReferenceSeconds: *request.Metering.ReferenceSeconds}
+	}
 	middleware.SetAuditAction(c, "video_task.review.resolve")
-	task, err := h.gatewayService.ResolveSeedanceVideoTaskReview(c.Request.Context(), c.Param("state_id"), actorID, request.Action, request.Reason)
+	task, err := h.gatewayService.ResolveSeedanceVideoTaskReview(c.Request.Context(), c.Param("state_id"), actorID, request.Action, request.Reason, metering)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

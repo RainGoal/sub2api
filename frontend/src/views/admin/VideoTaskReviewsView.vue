@@ -66,6 +66,7 @@
             <li v-for="(decision, index) in selected.decisions" :key="index" class="border-l border-gray-300 pl-3 text-xs dark:border-dark-600">
               <p>{{ actionLabel(decision.action) }} · {{ t('admin.videoTaskReviews.actor') }} #{{ decision.actor_id }} · {{ formatTime(decision.decided_at) }}</p>
               <p class="mt-1 whitespace-pre-wrap break-all text-gray-500">{{ decision.reason }}</p>
+              <p v-if="decision.metering" class="mt-1 text-gray-500">{{ t('admin.videoTaskReviews.meteringSummary', { output: decision.metering.output_seconds, reference: decision.metering.reference_seconds }) }}</p>
             </li>
           </ol>
         </details>
@@ -73,23 +74,37 @@
           <label for="review-action" class="input-label">{{ t('admin.videoTaskReviews.action') }}</label>
           <select id="review-action" v-model="action" class="input" :disabled="submitting" @change="acknowledged = false">
             <option value="retry_poll" :disabled="!selected.upstream_id">{{ actionLabel('retry_poll') }}</option>
+            <option value="confirmed_succeeded" :disabled="!selected.upstream_id">{{ actionLabel('confirmed_succeeded') }}</option>
             <option value="confirmed_failed">{{ actionLabel('confirmed_failed') }}</option>
             <option value="confirmed_canceled">{{ actionLabel('confirmed_canceled') }}</option>
           </select>
+        </div>
+        <div v-if="action === 'confirmed_succeeded'" class="space-y-3 rounded border border-gray-200 p-3 dark:border-dark-700">
+          <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.videoTaskReviews.meteringHint') }}</p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label for="review-output-seconds" class="input-label">{{ t('admin.videoTaskReviews.outputSeconds') }}</label>
+              <input id="review-output-seconds" v-model="outputSeconds" type="number" min="0" step="any" class="input" :disabled="submitting" @input="acknowledged = false" />
+            </div>
+            <div>
+              <label for="review-reference-seconds" class="input-label">{{ t('admin.videoTaskReviews.referenceSeconds') }}</label>
+              <input id="review-reference-seconds" v-model="referenceSeconds" type="number" min="0" step="any" class="input" :disabled="submitting" @input="acknowledged = false" />
+            </div>
+          </div>
         </div>
         <div>
           <label for="review-reason" class="input-label">{{ t('admin.videoTaskReviews.reason') }}</label>
           <textarea id="review-reason" v-model="reason" rows="3" maxlength="2000" class="input" :disabled="submitting" :placeholder="t('admin.videoTaskReviews.reasonPlaceholder')" />
         </div>
         <label v-if="action !== 'retry_poll'" class="flex items-start gap-3 text-sm text-amber-500">
-          <input v-model="acknowledged" type="checkbox" class="mt-1" :disabled="submitting" data-testid="review-confirm-release" />
-          <span>{{ t('admin.videoTaskReviews.releaseConfirmation') }}</span>
+          <input v-model="acknowledged" type="checkbox" class="mt-1" :disabled="submitting" :data-testid="action === 'confirmed_succeeded' ? 'review-confirm-success' : 'review-confirm-release'" />
+          <span>{{ t(action === 'confirmed_succeeded' ? 'admin.videoTaskReviews.successConfirmation' : 'admin.videoTaskReviews.releaseConfirmation') }}</span>
         </label>
         <p v-if="resolveError" role="alert" class="text-sm text-red-400">{{ resolveError }}</p>
       </div>
       <template #footer>
         <button type="button" class="btn btn-secondary" :disabled="submitting" @click="closeReview">{{ t('common.cancel') }}</button>
-        <button type="button" class="btn" :class="action === 'retry_poll' ? 'btn-primary' : 'btn-danger'" :disabled="!canSubmit" data-testid="review-submit" @click="submitDecision">{{ submitting ? t('common.loading') : t('admin.videoTaskReviews.submit') }}</button>
+        <button type="button" class="btn" :class="action === 'retry_poll' || action === 'confirmed_succeeded' ? 'btn-primary' : 'btn-danger'" :disabled="!canSubmit" data-testid="review-submit" @click="submitDecision">{{ submitting ? t('common.loading') : t('admin.videoTaskReviews.submit') }}</button>
       </template>
     </BaseDialog>
   </AppLayout>
@@ -98,7 +113,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listVideoTaskReviews, resolveVideoTaskReview, type VideoTaskReview, type VideoTaskReviewAction } from '@/api/admin/videoTaskReviews'
+import { listVideoTaskReviews, resolveVideoTaskReview, type VideoTaskReview, type VideoTaskReviewAction, type VideoTaskReviewMetering } from '@/api/admin/videoTaskReviews'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -119,6 +134,15 @@ const offset = ref(0)
 const action = ref<VideoTaskReviewAction>('retry_poll')
 const reason = ref('')
 const acknowledged = ref(false)
+const outputSeconds = ref<number | string>('')
+const referenceSeconds = ref<number | string>('')
+const metering = computed<VideoTaskReviewMetering | null>(() => {
+  if (String(outputSeconds.value).trim() === '' || String(referenceSeconds.value).trim() === '') return null
+  const output = Number(outputSeconds.value)
+  const reference = Number(referenceSeconds.value)
+  if (!Number.isFinite(output) || output < 0 || !Number.isFinite(reference) || reference < 0) return null
+  return { output_seconds: output, reference_seconds: reference }
+})
 const columns = computed<Column[]>(() => [
   { key: 'task', label: t('admin.videoTaskReviews.task') },
   { key: 'owner', label: t('admin.videoTaskReviews.owner') },
@@ -126,7 +150,8 @@ const columns = computed<Column[]>(() => [
   { key: 'actions', label: t('common.actions') }
 ])
 const canSubmit = computed(() => !!selected.value && !submitting.value && !!reason.value.trim() &&
-  (action.value === 'retry_poll' ? !!selected.value.upstream_id : acknowledged.value))
+  (action.value === 'retry_poll' ? !!selected.value.upstream_id : acknowledged.value) &&
+  (action.value !== 'confirmed_succeeded' || (!!selected.value.upstream_id && !!metering.value)))
 
 function formatTime(value: string | null): string {
   if (!value) return '—'
@@ -163,6 +188,8 @@ function openReview(task: VideoTaskReview) {
   reason.value = ''
   resolveError.value = ''
   acknowledged.value = false
+  outputSeconds.value = ''
+  referenceSeconds.value = task.reference_video_count === 0 ? 0 : ''
 }
 
 function closeReview() { if (!submitting.value) selected.value = null }
@@ -172,12 +199,21 @@ async function submitDecision() {
   submitting.value = true
   resolveError.value = ''
   try {
-    const result = await resolveVideoTaskReview(selected.value.state_id, action.value, reason.value.trim())
+    const result = action.value === 'confirmed_succeeded'
+      ? await resolveVideoTaskReview(selected.value.state_id, action.value, reason.value.trim(), metering.value!)
+      : await resolveVideoTaskReview(selected.value.state_id, action.value, reason.value.trim())
     selected.value = null
-    appStore.showSuccess(t(result.settlement_status === 'settled' ? 'admin.videoTaskReviews.alreadySettled' : 'admin.videoTaskReviews.resolved'))
+    const successKey = action.value === 'confirmed_succeeded'
+      ? (result.settlement_status === 'settled' ? 'successSettled' : 'successQueued')
+      : (result.settlement_status === 'settled' ? 'alreadySettled' : 'resolved')
+    appStore.showSuccess(t(`admin.videoTaskReviews.${successKey}`))
     await loadTasks()
   } catch (error) {
-    resolveError.value = t((error as { status?: number })?.status === 403 ? 'admin.videoTaskReviews.forbidden' : 'admin.videoTaskReviews.resolveFailed')
+    const failure = error as { status?: number; code?: string }
+    const errorKey = failure?.status === 403 ? 'forbidden'
+      : failure?.code === 'VIDEO_TASK_REVIEW_METERING_INVALID' ? 'meteringInvalid'
+      : failure?.status === 409 ? 'reviewConflict' : 'resolveFailed'
+    resolveError.value = t(`admin.videoTaskReviews.${errorKey}`)
   } finally { submitting.value = false }
 }
 
