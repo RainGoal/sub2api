@@ -23,6 +23,7 @@ const groupsError = ref('')
 const saved = ref<OpenAICollaborationSettings | null>(null)
 const draft = ref<OpenAICollaborationSettings>({
   enabled: false, plaintext_enabled: false, legacy_cipher_recovery_enabled: false,
+  blank_stream_failover_enabled: false,
   blank_prelude_wait_seconds: defaultBlankPreludeWaitSeconds,
   group_ids: [], api_key_ids: []
 })
@@ -42,11 +43,13 @@ function normalizeConfig(value: unknown): OpenAICollaborationSettings | null {
   const config = value as OpenAICollaborationSettings
   if (typeof config.enabled !== 'boolean' || typeof config.plaintext_enabled !== 'boolean' ||
     typeof config.legacy_cipher_recovery_enabled !== 'boolean' ||
+    (config.blank_stream_failover_enabled !== undefined && typeof config.blank_stream_failover_enabled !== 'boolean') ||
     ![config.group_ids, config.api_key_ids].every(ids => Array.isArray(ids) &&
       ids.every(id => Number.isSafeInteger(id) && id > 0))) return null
   const wait = config.blank_prelude_wait_seconds === undefined ? defaultBlankPreludeWaitSeconds : config.blank_prelude_wait_seconds
   if (!Number.isInteger(wait) || wait < minBlankPreludeWaitSeconds || wait > maxBlankPreludeWaitSeconds) return null
-  return { ...config, blank_prelude_wait_seconds: wait, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] }
+  return { ...config, blank_stream_failover_enabled: config.blank_stream_failover_enabled ?? false,
+    blank_prelude_wait_seconds: wait, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] }
 }
 function copy(config: OpenAICollaborationSettings): OpenAICollaborationSettings {
   return { ...config, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] }
@@ -108,7 +111,7 @@ async function save(stop = false): Promise<void> {
       error.value = t(prefix + 'selectGroups')
       return
     }
-    if (config.enabled && !config.plaintext_enabled && !config.legacy_cipher_recovery_enabled) {
+    if (config.enabled && !config.plaintext_enabled && !config.legacy_cipher_recovery_enabled && !config.blank_stream_failover_enabled) {
       error.value = t(prefix + 'selectMode')
       return
     }
@@ -117,7 +120,8 @@ async function save(stop = false): Promise<void> {
   try {
     const result = await adminAPI.settings.updateSettings({ openai_collaboration_settings: config })
     const normalized = normalizeConfig(result?.openai_collaboration_settings)
-    if (!normalized || normalized.blank_prelude_wait_seconds !== config.blank_prelude_wait_seconds) {
+    if (!normalized || normalized.blank_prelude_wait_seconds !== config.blank_prelude_wait_seconds ||
+      result?.openai_collaboration_settings?.blank_stream_failover_enabled !== config.blank_stream_failover_enabled) {
       loaded.value = false
       error.value = t(prefix + 'unconfirmed')
       return
@@ -179,6 +183,13 @@ watch(() => props.active, active => {
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'recoveryHint') }}</p>
               </div>
               <Toggle v-model="draft.legacy_cipher_recovery_enabled" data-test="collaboration-recovery" aria-labelledby="collaboration-recovery-label" :disabled="busy" />
+            </div>
+            <div class="flex items-start justify-between gap-4 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+              <div>
+                <label id="collaboration-blank-failover-label" class="font-medium text-gray-900 dark:text-white">{{ t(prefix + 'blankStreamFailover') }}</label>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'blankStreamFailoverHint') }}</p>
+              </div>
+              <Toggle v-model="draft.blank_stream_failover_enabled" data-test="collaboration-blank-failover" aria-labelledby="collaboration-blank-failover-label" :disabled="busy" />
             </div>
           </div>
           <p v-if="draft.legacy_cipher_recovery_enabled" class="text-sm text-amber-700 dark:text-amber-300">{{ t(prefix + 'lossyHint') }}</p>

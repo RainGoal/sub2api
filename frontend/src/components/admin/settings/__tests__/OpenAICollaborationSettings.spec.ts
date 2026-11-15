@@ -12,6 +12,7 @@ vi.mock('@/stores', () => ({ useAppStore: () => ({ showSuccess: api.showSuccess,
 
 const enabled: Settings = {
   enabled: true, plaintext_enabled: true, legacy_cipher_recovery_enabled: true,
+  blank_stream_failover_enabled: false,
   blank_prelude_wait_seconds: 10,
   group_ids: [7], api_key_ids: [12]
 }
@@ -112,6 +113,48 @@ describe('OpenAI collaboration settings', () => {
     expect(api.updateSettings).toHaveBeenCalledWith({ openai_collaboration_settings: {
       ...enabled, blank_prelude_wait_seconds: 2, api_key_ids: [42]
     } })
+    wrapper.unmount()
+  })
+  it('loads older settings with blank stream failover disabled', async () => {
+    api.getSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, blank_stream_failover_enabled: undefined } })
+    const wrapper = await open()
+    expect(wrapper.get('[data-test="collaboration-blank-failover"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="collaboration-save"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+  it('enables blank stream failover independently and preserves it during shutdown', async () => {
+    const wrapper = await open()
+    await wrapper.get('[data-test="collaboration-plaintext"]').trigger('click')
+    await wrapper.get('[data-test="collaboration-recovery"]').trigger('click')
+    await wrapper.get('[data-test="collaboration-blank-failover"]').trigger('click')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    const config = { ...enabled, plaintext_enabled: false, legacy_cipher_recovery_enabled: false, blank_stream_failover_enabled: true }
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ openai_collaboration_settings: config })
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    await wrapper.get('[data-test="collaboration-blank-failover"]').trigger('click')
+    await wrapper.get('[data-test="collaboration-stop"]').trigger('click')
+    await flushPromises()
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ openai_collaboration_settings: { ...config, enabled: false } })
+    expect(wrapper.get('[data-test="collaboration-blank-failover"]').attributes('aria-checked')).toBe('true')
+    wrapper.unmount()
+  })
+  it.each([undefined, false])('does not confirm blank stream failover when the backend returns %s', async value => {
+    api.updateSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, blank_stream_failover_enabled: value } })
+    const wrapper = await open()
+    await wrapper.get('[data-test="collaboration-blank-failover"]').trigger('click')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('无法确认')
+    expect(api.showSuccess).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="collaboration-save"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+  it.each([null, 'true', 1])('rejects an invalid blank stream failover flag: %s', async value => {
+    api.getSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, blank_stream_failover_enabled: value } })
+    const wrapper = await open()
+    expect(wrapper.get('[role="alert"]').text()).toContain('禁止保存')
+    expect(wrapper.find('[data-test="collaboration-blank-failover"]').exists()).toBe(false)
     wrapper.unmount()
   })
   it.each(['', '1', '0', '-1', '2.5', '16'])('rejects an invalid wait limit without saving: %s', async value => {

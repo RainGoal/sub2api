@@ -1147,6 +1147,7 @@ func (s *OpenAIGatewayService) forwardOpenAIRequest(ctx context.Context, c *gin.
 		// Send request
 		upstreamStart := time.Now()
 		noteCollaborationUpstreamAttempt(c)
+		noteBlankStreamUpstreamBody(c, body)
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if headerGuard != nil && headerGuard.stopHeaderWait() {

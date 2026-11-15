@@ -80,6 +80,38 @@ func TestOpenAICollaborationBlankPreludeDefaultsAndBounds(t *testing.T) {
 	}
 }
 
+func TestOpenAICollaborationBlankStreamFailoverDefaultsAndRoundTrip(t *testing.T) {
+	require.False(t, DefaultOpenAICollaborationSettings().BlankStreamFailoverEnabled)
+	for _, raw := range []string{"", "{}", `{"enabled":true,"legacy_cipher_recovery_enabled":true,"group_ids":[7]}`} {
+		settings, err := parseOpenAICollaborationSettings(raw)
+		require.NoError(t, err)
+		require.False(t, settings.BlankStreamFailoverEnabled)
+	}
+	for _, raw := range []string{`{"blank_stream_failover_enabled":"true"}`, `{"blank_stream_failover_enabled":1}`} {
+		settings, err := parseOpenAICollaborationSettings(raw)
+		require.Error(t, err)
+		require.False(t, settings.BlankStreamFailoverEnabled)
+	}
+	ctx := context.Background()
+	svc := NewSettingService(&panelRateLimitSettingRepo{}, &config.Config{})
+	settings := DefaultOpenAICollaborationSettings()
+	settings.Enabled = true
+	settings.BlankStreamFailoverEnabled = true
+	settings.GroupIDs, settings.APIKeyIDs = []int64{7}, []int64{11}
+	require.NoError(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	got, err := svc.GetOpenAICollaborationSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, settings, got)
+	require.Equal(t, settings, svc.GetOpenAICollaborationSettingsCached(ctx))
+	require.True(t, got.Allows(7, 11))
+	require.False(t, got.LegacyCipherRecoveryEnabled)
+	settings.Enabled = false
+	require.NoError(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	got = svc.GetOpenAICollaborationSettingsCached(ctx)
+	require.True(t, got.BlankStreamFailoverEnabled)
+	require.False(t, got.Allows(7, 11))
+}
+
 func TestOpenAICollaborationBlankPreludeRoundTripAndLegacySave(t *testing.T) {
 	ctx := context.Background()
 	repo := &panelRateLimitSettingRepo{}

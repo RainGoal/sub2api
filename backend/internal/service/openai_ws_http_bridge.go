@@ -639,6 +639,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil, buildErr
 		}
 		noteCollaborationUpstreamAttempt(c)
+		noteBlankStreamUpstreamBody(c, body)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
 			if turn == 1 {
@@ -798,6 +799,23 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if hasResponsesClientToolMapping(clientToolMapping) {
 		resp.Body = newResponsesClientToolStreamBody(resp.Body, clientToolMapping, maxLineSize, s.cfg)
 	}
+	var blankGuard *openAIBlankStreamGuard
+	if turn == 1 {
+		reasoningEffort := ""
+		if effort := extractOpenAIReasoningEffortFromBody(body, mappedModel, originalModel); effort != nil {
+			reasoningEffort = *effort
+		}
+		blankGuard = s.newBlankStreamGuard(ctx, c, account, resp, turnStart, reasoningEffort)
+	}
+	defer blankGuard.Close()
+	blankGuardError := func() error {
+		err := blankGuard.Err()
+		if errors.Is(err, errOpenAIBlankStreamTimeout) && !clientDisconnected &&
+			!wroteDownstream && !blankGuard.BlocksFailover() {
+			return s.newBlankStreamTimeoutError(ctx, c, account, blankGuard, turnStart, originalModel, resp.Header)
+		}
+		return err
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
@@ -848,6 +866,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil
 	}
 	for streamScanner.Scan() {
+		if err := blankGuardError(); err != nil {
+			return resultWithUsage(), err
+		}
 		line := streamScanner.Text()
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
@@ -876,6 +897,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 
 		upstreamMessage := []byte(openAICompatPayloadWithEventType(trimmedData, pendingSSEEventType))
+		guardEventType, _, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+		bufferBlankPrelude := blankGuard.Observe(upstreamMessage, guardEventType)
+		if err := blankGuardError(); err != nil {
+			return resultWithUsage(), err
+		}
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 			upstreamMessage = normalized
 		}
@@ -891,7 +917,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			lastEventType = eventType
 		}
-		if isOpenAIWSTokenEvent(eventType) {
+		if !bufferBlankPrelude && isOpenAIWSTokenEvent(eventType) {
 			tokenEventCount++
 			if firstTokenMs == nil {
 				ms := int(time.Since(turnStart).Milliseconds())
@@ -963,7 +989,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			// A disconnected client needs this attempt drained for usage, not replayed,
 			// even when only non-semantic heartbeats were delivered.
-			if !clientDisconnected && !wroteDownstream && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
+			if !clientDisconnected && !wroteDownstream && !blankGuard.BlocksFailover() && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
 				if account.Platform == PlatformGrok {
 					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
 				}
@@ -1004,10 +1030,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			isKeepalive := eventType == "keepalive"
 			stageBeforeSemanticOutput := turn == 1 && account.Platform == PlatformOpenAI && !wroteDownstream
 			commitStagedMessages := !stageBeforeSemanticOutput ||
-				openAIStreamDataStartsClientOutput(string(clientMessage), eventType) ||
+				(!bufferBlankPrelude && (blankGuard.BlocksFailover() || openAIStreamDataStartsClientOutput(string(clientMessage), eventType))) ||
 				isOpenAIWSTerminalEvent(eventType)
 			if stageBeforeSemanticOutput && !commitStagedMessages && !isKeepalive {
-				if pendingClientMessageBytes+int64(len(clientMessage)) > openAIFirstOutputStageMaxBytes {
+				stageLimit := int64(openAIFirstOutputStageMaxBytes)
+				if blankGuard != nil {
+					stageLimit = openAIBlankStreamMaxBytes
+				}
+				if pendingClientMessageBytes+int64(len(clientMessage)) > stageLimit {
 					return nil, s.newOpenAIStreamFailoverError(
 						c,
 						account,
@@ -1095,6 +1125,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return resultWithUsage(), nil
 		}
 	}
+	if err := blankGuardError(); err != nil {
+		return resultWithUsage(), err
+	}
 	if bareErrorPending {
 		if finalizeErr := finalizeBareError(); finalizeErr != nil {
 			return resultWithUsage(), finalizeErr
@@ -1110,7 +1143,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return resultWithUsage(), err
 		}
 		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
-		if turn == 1 && !clientDisconnected && !wroteDownstream {
+		if turn == 1 && !clientDisconnected && !wroteDownstream && !blankGuard.BlocksFailover() {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)
 		}
 		return resultWithUsage(), streamErr
@@ -1119,7 +1152,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if sawDone {
 		terminalErr = errors.New("upstream http bridge stream sent [DONE] before terminal event")
 	}
-	if turn == 1 && !clientDisconnected && !wroteDownstream {
+	if turn == 1 && !clientDisconnected && !wroteDownstream && !blankGuard.BlocksFailover() {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
 	return resultWithUsage(), terminalErr

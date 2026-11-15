@@ -92,6 +92,7 @@ func (s *OpenAIGatewayService) beginCollaborationAttempt(ctx context.Context, c 
 	if c == nil || s == nil {
 		return nil
 	}
+	s.beginBlankStreamPolicy(ctx, c, account, body, newTurn)
 	const identityKey = "openai_collaboration_attempt_identity"
 	prior := collaborationAttempt(c)
 	budget := collaborationRequestBudget(c)

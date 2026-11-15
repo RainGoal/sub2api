@@ -26,6 +26,7 @@ type OpenAICollaborationSettings struct {
 	Enabled                     bool    `json:"enabled"`
 	PlaintextEnabled            bool    `json:"plaintext_enabled"`
 	LegacyCipherRecoveryEnabled bool    `json:"legacy_cipher_recovery_enabled"`
+	BlankStreamFailoverEnabled  bool    `json:"blank_stream_failover_enabled"`
 	BlankPreludeWaitSeconds     int     `json:"blank_prelude_wait_seconds"`
 	GroupIDs                    []int64 `json:"group_ids"`
 	APIKeyIDs                   []int64 `json:"api_key_ids"`
