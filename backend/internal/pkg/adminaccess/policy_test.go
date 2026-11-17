@@ -16,6 +16,7 @@ func TestScopedAdminPolicyDefaultDeny(t *testing.T) {
 			{"GET", "/api/v1/admin/accounts"}, {"GET", "/api/v1/admin/accounts/:id"},
 			{"PUT", "/api/v1/admin/settings"}, {"GET", "/api/v1/admin/users"},
 			{"POST", "/api/v1/admin/payment/orders/:id/refund"},
+			{"GET", "/api/v1/admin/payment/profit"},
 			{"POST", "/api/v1/admin/settings/admin-api-keys"},
 		} {
 			require.False(t, RouteAllowed(policy, route.method, route.path), route.path)

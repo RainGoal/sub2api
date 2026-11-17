@@ -401,6 +401,23 @@ func newPaymentConfigServiceTestClient(t *testing.T) *dbent.Client {
 
 	drv := entsql.OpenDB(dialect.SQLite, db)
 	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(drv)))
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS subscription_revenue_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		order_id BIGINT NOT NULL UNIQUE,
+		subscription_id BIGINT NOT NULL,
+		user_id BIGINT NOT NULL,
+		group_id BIGINT NOT NULL,
+		plan_id BIGINT,
+		service_start_at DATETIME NOT NULL,
+		service_end_at DATETIME NOT NULL,
+		order_amount NUMERIC NOT NULL,
+		paid_amount NUMERIC NOT NULL,
+		payment_currency VARCHAR(3) NOT NULL DEFAULT '',
+		payment_fx_rate_to_usd NUMERIC,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("create subscription revenue event test table: %v", err)
+	}
 	t.Cleanup(func() { _ = client.Close() })
 	return client
 }

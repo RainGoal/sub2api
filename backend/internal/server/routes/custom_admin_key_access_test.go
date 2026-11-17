@@ -116,6 +116,7 @@ func TestScopedAdminRegisteredRoutesEnforceDefaultDenyAndAccountScope(t *testing
 				{"GET", "/api/v1/admin/settings/admin-api-keys"},
 				{"GET", "/api/v1/admin/groups"},
 				{"GET", "/api/v1/admin/payment/orders"},
+				{"GET", "/api/v1/admin/payment/profit"},
 				{"POST", "/api/v1/admin/payment/orders/1/refund"},
 				{"PUT", "/api/v1/admin/payment/config"},
 			} {

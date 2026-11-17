@@ -3,6 +3,11 @@ package adminaccess
 import "testing"
 
 func TestStatisticsAndOpenAIPermissions(t *testing.T) {
+	financialReader := Policy{GlobalPermissions: []string{"payment.read"}}
+	if !RouteAllowed(financialReader, "GET", "/api/v1/admin/payment/profit") {
+		t.Fatal("payment.read cannot access profit report")
+	}
+
 	for action, routes := range map[string][]string{
 		"accounts.stats.read":     {"GET /accounts/:id/today-stats", "POST /accounts/today-stats/batch", "GET /accounts/:id/stats"},
 		"accounts.usage.read":     {"POST /accounts/usage/batch"},

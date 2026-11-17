@@ -181,6 +181,16 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		return nil, err
 	}
 	providerSnapshot := buildPaymentOrderProviderSnapshot(sel, req)
+	if req.OrderType == payment.OrderTypeSubscription && providerSnapshot != nil {
+		currency := payment.DefaultPaymentCurrency
+		if sel != nil {
+			currency = paymentProviderConfigCurrency(sel.ProviderKey, sel.Config)
+		}
+		if _, ok := providerSnapshot["currency"]; !ok {
+			providerSnapshot["currency"] = currency
+		}
+		snapshotSubscriptionPaymentFX(providerSnapshot, currency, cfg.SubscriptionUSDToCNYRate)
+	}
 	selectedInstanceID := ""
 	selectedProviderKey := ""
 	if sel != nil {

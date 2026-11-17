@@ -189,6 +189,58 @@ func TestBuildPaymentOrderProviderSnapshot_IncludesProviderCurrency(t *testing.T
 	require.Equal(t, "acct-78", airwallexSnapshot["merchant_id"])
 }
 
+func TestCreateSubscriptionOrderSnapshotsPaymentFXRateToUSD(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+
+	user, err := client.User.Create().
+		SetEmail("subscription-fx-snapshot@example.com").
+		SetPasswordHash("hash").
+		SetUsername("subscription-fx-snapshot-user").
+		Save(ctx)
+	require.NoError(t, err)
+
+	instance, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeAlipay).
+		SetName("CNY Alipay").
+		SetConfig(`{"secretKey":"do-not-copy"}`).
+		SetSupportedTypes("alipay").
+		SetPaymentMode("redirect").
+		SetEnabled(true).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client}
+	order, err := svc.createOrderInTx(
+		ctx,
+		CreateOrderRequest{UserID: user.ID, PaymentType: payment.TypeAlipay, OrderType: payment.OrderTypeSubscription},
+		&User{ID: user.ID, Email: user.Email, Username: user.Username},
+		nil,
+		&PaymentConfig{MaxPendingOrders: 3, OrderTimeoutMin: 30, SubscriptionUSDToCNYRate: 7.2},
+		100, 100, 0, 720, 0,
+		&payment.InstanceSelection{
+			InstanceID:  strconv.FormatInt(instance.ID, 10),
+			ProviderKey: payment.TypeAlipay,
+			Config:      map[string]string{},
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "CNY", order.ProviderSnapshot["currency"])
+	require.InDelta(t, 1.0/7.2, order.ProviderSnapshot["payment_fx_rate_to_usd"], 1e-12)
+}
+
+func TestPaymentFXRateToUSDOnlyUsesKnownRates(t *testing.T) {
+	usd := paymentFXRateToUSD("USD", 0)
+	require.NotNil(t, usd)
+	require.Equal(t, 1.0, *usd)
+
+	cny := paymentFXRateToUSD("CNY", 7.2)
+	require.NotNil(t, cny)
+	require.InDelta(t, 1.0/7.2, *cny, 1e-12)
+	require.Nil(t, paymentFXRateToUSD("CNY", 0))
+	require.Nil(t, paymentFXRateToUSD("EUR", 7.2))
+}
+
 func valueOrEmpty(v *string) string {
 	if v == nil {
 		return ""

@@ -1189,6 +1189,24 @@ func TestExecuteSubscriptionFulfillmentAppliesAffiliateRebate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
 	require.Len(t, affiliateRepo.accrueCalls, 1)
+	eventRows, err := client.QueryContext(ctx, `
+		SELECT order_amount, paid_amount, payment_currency, payment_fx_rate_to_usd,
+		       service_start_at < service_end_at
+		FROM subscription_revenue_events WHERE order_id = $1
+	`, order.ID)
+	require.NoError(t, err)
+	require.True(t, eventRows.Next())
+	var orderAmount, paidAmount float64
+	var paymentCurrency string
+	var paymentFXRate any
+	var validServicePeriod bool
+	require.NoError(t, eventRows.Scan(&orderAmount, &paidAmount, &paymentCurrency, &paymentFXRate, &validServicePeriod))
+	require.NoError(t, eventRows.Close())
+	require.InDelta(t, order.Amount, orderAmount, 0.00000001)
+	require.InDelta(t, order.PayAmount, paidAmount, 0.00000001)
+	require.Equal(t, payment.DefaultPaymentCurrency, paymentCurrency)
+	require.Nil(t, paymentFXRate)
+	require.True(t, validServicePeriod)
 	require.Equal(t, inviterID, affiliateRepo.accrueCalls[0].inviterID)
 	require.Equal(t, user.ID, affiliateRepo.accrueCalls[0].inviteeUserID)
 	require.InDelta(t, 1.4985, affiliateRepo.accrueCalls[0].amount, 0.00000001)

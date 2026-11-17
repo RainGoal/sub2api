@@ -61,6 +61,39 @@ export interface RefundResult {
   subscription_days_deducted?: number
 }
 
+export interface ProfitMetrics {
+  revenue_usd: number
+  cost_usd: number
+  profit_usd: number
+  nominal_usage_usd?: number
+  payment_received_by_currency?: Record<string, number>
+}
+
+export interface ProfitDailyStats {
+  date: string
+  balance_revenue_usd: number
+  balance_cost_usd: number
+  balance_profit_usd: number
+  subscription_revenue_usd: number
+  subscription_cost_usd: number
+  subscription_profit_usd: number
+  subscription_nominal_usage_usd: number
+  total_revenue_usd: number
+  total_cost_usd: number
+  total_profit_usd: number
+}
+
+export interface ProfitReport {
+  start_date: string
+  end_date: string
+  summary: {
+    balance: ProfitMetrics
+    subscription: ProfitMetrics
+    total: ProfitMetrics
+  }
+  daily_series: ProfitDailyStats[]
+}
+
 export const adminPaymentAPI = {
   // ==================== Config ====================
 
@@ -81,6 +114,11 @@ export const adminPaymentAPI = {
     return apiClient.get<DashboardStats>('/admin/payment/dashboard', {
       params: days ? { days } : undefined
     })
+  },
+
+  /** Get daily profit statistics with subscription revenue recognized over its service period. */
+  getProfitReport(params: { start_date: string; end_date: string }) {
+    return apiClient.get<ProfitReport>('/admin/payment/profit', { params })
   },
 
   // ==================== Orders ====================

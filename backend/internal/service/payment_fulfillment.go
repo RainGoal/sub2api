@@ -631,23 +631,46 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 	}
 
 	recoveredFromNote := false
+	var serviceStartAt time.Time
+	var assignedSubscription *UserSubscription
 	if !alreadyAssigned {
 		orderNote := paymentSubscriptionOrderNote(o.ID)
 		existing, lookupErr := s.subscriptionSvc.userSubRepo.GetByUserIDAndGroupID(txCtx, o.UserID, groupID)
+		now := time.Now()
+		if s.subscriptionSvc.now != nil {
+			now = s.subscriptionSvc.now()
+		}
 		switch {
 		case lookupErr == nil && existing != nil && hasPaymentSubscriptionOrderNote(existing.Notes, orderNote):
 			recoveredFromNote = true
+			assignedSubscription = existing
 		case lookupErr != nil && !errors.Is(lookupErr, ErrSubscriptionNotFound):
 			return fmt.Errorf("check existing subscription assignment: %w", lookupErr)
 		default:
-			if _, _, err := s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
+			serviceStartAt = now
+			if existing != nil && existing.ExpiresAt.After(now) {
+				serviceStartAt = existing.ExpiresAt
+			}
+			assignedSubscription, _, err = s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
 				UserID:       o.UserID,
 				GroupID:      groupID,
 				ValidityDays: days,
 				AssignedBy:   0,
 				Notes:        orderNote,
-			}, true); err != nil {
+			}, true)
+			if err != nil {
 				return fmt.Errorf("assign subscription: %w", err)
+			}
+			if existing == nil || !existing.ExpiresAt.After(now) {
+				serviceStartAt = assignedSubscription.StartsAt
+			}
+		}
+		if !recoveredFromNote {
+			if assignedSubscription == nil || assignedSubscription.ID <= 0 {
+				return fmt.Errorf("assigned subscription is unavailable for order %d", o.ID)
+			}
+			if err := insertSubscriptionRevenueEvent(txCtx, txClient, o, assignedSubscription, serviceStartAt, assignedSubscription.ExpiresAt); err != nil {
+				return fmt.Errorf("record subscription revenue event: %w", err)
 			}
 		}
 
