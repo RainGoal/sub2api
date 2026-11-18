@@ -1064,7 +1064,10 @@ export default {
     endTime: '结束时间',
     preciseRangeHint: '按本地时区筛选，精确到秒；包含开始时间，不包含结束时间。',
     apply: '应用',
-    selectDateRange: '选择日期范围'
+    selectDateRange: '选择日期范围',
+    previousMonth: '上个月',
+    nextMonth: '下个月',
+    customRangeHint: '依次点击开始日期和结束日期；再次点击会重新选择起始日期。'
   },
 
   // Admin

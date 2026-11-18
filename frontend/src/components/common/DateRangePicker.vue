@@ -22,7 +22,7 @@
     </button>
 
     <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown" :class="{ 'date-picker-with-time': enableTime }">
+      <div v-if="isOpen" class="date-picker-dropdown" :class="{ 'date-picker-with-time': enableTime, 'date-picker-custom-calendar': customCalendar && !enableTime }">
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button
@@ -38,7 +38,54 @@
         <div class="date-picker-divider"></div>
 
         <!-- Custom date range inputs -->
-        <div class="date-picker-custom">
+        <div v-if="customCalendar && !enableTime" class="date-picker-calendar">
+          <div class="date-picker-calendar-navigation">
+            <button type="button" class="date-picker-calendar-nav-button" :aria-label="t('dates.previousMonth')" @click="shiftCalendarMonth(-1)">
+              <Icon name="chevronLeft" size="sm" />
+            </button>
+            <span class="date-picker-calendar-range-label" aria-live="polite">
+              {{ calendarMonthLabel(calendarMonths[0]!) }} <span aria-hidden="true">—</span> {{ calendarMonthLabel(calendarMonths[1]!) }}
+            </span>
+            <button type="button" class="date-picker-calendar-nav-button" :aria-label="t('dates.nextMonth')" :disabled="isNextCalendarMonthBeyondMaximum" @click="shiftCalendarMonth(1)">
+              <Icon name="chevronRight" size="sm" />
+            </button>
+          </div>
+          <div class="date-picker-calendar-selection">
+            <span><span class="date-picker-calendar-selection-label">{{ t('dates.startDate') }}</span><strong>{{ localStartDate || '—' }}</strong></span>
+            <Icon name="arrowRight" size="sm" class="text-gray-400" />
+            <span><span class="date-picker-calendar-selection-label">{{ t('dates.endDate') }}</span><strong>{{ localEndDate || '—' }}</strong></span>
+          </div>
+          <p class="date-picker-calendar-hint">{{ t('dates.customRangeHint') }}</p>
+          <div class="date-picker-calendar-months">
+            <div v-for="month in calendarMonths" :key="`${month.getFullYear()}-${month.getMonth()}`" class="date-picker-calendar-month">
+              <div class="date-picker-calendar-month-title">{{ calendarMonthLabel(month) }}</div>
+              <div class="date-picker-calendar-weekdays">
+                <span v-for="weekday in calendarWeekdays" :key="weekday">{{ weekday }}</span>
+              </div>
+              <div class="date-picker-calendar-days">
+                <template v-for="(date, index) in calendarDateSlots(month)" :key="date ?? `empty-${index}`">
+                  <span v-if="!date" class="date-picker-calendar-empty" aria-hidden="true"></span>
+                  <button
+                    v-else
+                    type="button"
+                    :data-date="date"
+                    :aria-label="date"
+                    :aria-pressed="date === localStartDate || date === localEndDate"
+                    :disabled="date > maximumDate()"
+                    :class="[
+                      'date-picker-calendar-day',
+                      (date === localStartDate || date === localEndDate) && 'date-picker-calendar-day-selected',
+                      isCalendarDateInRange(date) && 'date-picker-calendar-day-in-range',
+                    ]"
+                    @click="selectCalendarDate(date)"
+                  >{{ Number(date.slice(-2)) }}</button>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="date-picker-custom">
           <div class="date-picker-field">
             <label class="date-picker-label">{{ t(enableTime ? 'dates.startTime' : 'dates.startDate') }}</label>
             <input
@@ -97,6 +144,7 @@ interface Props {
   startDate: string
   endDate: string
   enableTime?: boolean
+  customCalendar?: boolean
 }
 
 interface Emits {
@@ -116,6 +164,8 @@ const inputValue = (value: string, end = false) => props.enableTime ? formatRang
 const localStartDate = ref(inputValue(props.startDate))
 const localEndDate = ref(inputValue(props.endDate, true))
 const activePreset = ref<string | null>('last24Hours')
+const awaitingEndDate = ref(false)
+const visibleCalendarMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
 
 const today = () => formatDateToString(new Date())
 
@@ -142,6 +192,51 @@ const formatDateToString = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+const calendarMonths = computed(() => [
+  visibleCalendarMonth.value,
+  new Date(visibleCalendarMonth.value.getFullYear(), visibleCalendarMonth.value.getMonth() + 1, 1),
+])
+
+const dateLocale = computed(() => locale.value === 'zh' ? 'zh-CN' : 'en-US')
+const calendarWeekdays = computed(() => Array.from({ length: 7 }, (_, index) =>
+  new Intl.DateTimeFormat(dateLocale.value, { weekday: 'short' }).format(new Date(2024, 0, 7 + index)),
+))
+const isNextCalendarMonthBeyondMaximum = computed(() => {
+  const nextVisibleMonth = new Date(visibleCalendarMonth.value.getFullYear(), visibleCalendarMonth.value.getMonth() + 1, 1)
+  return formatDateToString(nextVisibleMonth) > maximumDate()
+})
+
+const calendarMonthLabel = (month: Date) => new Intl.DateTimeFormat(dateLocale.value, { year: 'numeric', month: 'long' }).format(month)
+
+const calendarDateSlots = (month: Date): Array<string | null> => {
+  const firstWeekday = new Date(month.getFullYear(), month.getMonth(), 1).getDay()
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  return [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => formatDateToString(new Date(month.getFullYear(), month.getMonth(), index + 1))),
+  ]
+}
+
+const shiftCalendarMonth = (offset: number) => {
+  visibleCalendarMonth.value = new Date(visibleCalendarMonth.value.getFullYear(), visibleCalendarMonth.value.getMonth() + offset, 1)
+}
+
+const selectCalendarDate = (date: string) => {
+  if (!awaitingEndDate.value || !localStartDate.value || localEndDate.value || date < localStartDate.value) {
+    localStartDate.value = date
+    localEndDate.value = ''
+    awaitingEndDate.value = true
+  } else {
+    localEndDate.value = date
+    awaitingEndDate.value = false
+  }
+  activePreset.value = null
+}
+
+const isCalendarDateInRange = (date: string) => Boolean(
+  localStartDate.value && localEndDate.value && date > localStartDate.value && date < localEndDate.value,
+)
 
 const presets: DatePreset[] = [
   {
@@ -267,10 +362,21 @@ const selectPreset = (preset: DatePreset) => {
   localStartDate.value = range.start
   localEndDate.value = range.end
   activePreset.value = preset.value
+  awaitingEndDate.value = false
+  setVisibleCalendarMonth(range.start)
+}
+
+const setVisibleCalendarMonth = (value: string) => {
+  if (!value) return
+  const date = new Date(`${value.slice(0, 10)}T00:00:00`)
+  if (Number.isFinite(date.getTime())) {
+    visibleCalendarMonth.value = new Date(date.getFullYear(), date.getMonth(), 1)
+  }
 }
 
 const onDateChange = () => {
   // Check if current dates match any preset
+  awaitingEndDate.value = false
   activePreset.value = null
   for (const preset of presets) {
     const range = getPresetRange(preset)
@@ -314,7 +420,11 @@ const handleEscape = (event: KeyboardEvent) => {
 
 // Restore the applied range after dismissal, including parent updates from Apply.
 watch(isOpen, (open) => {
-  if (open) return
+  if (open) {
+    setVisibleCalendarMonth(props.startDate)
+    awaitingEndDate.value = false
+    return
+  }
   localStartDate.value = inputValue(props.startDate)
   localEndDate.value = inputValue(props.endDate, true)
   onDateChange()
@@ -326,6 +436,7 @@ watch(
   (val) => {
     localStartDate.value = inputValue(val)
     onDateChange()
+    setVisibleCalendarMonth(val)
   }
 )
 
@@ -413,6 +524,98 @@ onUnmounted(() => {
   @apply flex items-end gap-2 p-3;
 }
 
+.date-picker-custom-calendar {
+  width: min(660px, calc(100vw - 2rem));
+  min-width: 0;
+}
+
+.date-picker-calendar {
+  @apply px-3 pb-3;
+}
+
+.date-picker-calendar-navigation {
+  @apply flex items-center justify-between gap-2 px-1 pb-2;
+}
+
+.date-picker-calendar-nav-button {
+  @apply flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg;
+  @apply text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900;
+  @apply dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-white;
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500/40;
+}
+
+.date-picker-calendar-nav-button:disabled {
+  @apply cursor-not-allowed opacity-40;
+}
+
+.date-picker-calendar-range-label {
+  @apply min-w-0 truncate text-center text-xs font-medium text-gray-500 dark:text-gray-400;
+}
+
+.date-picker-calendar-selection {
+  @apply mb-2 flex items-center justify-center gap-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-900/60;
+}
+
+.date-picker-calendar-selection > span {
+  @apply flex min-w-0 flex-col items-center gap-0.5;
+}
+
+.date-picker-calendar-selection-label {
+  @apply text-[10px] font-medium text-gray-400 dark:text-gray-500;
+}
+
+.date-picker-calendar-selection strong {
+  @apply truncate text-xs font-semibold text-gray-800 dark:text-gray-100;
+}
+
+.date-picker-calendar-hint {
+  @apply pb-2 text-center text-[11px] text-gray-500 dark:text-gray-400;
+}
+
+.date-picker-calendar-months {
+  @apply grid grid-cols-2 gap-4;
+}
+
+.date-picker-calendar-month-title {
+  @apply pb-2 text-center text-sm font-semibold text-gray-900 dark:text-white;
+}
+
+.date-picker-calendar-weekdays,
+.date-picker-calendar-days {
+  @apply grid grid-cols-7 gap-1 text-center;
+}
+
+.date-picker-calendar-weekdays {
+  @apply mb-1 text-[11px] font-medium text-gray-400 dark:text-gray-500;
+}
+
+.date-picker-calendar-day,
+.date-picker-calendar-empty {
+  @apply mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs;
+}
+
+.date-picker-calendar-day {
+  @apply text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700;
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500/40;
+}
+
+.date-picker-calendar-day:disabled {
+  @apply cursor-not-allowed text-gray-300 hover:bg-transparent dark:text-dark-500 dark:hover:bg-transparent;
+}
+
+.date-picker-calendar-day-in-range {
+  @apply rounded-md bg-primary-50 text-primary-800 dark:bg-primary-900/30 dark:text-primary-200;
+}
+
+.date-picker-calendar-day-selected,
+.date-picker-calendar-day-selected:hover {
+  @apply bg-primary-600 font-semibold text-white dark:bg-primary-500 dark:text-white;
+}
+
+.date-picker-calendar-day-selected:disabled {
+  @apply bg-gray-300 text-white dark:bg-dark-600 dark:text-gray-400;
+}
+
 .date-picker-field {
   @apply min-w-0 flex-1;
 }
@@ -423,6 +626,14 @@ onUnmounted(() => {
 }
 
 @media (max-width: 600px) {
+  .date-picker-calendar-months > :nth-child(2) {
+    display: none;
+  }
+  .date-picker-calendar-day,
+  .date-picker-calendar-empty {
+    width: 2rem;
+    height: 2rem;
+  }
   .date-picker-with-time {
     position: fixed;
     inset: 20vh 1rem auto;

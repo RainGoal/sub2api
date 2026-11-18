@@ -488,6 +488,30 @@ const PluginIcon = {
   render: () => h(Icon, { name: 'cube' })
 }
 
+const ProfitIcon = {
+  render: () => h(Icon, { name: 'trendingUp' })
+}
+
+const UpstreamBalanceIcon = {
+  render: () => h(Icon, { name: 'dollar' })
+}
+
+const VideoReviewIcon = {
+  render: () => h(Icon, { name: 'play' })
+}
+
+const DocsIcon = {
+  render: () => h(Icon, { name: 'book' })
+}
+
+const SalesIcon = {
+  render: () => h(Icon, { name: 'trophy' })
+}
+
+const RequestAuditIcon = {
+  render: () => h(Icon, { name: 'clipboard' })
+}
+
 const MCPIcon = {
   render: () => h(Icon, { name: 'mcp' })
 }
@@ -789,6 +813,7 @@ const customMenuItemsForAdmin = computed(() => {
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
+    { path: '/admin/profit', label: t('nav.profit'), icon: ProfitIcon },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon },
@@ -806,11 +831,11 @@ const adminNavItems = computed((): NavItem[] => {
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/upstream-balances', label: t('admin.upstreamBalances.title'), icon: CreditCardIcon },
-    { path: '/admin/video-task-reviews', label: t('admin.videoTaskReviews.title'), icon: ShieldIcon },
+    { path: '/admin/upstream-balances', label: t('admin.upstreamBalances.title'), icon: UpstreamBalanceIcon },
+    { path: '/admin/video-task-reviews', label: t('admin.videoTaskReviews.title'), icon: VideoReviewIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/docs', label: t('docsAdmin.title'), icon: FolderIcon },
+    { path: '/admin/docs', label: t('docsAdmin.title'), icon: DocsIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {
       path: '/admin/security-audit',
@@ -825,7 +850,7 @@ const adminNavItems = computed((): NavItem[] => {
     },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
-    { path: '/admin/sales', label: t('sales.title'), icon: UsersIcon, hideInSimpleMode: true },
+    { path: '/admin/sales', label: t('sales.title'), icon: SalesIcon, hideInSimpleMode: true },
     {
       path: '/admin/affiliates',
       label: t('nav.affiliateManagement'),
@@ -853,9 +878,8 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/profit', label: t('nav.profit'), icon: ChartIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true },
-    { path: '/admin/request-audits', label: t('admin.requestAudit.title'), icon: ShieldIcon, hideInSimpleMode: true }
+    { path: '/admin/request-audits', label: t('admin.requestAudit.title'), icon: RequestAuditIcon, hideInSimpleMode: true }
   ]
 
   const visible = applyFeatureFlags(baseItems)

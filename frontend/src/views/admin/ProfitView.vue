@@ -57,27 +57,24 @@
           <h2 id="history-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.historyTitle') }}</h2>
           <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('profit.historyDescription') }}</p>
         </div>
-        <form class="flex flex-wrap items-end gap-2" @submit.prevent="loadHistory">
-          <label class="text-xs text-gray-500 dark:text-gray-400">
-            <span class="mb-1 block">{{ t('profit.startDate') }}</span>
-            <input v-model="startDate" type="date" class="input w-40" required />
-          </label>
-          <label class="text-xs text-gray-500 dark:text-gray-400">
-            <span class="mb-1 block">{{ t('profit.endDate') }}</span>
-            <input v-model="endDate" type="date" class="input w-40" required />
-          </label>
-          <button class="btn btn-primary" type="submit" :disabled="historyLoading || !isHistoryRangeValid">
-            <Icon name="search" size="sm" />
-            {{ t('profit.searchHistory') }}
-          </button>
-        </form>
-
-        <div v-if="historyLoading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
-        <div v-else-if="historyError" class="flex min-h-32 flex-col items-center justify-center gap-3 text-center">
-          <p class="text-sm text-red-600 dark:text-red-400">{{ historyError }}</p>
-          <button class="btn btn-secondary" @click="loadHistory">{{ t('common.tryAgain') }}</button>
+        <div class="flex flex-wrap items-center gap-3">
+          <DateRangePicker
+            v-model:start-date="startDate"
+            v-model:end-date="endDate"
+            :custom-calendar="true"
+            @change="onHistoryRangeChange"
+          />
+          <span v-if="historyLoading" class="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" role="status">
+            <LoadingSpinner />{{ t('profit.loadingHistory') }}
+          </span>
+          <div v-else-if="historyError" class="flex flex-wrap items-center gap-3" role="alert">
+            <p class="text-sm text-red-600 dark:text-red-400">{{ historyError }}</p>
+            <button v-if="historyCanRetry" class="btn btn-secondary" type="button" @click="loadHistory()">
+              {{ t('common.tryAgain') }}
+            </button>
+          </div>
         </div>
-        <template v-else-if="historyReport">
+        <template v-if="historyReport && !historyLoading">
           <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
             <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="historyReport.summary.balance" />
             <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="historyReport.summary.subscription" :show-nominal="true" />
@@ -140,7 +137,7 @@
             </div>
           </section>
         </template>
-        <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('profit.historyPrompt') }}</p>
+        <p v-if="!historyReport && !historyError && !historyLoading" class="text-sm text-gray-500 dark:text-gray-400">{{ t('profit.historyPrompt') }}</p>
       </section>
     </div>
   </AppLayout>
@@ -150,8 +147,8 @@
 import { computed, defineComponent, h, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import Icon from '@/components/icons/Icon.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import { adminPaymentAPI, type ProfitDailyStats, type ProfitMetrics, type ProfitReport } from '@/api/admin/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 
@@ -161,15 +158,10 @@ const overviewError = ref('')
 const overview = ref<ProfitReport | null>(null)
 const historyLoading = ref(false)
 const historyError = ref('')
+const historyCanRetry = ref(false)
 const historyReport = ref<ProfitReport | null>(null)
 const startDate = ref('')
 const endDate = ref('')
-const isHistoryRangeValid = computed(() => {
-  if (!startDate.value || !endDate.value || startDate.value > endDate.value) return false
-  const first = Date.parse(`${startDate.value}T00:00:00Z`)
-  const last = Date.parse(`${endDate.value}T00:00:00Z`)
-  return (last - first) / 86_400_000 < 366
-})
 const todayStats = computed(() => overview.value?.daily_series.find(day => day.date === overview.value?.end_date) ?? null)
 
 function metricsForDay(day: ProfitDailyStats | null, kind: 'balance' | 'subscription' | 'total'): ProfitMetrics {
@@ -219,20 +211,40 @@ async function loadOverview() {
   overviewError.value = ''
   try {
     overview.value = (await adminPaymentAPI.getProfitReport()).data
+    if (!startDate.value && !endDate.value) {
+      startDate.value = overview.value.start_date
+      endDate.value = overview.value.end_date
+    }
   } catch (err: unknown) {
     overviewError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
   } finally { overviewLoading.value = false }
 }
 
-async function loadHistory() {
-  if (!isHistoryRangeValid.value) return
+function onHistoryRangeChange(range: { startDate: string; endDate: string }) {
+  startDate.value = range.startDate
+  endDate.value = range.endDate
+  void loadHistory(range.startDate, range.endDate)
+}
+
+async function loadHistory(start = startDate.value, end = endDate.value) {
+  if (!start || !end || start > end) return
+  const firstDay = Date.parse(`${start}T00:00:00Z`)
+  const lastDay = Date.parse(`${end}T00:00:00Z`)
+  if (!Number.isFinite(firstDay) || !Number.isFinite(lastDay) || (lastDay - firstDay) / 86_400_000 >= 366) {
+    historyReport.value = null
+    historyCanRetry.value = false
+    historyError.value = t('profit.rangeTooLarge')
+    return
+  }
   historyLoading.value = true
+  historyCanRetry.value = false
   historyError.value = ''
   historyReport.value = null
   try {
-    historyReport.value = (await adminPaymentAPI.getProfitReport({ start_date: startDate.value, end_date: endDate.value })).data
+    historyReport.value = (await adminPaymentAPI.getProfitReport({ start_date: start, end_date: end })).data
   } catch (err: unknown) {
     historyError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
+    historyCanRetry.value = true
   } finally { historyLoading.value = false }
 }
 

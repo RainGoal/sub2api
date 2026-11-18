@@ -1060,7 +1060,10 @@ export default {
     endTime: 'End Time',
     preciseRangeHint: 'Local timezone, precise to the second. Start is included; end is excluded.',
     apply: 'Apply',
-    selectDateRange: 'Select date range'
+    selectDateRange: 'Select date range',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
+    customRangeHint: 'Select a start date, then an end date. Click again to restart the range.'
   },
 
   // Admin

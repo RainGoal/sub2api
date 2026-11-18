@@ -90,3 +90,15 @@ describe('AppSidebar MCP entry', () => {
     expect(componentSource).not.toMatch(/path: '\/settings\/mcp'[^\n]*PluginIcon/)
   })
 })
+
+describe('AppSidebar custom admin entries', () => {
+  it('places profit below dashboard and gives added admin entries distinct icons', () => {
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'trendingUp' })")
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'dollar' })")
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'play' })")
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'book' })")
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'trophy' })")
+    expect(componentSource).toContain("render: () => h(Icon, { name: 'clipboard' })")
+    expect(componentSource).toMatch(/path: '\/admin\/dashboard'[^\n]*\n\s*\{ path: '\/admin\/profit'/)
+  })
+})

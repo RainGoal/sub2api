@@ -16,6 +16,7 @@ vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return { ...actual,
     useI18n: () => ({
+    locale: { value: 'en' },
     t: (key: string) => {
       const messages: Record<string, string> = {
         'profit.title': 'Profit Statistics',
@@ -26,8 +27,9 @@ vi.mock('vue-i18n', async () => {
         'profit.thisMonth': "This month's profit",
         'profit.historyTitle': 'Historical profit query',
         'profit.historyDescription': 'Choose a date range',
-        'profit.historyPrompt': 'Choose a start and end date',
-        'profit.searchHistory': 'Query history',
+        'profit.historyPrompt': 'Choose a quick range or set custom dates, then apply.',
+        'profit.loadingHistory': 'Loading historical profit…',
+        'profit.rangeTooLarge': 'The date range cannot exceed 366 days. Choose a shorter range.',
         'profit.revenue': 'Revenue',
         'profit.cost': 'Cost',
         'profit.profit': 'Profit',
@@ -74,7 +76,7 @@ describe('ProfitView', () => {
     getProfitReport.mockResolvedValue({ data: report })
   })
 
-  it('loads today and month-to-date overview without loading history', async () => {
+  it('loads the overview first and queries history only after applying a date range', async () => {
     const wrapper = mount(ProfitView, {
       global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true, LoadingSpinner: true } },
     })
@@ -87,15 +89,18 @@ describe('ProfitView', () => {
     expect(wrapper.text()).toContain('Balance usage')
     expect(wrapper.text()).toContain('Subscription usage')
     expect(wrapper.text()).toContain('Historical subscription data note')
-    expect(wrapper.text()).toContain('Choose a start and end date')
+    expect(wrapper.text()).toContain('Choose a quick range or set custom dates, then apply.')
 
-    const inputs = wrapper.findAll('input[type="date"]')
-    await inputs[0].setValue('2026-01-01')
-    await inputs[1].setValue('2026-01-01')
-    await wrapper.find('form').trigger('submit')
+    await wrapper.find('.date-picker-trigger').trigger('click')
+    expect(wrapper.findAll('input[type="date"]')).toHaveLength(0)
+    await wrapper.find('[data-date="2026-01-01"]').trigger('click')
+    await wrapper.find('[data-date="2026-01-05"]').trigger('click')
+    expect(getProfitReport).toHaveBeenCalledTimes(1)
+
+    await wrapper.find('.date-picker-apply').trigger('click')
     await flushPromises()
 
-    expect(getProfitReport).toHaveBeenLastCalledWith({ start_date: '2026-01-01', end_date: '2026-01-01' })
+    expect(getProfitReport).toHaveBeenLastCalledWith({ start_date: '2026-01-01', end_date: '2026-01-05' })
     expect(wrapper.text()).toContain('Daily breakdown')
     expect(wrapper.text()).toContain('2026-01-01')
   })
