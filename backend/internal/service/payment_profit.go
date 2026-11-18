@@ -67,6 +67,15 @@ type profitRevenueEvent struct {
 // Subscription revenue is recognized evenly over its recorded service period;
 // request costs are recognized on the request date using the upstream account cost.
 func (s *PaymentService) GetProfitReport(ctx context.Context, start, end time.Time) (*ProfitReport, error) {
+	return s.getProfitReport(ctx, start, end, false)
+}
+
+// GetTodayProfitReport returns one day of profit without the separate cash receipts breakdown.
+func (s *PaymentService) GetTodayProfitReport(ctx context.Context, today time.Time) (*ProfitReport, error) {
+	return s.getProfitReport(ctx, today, today.AddDate(0, 0, 1), true)
+}
+
+func (s *PaymentService) getProfitReport(ctx context.Context, start, end time.Time, todayOnly bool) (*ProfitReport, error) {
 	if s.entClient == nil {
 		return nil, fmt.Errorf("payment database is unavailable")
 	}
@@ -90,8 +99,15 @@ func (s *PaymentService) GetProfitReport(ctx context.Context, start, end time.Ti
 	if err := s.loadProfitCosts(ctx, start, end, accumulators); err != nil {
 		return nil, err
 	}
-	if err := s.loadProfitSubscriptionRevenue(ctx, start, end, accumulators); err != nil {
+	revenueAllocationStart := start
+	if todayOnly {
+		revenueAllocationStart = timezone.StartOfMonth(start)
+	}
+	if err := s.loadProfitSubscriptionRevenue(ctx, start, end, revenueAllocationStart, accumulators); err != nil {
 		return nil, err
+	}
+	if todayOnly {
+		return buildProfitReport(start, end, accumulators, nil), nil
 	}
 	receivedByCurrency, err := s.loadProfitPaymentReceived(ctx, start, end)
 	if err != nil {
@@ -132,7 +148,7 @@ func (s *PaymentService) loadProfitCosts(ctx context.Context, start, end time.Ti
 	return rows.Err()
 }
 
-func (s *PaymentService) loadProfitSubscriptionRevenue(ctx context.Context, start, end time.Time, daily map[string]*profitDailyAccumulator) error {
+func (s *PaymentService) loadProfitSubscriptionRevenue(ctx context.Context, start, end, revenueAllocationStart time.Time, daily map[string]*profitDailyAccumulator) error {
 	rows, err := s.entClient.QueryContext(ctx, `
 		SELECT e.service_start_at, e.service_end_at, e.order_amount,
 			po.status, po.refund_amount
@@ -152,7 +168,12 @@ func (s *PaymentService) loadProfitSubscriptionRevenue(ctx context.Context, star
 		}
 		refundAmount := confirmedSubscriptionRefund(event.status, event.refundAmount)
 		netRevenue := math.Max(0, event.orderAmount-refundAmount)
-		for date, amount := range splitProfitAmountByDay(netRevenue, event.start, event.end, start, end, timezone.Location()) {
+		allocationStart := start
+		// Include earlier service days only when they affect the final day's rounding in the monthly report.
+		if !event.start.Before(revenueAllocationStart) && !event.end.After(end) {
+			allocationStart = revenueAllocationStart
+		}
+		for date, amount := range splitProfitAmountByDay(netRevenue, event.start, event.end, allocationStart, end, timezone.Location()) {
 			if day := daily[date]; day != nil {
 				day.subscriptionRevenue += amount
 			}

@@ -117,8 +117,8 @@ export const adminPaymentAPI = {
   },
 
   /** Get daily profit statistics with subscription revenue recognized over its service period. */
-  getProfitReport(params?: { start_date: string; end_date: string }) {
-    return apiClient.get<ProfitReport>('/admin/payment/profit', params ? { params } : undefined)
+  getProfitReport(params?: { period: 'today' } | { start_date: string; end_date: string }, options?: { signal?: AbortSignal }) {
+    return apiClient.get<ProfitReport>('/admin/payment/profit', { params, signal: options?.signal })
   },
 
   // ==================== Orders ====================

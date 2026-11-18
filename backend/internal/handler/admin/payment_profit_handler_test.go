@@ -11,20 +11,35 @@ import (
 func TestParseProfitReportRange(t *testing.T) {
 	loc := timezone.Location()
 	today := timezone.Today()
-	defaultStart, defaultEnd, err := parseProfitReportRange("", "")
+	defaultStart, defaultEnd, err := parseProfitReportRange("", "", "")
 	require.NoError(t, err)
 	require.Equal(t, timezone.StartOfMonth(today), defaultStart)
 	require.Equal(t, today.AddDate(0, 0, 1), defaultEnd)
 
-	start, end, err := parseProfitReportRange("2026-11-01", "2026-11-01")
+	start, end, err := parseProfitReportRange("2026-11-01", "2026-11-01", "")
 	require.NoError(t, err)
 	require.Equal(t, time.Date(2026, 11, 1, 0, 0, 0, 0, loc), start)
 	require.Equal(t, start.AddDate(0, 0, 1), end)
 
-	_, _, err = parseProfitReportRange("2026-02-30", "2026-03-01")
+	_, _, err = parseProfitReportRange("2026-02-30", "2026-03-01", "")
 	require.ErrorIs(t, err, errProfitReportDateRangeInvalid)
-	_, _, err = parseProfitReportRange("2026-11-02", "2026-11-01")
+	_, _, err = parseProfitReportRange("2026-11-02", "2026-11-01", "")
 	require.ErrorIs(t, err, errProfitReportDateRangeInvalid)
-	_, _, err = parseProfitReportRange("2025-01-01", "2026-01-02")
+	_, _, err = parseProfitReportRange("2025-01-01", "2026-01-02", "")
 	require.ErrorIs(t, err, errProfitReportDateRangeTooLarge)
+}
+
+func TestParseProfitReportRangeToday(t *testing.T) {
+	today := timezone.Today()
+	start, end, err := parseProfitReportRange("", "", "today")
+	require.NoError(t, err)
+	require.Equal(t, today, start)
+	require.Equal(t, today.AddDate(0, 0, 1), end)
+
+	_, _, err = parseProfitReportRange("", "", "yesterday")
+	require.ErrorIs(t, err, errProfitReportPeriodInvalid)
+	_, _, err = parseProfitReportRange("2026-11-01", "", "today")
+	require.ErrorIs(t, err, errProfitReportPeriodWithDates)
+	_, _, err = parseProfitReportRange("", "2026-11-01", "today")
+	require.ErrorIs(t, err, errProfitReportPeriodWithDates)
 }

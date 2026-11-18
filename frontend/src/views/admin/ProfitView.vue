@@ -11,46 +11,51 @@
         {{ t('profit.historyNote') }}
       </div>
 
-      <div v-if="overviewLoading" class="card flex min-h-48 items-center justify-center"><LoadingSpinner /></div>
-      <div v-else-if="overviewError" class="card flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
-        <p class="text-sm text-red-600 dark:text-red-400">{{ overviewError }}</p>
-        <button class="btn btn-secondary" @click="loadOverview">{{ t('common.tryAgain') }}</button>
-      </div>
-      <template v-else-if="overview">
-        <section class="space-y-3" aria-labelledby="today-profit-heading">
-          <div>
-            <h2 id="today-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.today') }}</h2>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ todayStats?.date || overview.end_date }}</p>
-          </div>
-          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="todayMetrics.balance" />
-            <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="todayMetrics.subscription" :show-nominal="true" />
-            <ProfitSummaryCard :title="t('profit.total')" :metrics="todayMetrics.total" />
-          </div>
-        </section>
+      <section class="space-y-3" aria-labelledby="today-profit-heading">
+        <div>
+          <h2 id="today-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.today') }}</h2>
+          <p v-if="todayReport" class="text-xs text-gray-500 dark:text-gray-400">{{ todayReport.end_date }}</p>
+        </div>
+        <div v-if="todayError" class="card flex min-h-28 flex-col items-center justify-center gap-3 p-4 text-center" role="alert">
+          <p class="text-sm text-red-600 dark:text-red-400">{{ todayError }}</p>
+          <button class="btn btn-secondary" type="button" @click="loadToday">{{ t('common.tryAgain') }}</button>
+        </div>
+        <div v-else-if="todayReport" class="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="todayMetrics.balance" />
+          <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="todayMetrics.subscription" :show-nominal="true" />
+          <ProfitSummaryCard :title="t('profit.total')" :metrics="todayMetrics.total" />
+        </div>
+        <div v-else class="card flex min-h-28 items-center justify-center"><LoadingSpinner /></div>
+      </section>
 
-        <section class="space-y-3" aria-labelledby="month-profit-heading">
-          <div>
-            <h2 id="month-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.thisMonth') }}</h2>
-            <p class="text-xs text-gray-500 dark:text-gray-400">{{ overview.start_date }} — {{ overview.end_date }}</p>
-          </div>
+      <section class="space-y-3" aria-labelledby="month-profit-heading">
+        <div>
+          <h2 id="month-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.thisMonth') }}</h2>
+          <p v-if="monthReport" class="text-xs text-gray-500 dark:text-gray-400">{{ monthReport.start_date }} — {{ monthReport.end_date }}</p>
+        </div>
+        <div v-if="monthError" class="card flex min-h-28 flex-col items-center justify-center gap-3 p-4 text-center" role="alert">
+          <p class="text-sm text-red-600 dark:text-red-400">{{ monthError }}</p>
+          <button class="btn btn-secondary" type="button" @click="loadMonth">{{ t('common.tryAgain') }}</button>
+        </div>
+        <template v-else-if="monthReport">
           <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="overview.summary.balance" />
-            <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="overview.summary.subscription" :show-nominal="true" />
-            <ProfitSummaryCard :title="t('profit.total')" :metrics="overview.summary.total" />
+            <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="monthReport.summary.balance" />
+            <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="monthReport.summary.subscription" :show-nominal="true" />
+            <ProfitSummaryCard :title="t('profit.total')" :metrics="monthReport.summary.total" />
           </div>
-          <section v-if="Object.keys(overview.summary.subscription.payment_received_by_currency || {}).length" class="card p-4">
+          <section v-if="Object.keys(monthReport.summary.subscription.payment_received_by_currency || {}).length" class="card p-4">
             <h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.paymentReceived') }}</h3>
             <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('profit.paymentReceivedHint') }}</p>
             <div class="flex flex-wrap gap-3">
-              <div v-for="(amount, currency) in overview.summary.subscription.payment_received_by_currency" :key="currency" class="rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800">
+              <div v-for="(amount, currency) in monthReport.summary.subscription.payment_received_by_currency" :key="currency" class="rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800">
                 <p class="text-xs text-gray-500 dark:text-gray-400">{{ currency }}</p>
                 <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{{ formatCurrency(amount, currency) }}</p>
               </div>
             </div>
           </section>
-        </section>
-      </template>
+        </template>
+        <div v-else class="card flex min-h-28 items-center justify-center"><LoadingSpinner /></div>
+      </section>
 
       <section class="card space-y-4 p-4" aria-labelledby="history-profit-heading">
         <div>
@@ -144,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref } from 'vue'
+import { computed, defineComponent, h, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -153,16 +158,19 @@ import { adminPaymentAPI, type ProfitDailyStats, type ProfitMetrics, type Profit
 import { extractI18nErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
-const overviewLoading = ref(false)
-const overviewError = ref('')
-const overview = ref<ProfitReport | null>(null)
+const overviewController = new AbortController()
+const todayError = ref('')
+const todayReport = ref<ProfitReport | null>(null)
+const monthError = ref('')
+const monthReport = ref<ProfitReport | null>(null)
 const historyLoading = ref(false)
 const historyError = ref('')
 const historyCanRetry = ref(false)
 const historyReport = ref<ProfitReport | null>(null)
 const startDate = ref('')
 const endDate = ref('')
-const todayStats = computed(() => overview.value?.daily_series.find(day => day.date === overview.value?.end_date) ?? null)
+// An older backend may return a month report for the Today request.
+const todayStats = computed(() => todayReport.value?.daily_series.find(day => day.date === todayReport.value?.end_date) ?? null)
 
 function metricsForDay(day: ProfitDailyStats | null, kind: 'balance' | 'subscription' | 'total'): ProfitMetrics {
   if (!day) return { revenue_usd: 0, cost_usd: 0, profit_usd: 0, nominal_usage_usd: 0 }
@@ -206,18 +214,31 @@ function formatCurrency(amount: number, currency = 'USD'): string {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount) } catch { return `${currency} ${amount.toFixed(2)}` }
 }
 
-async function loadOverview() {
-  overviewLoading.value = true
-  overviewError.value = ''
+async function loadToday() {
+  const { signal } = overviewController
+  todayError.value = ''
   try {
-    overview.value = (await adminPaymentAPI.getProfitReport()).data
+    const { data } = await adminPaymentAPI.getProfitReport({ period: 'today' }, { signal })
+    if (!signal.aborted) todayReport.value = data
+  } catch (err: unknown) {
+    if (!signal.aborted) todayError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
+  }
+}
+
+async function loadMonth() {
+  const { signal } = overviewController
+  monthError.value = ''
+  try {
+    const { data } = await adminPaymentAPI.getProfitReport(undefined, { signal })
+    if (signal.aborted) return
+    monthReport.value = data
     if (!startDate.value && !endDate.value) {
-      startDate.value = overview.value.start_date
-      endDate.value = overview.value.end_date
+      startDate.value = data.start_date
+      endDate.value = data.end_date
     }
   } catch (err: unknown) {
-    overviewError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
-  } finally { overviewLoading.value = false }
+    if (!signal.aborted) monthError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
+  }
 }
 
 function onHistoryRangeChange(range: { startDate: string; endDate: string }) {
@@ -274,5 +295,9 @@ const MetricCell = defineComponent({
   ]) },
 })
 
-onMounted(() => { void loadOverview() })
+onMounted(async () => {
+  await loadToday()
+  if (!overviewController.signal.aborted) void loadMonth()
+})
+onUnmounted(() => overviewController.abort())
 </script>
