@@ -219,10 +219,16 @@ export default {
 
   profit: {
     title: '利润统计',
-    description: '按实际成本发生日和收入确认日拆分查看利润。订阅收入按服务周期逐日确认。',
+    description: '优先查看今日与本月利润；历史趋势和每日明细按需查询。订阅收入按服务周期逐日确认。',
     historyNote: '上线前已支付的订阅缺少订单级服务周期快照，订阅收入无法可靠回算；历史区间可能仅包含上线后新履约订阅的确认收入。余额收入按当日实际余额消费确认；订阅收入按服务周期摊销。订阅倍率只影响额度消耗，不计入收入。退款进入终态后，按净收入重新摊回原服务期，因此原服务期各日利润可能更新。',
     startDate: '开始日期',
     endDate: '结束日期',
+    today: '今日利润',
+    thisMonth: '本月利润',
+    historyTitle: '历史利润查询',
+    historyDescription: '选择日期范围后查询历史利润趋势与每日明细。',
+    historyPrompt: '选择开始和结束日期，然后查询历史数据。',
+    searchHistory: '查询历史',
     last7Days: '近 7 天',
     last30Days: '近 30 天',
     last90Days: '近 90 天',

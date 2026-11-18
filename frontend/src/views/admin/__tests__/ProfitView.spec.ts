@@ -22,6 +22,12 @@ vi.mock('vue-i18n', async () => {
         'profit.balanceUsage': 'Balance usage',
         'profit.subscriptionUsage': 'Subscription usage',
         'profit.total': 'Total',
+        'profit.today': "Today's profit",
+        'profit.thisMonth': "This month's profit",
+        'profit.historyTitle': 'Historical profit query',
+        'profit.historyDescription': 'Choose a date range',
+        'profit.historyPrompt': 'Choose a start and end date',
+        'profit.searchHistory': 'Query history',
         'profit.revenue': 'Revenue',
         'profit.cost': 'Cost',
         'profit.profit': 'Profit',
@@ -68,17 +74,29 @@ describe('ProfitView', () => {
     getProfitReport.mockResolvedValue({ data: report })
   })
 
-  it('loads the selected date range and shows separated balance and subscription profit', async () => {
+  it('loads today and month-to-date overview without loading history', async () => {
     const wrapper = mount(ProfitView, {
       global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true, LoadingSpinner: true } },
     })
     await flushPromises()
 
-    expect(getProfitReport).toHaveBeenCalledWith(expect.objectContaining({ start_date: expect.any(String), end_date: expect.any(String) }))
+    expect(getProfitReport).toHaveBeenCalledWith()
+    expect(getProfitReport).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain("Today's profit")
+    expect(wrapper.text()).toContain("This month's profit")
     expect(wrapper.text()).toContain('Balance usage')
     expect(wrapper.text()).toContain('Subscription usage')
-    expect(wrapper.text()).toContain('Daily breakdown')
     expect(wrapper.text()).toContain('Historical subscription data note')
+    expect(wrapper.text()).toContain('Choose a start and end date')
+
+    const inputs = wrapper.findAll('input[type="date"]')
+    await inputs[0].setValue('2026-01-01')
+    await inputs[1].setValue('2026-01-01')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(getProfitReport).toHaveBeenLastCalledWith({ start_date: '2026-01-01', end_date: '2026-01-01' })
+    expect(wrapper.text()).toContain('Daily breakdown')
     expect(wrapper.text()).toContain('2026-01-01')
   })
 })

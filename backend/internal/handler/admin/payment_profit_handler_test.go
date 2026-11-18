@@ -10,6 +10,12 @@ import (
 
 func TestParseProfitReportRange(t *testing.T) {
 	loc := timezone.Location()
+	today := timezone.Today()
+	defaultStart, defaultEnd, err := parseProfitReportRange("", "")
+	require.NoError(t, err)
+	require.Equal(t, timezone.StartOfMonth(today), defaultStart)
+	require.Equal(t, today.AddDate(0, 0, 1), defaultEnd)
+
 	start, end, err := parseProfitReportRange("2026-11-01", "2026-11-01")
 	require.NoError(t, err)
 	require.Equal(t, time.Date(2026, 11, 1, 0, 0, 0, 0, loc), start)

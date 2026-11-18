@@ -219,10 +219,16 @@ export default {
 
   profit: {
     title: 'Profit Statistics',
-    description: 'View profit by actual cost date and recognized revenue date. Subscription revenue is recognized daily over its service period.',
+    description: 'Start with today and month-to-date profit. Query historical trends and daily details when needed.',
     historyNote: 'Subscriptions paid before this feature went live have no order-level service-period snapshots, so their revenue cannot be reliably recalculated. Historical ranges may include only subscription revenue from fulfillments recorded after launch. Balance revenue is recognized from actual balance usage on each day; subscription revenue is allocated over its service period. The subscription multiplier affects quota usage only and is not revenue. Once a refund reaches a terminal state, net revenue is reallocated across the original service period, so profit for those days may change.',
     startDate: 'Start date',
     endDate: 'End date',
+    today: 'Today\'s profit',
+    thisMonth: 'This month\'s profit',
+    historyTitle: 'Historical profit query',
+    historyDescription: 'Choose a date range to query historical profit trends and daily details.',
+    historyPrompt: 'Choose a start and end date, then query historical data.',
+    searchHistory: 'Query history',
     last7Days: 'Last 7 days',
     last30Days: 'Last 30 days',
     last90Days: 'Last 90 days',

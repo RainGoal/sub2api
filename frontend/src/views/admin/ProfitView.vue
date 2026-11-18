@@ -1,105 +1,147 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <div class="flex flex-wrap items-end justify-between gap-4">
+      <header>
+        <h1 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('profit.title') }}</h1>
+        <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{{ t('profit.description') }}</p>
+      </header>
+
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('profit.currencyNote') }}</p>
+      <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" role="note">
+        {{ t('profit.historyNote') }}
+      </div>
+
+      <div v-if="overviewLoading" class="card flex min-h-48 items-center justify-center"><LoadingSpinner /></div>
+      <div v-else-if="overviewError" class="card flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p class="text-sm text-red-600 dark:text-red-400">{{ overviewError }}</p>
+        <button class="btn btn-secondary" @click="loadOverview">{{ t('common.tryAgain') }}</button>
+      </div>
+      <template v-else-if="overview">
+        <section class="space-y-3" aria-labelledby="today-profit-heading">
+          <div>
+            <h2 id="today-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.today') }}</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ todayStats?.date || overview.end_date }}</p>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="todayMetrics.balance" />
+            <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="todayMetrics.subscription" :show-nominal="true" />
+            <ProfitSummaryCard :title="t('profit.total')" :metrics="todayMetrics.total" />
+          </div>
+        </section>
+
+        <section class="space-y-3" aria-labelledby="month-profit-heading">
+          <div>
+            <h2 id="month-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.thisMonth') }}</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ overview.start_date }} — {{ overview.end_date }}</p>
+          </div>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="overview.summary.balance" />
+            <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="overview.summary.subscription" :show-nominal="true" />
+            <ProfitSummaryCard :title="t('profit.total')" :metrics="overview.summary.total" />
+          </div>
+          <section v-if="Object.keys(overview.summary.subscription.payment_received_by_currency || {}).length" class="card p-4">
+            <h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.paymentReceived') }}</h3>
+            <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('profit.paymentReceivedHint') }}</p>
+            <div class="flex flex-wrap gap-3">
+              <div v-for="(amount, currency) in overview.summary.subscription.payment_received_by_currency" :key="currency" class="rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ currency }}</p>
+                <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{{ formatCurrency(amount, currency) }}</p>
+              </div>
+            </div>
+          </section>
+        </section>
+      </template>
+
+      <section class="card space-y-4 p-4" aria-labelledby="history-profit-heading">
         <div>
-          <h1 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('profit.title') }}</h1>
-          <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{{ t('profit.description') }}</p>
+          <h2 id="history-profit-heading" class="text-base font-semibold text-gray-900 dark:text-white">{{ t('profit.historyTitle') }}</h2>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('profit.historyDescription') }}</p>
         </div>
-        <div class="flex flex-wrap items-end gap-2">
+        <form class="flex flex-wrap items-end gap-2" @submit.prevent="loadHistory">
           <label class="text-xs text-gray-500 dark:text-gray-400">
             <span class="mb-1 block">{{ t('profit.startDate') }}</span>
-            <input v-model="startDate" type="date" class="input w-36" />
+            <input v-model="startDate" type="date" class="input w-40" required />
           </label>
           <label class="text-xs text-gray-500 dark:text-gray-400">
             <span class="mb-1 block">{{ t('profit.endDate') }}</span>
-            <input v-model="endDate" type="date" class="input w-36" />
+            <input v-model="endDate" type="date" class="input w-40" required />
           </label>
-          <button class="btn btn-primary" :disabled="loading || !isDateRangeValid" @click="loadReport">
-            <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
-            {{ t('profit.refresh') }}
+          <button class="btn btn-primary" type="submit" :disabled="historyLoading || !isHistoryRangeValid">
+            <Icon name="search" size="sm" />
+            {{ t('profit.searchHistory') }}
           </button>
+        </form>
+
+        <div v-if="historyLoading" class="flex min-h-40 items-center justify-center"><LoadingSpinner /></div>
+        <div v-else-if="historyError" class="flex min-h-32 flex-col items-center justify-center gap-3 text-center">
+          <p class="text-sm text-red-600 dark:text-red-400">{{ historyError }}</p>
+          <button class="btn btn-secondary" @click="loadHistory">{{ t('common.tryAgain') }}</button>
         </div>
-      </div>
+        <template v-else-if="historyReport">
+          <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="historyReport.summary.balance" />
+            <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="historyReport.summary.subscription" :show-nominal="true" />
+            <ProfitSummaryCard :title="t('profit.total')" :metrics="historyReport.summary.total" />
+          </section>
 
-      <div class="flex flex-wrap gap-2">
-        <button v-for="preset in presets" :key="preset.days" type="button" class="btn btn-secondary text-xs" @click="setPreset(preset.days)">
-          {{ preset.label }}
-        </button>
-      </div>
-
-      <div v-if="loading" class="card flex min-h-48 items-center justify-center"><LoadingSpinner /></div>
-      <div v-else-if="error" class="card flex min-h-48 flex-col items-center justify-center gap-3 p-6 text-center">
-        <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-        <button class="btn btn-secondary" @click="loadReport">{{ t('common.tryAgain') }}</button>
-      </div>
-      <template v-else-if="report">
-        <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('profit.currencyNote') }}</p>
-        <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" role="note">
-          {{ t('profit.historyNote') }}
-        </div>
-        <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <ProfitSummaryCard :title="t('profit.balanceUsage')" :metrics="report.summary.balance" />
-          <ProfitSummaryCard :title="t('profit.subscriptionUsage')" :metrics="report.summary.subscription" :show-nominal="true" />
-          <ProfitSummaryCard :title="t('profit.total')" :metrics="report.summary.total" />
-        </section>
-
-        <section class="card p-4">
-          <h2 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.dailyTrend') }}</h2>
-          <div class="flex flex-wrap gap-x-5 gap-y-2 pb-2 text-xs text-gray-500 dark:text-gray-400">
-            <span class="inline-flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-blue-500" />{{ t('profit.balanceUsage') }}</span>
-            <span class="inline-flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-violet-500" />{{ t('profit.subscriptionUsage') }}</span>
-            <span class="inline-flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-emerald-500" />{{ t('profit.total') }}</span>
-          </div>
-          <svg v-if="report.daily_series.length" viewBox="0 0 960 220" preserveAspectRatio="none" class="h-56 w-full overflow-visible" role="img" :aria-label="t('profit.dailyTrend')">
-            <line x1="0" x2="960" :y1="zeroY" :y2="zeroY" stroke="currentColor" class="text-gray-200 dark:text-dark-600" stroke-dasharray="4 5" />
-            <path :d="profitPath('balance_profit_usd')" fill="none" stroke="#3b82f6" stroke-width="3" vector-effect="non-scaling-stroke" />
-            <path :d="profitPath('subscription_profit_usd')" fill="none" stroke="#8b5cf6" stroke-width="3" vector-effect="non-scaling-stroke" />
-            <path :d="profitPath('total_profit_usd')" fill="none" stroke="#10b981" stroke-width="3" vector-effect="non-scaling-stroke" />
-          </svg>
-          <div v-if="report.daily_series.length" class="flex justify-between text-[11px] text-gray-400">
-            <span>{{ report.daily_series[0]?.date }}</span><span>{{ report.daily_series[report.daily_series.length - 1]?.date }}</span>
-          </div>
-          <div v-else class="flex h-48 items-center justify-center text-sm text-gray-500 dark:text-gray-400">{{ t('profit.noData') }}</div>
-        </section>
-
-        <section class="card overflow-hidden">
-          <div class="border-b border-gray-200 px-4 py-3 dark:border-dark-700">
-            <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.dailyBreakdown') }}</h2>
-          </div>
-          <div v-if="!report.daily_series.length" class="p-10 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('profit.noData') }}</div>
-          <div v-else class="overflow-x-auto">
-            <table class="min-w-full text-left text-sm">
-              <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-gray-400">
-                <tr>
-                  <th class="px-4 py-3">{{ t('profit.date') }}</th>
-                  <th class="px-4 py-3">{{ t('profit.balanceUsage') }}</th>
-                  <th class="px-4 py-3">{{ t('profit.subscriptionUsage') }}</th>
-                  <th class="px-4 py-3">{{ t('profit.total') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="day in report.daily_series" :key="day.date" class="text-gray-700 dark:text-gray-300">
-                  <td class="whitespace-nowrap px-4 py-3 font-medium">{{ day.date }}</td>
-                  <td class="px-4 py-3"><MetricCell :revenue="day.balance_revenue_usd" :cost="day.balance_cost_usd" :profit="day.balance_profit_usd" /></td>
-                  <td class="px-4 py-3"><MetricCell :revenue="day.subscription_revenue_usd" :cost="day.subscription_cost_usd" :profit="day.subscription_profit_usd" :nominal="day.subscription_nominal_usage_usd" /></td>
-                  <td class="px-4 py-3"><MetricCell :revenue="day.total_revenue_usd" :cost="day.total_cost_usd" :profit="day.total_profit_usd" /></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section v-if="Object.keys(report.summary.subscription.payment_received_by_currency || {}).length" class="card p-4">
-          <h2 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.paymentReceived') }}</h2>
-          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('profit.paymentReceivedHint') }}</p>
-          <div class="flex flex-wrap gap-3">
-            <div v-for="(amount, currency) in report.summary.subscription.payment_received_by_currency" :key="currency" class="rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800">
-              <p class="text-xs text-gray-500 dark:text-gray-400">{{ currency }}</p>
-              <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{{ formatCurrency(amount, currency) }}</p>
+          <section class="card p-4">
+            <h3 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.dailyTrend') }}</h3>
+            <div class="flex flex-wrap gap-x-5 gap-y-2 pb-2 text-xs text-gray-500 dark:text-gray-400">
+              <span class="inline-flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-blue-500" />{{ t('profit.balanceUsage') }}</span>
+              <span class="inline-flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-violet-500" />{{ t('profit.subscriptionUsage') }}</span>
+              <span class="inline-flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-emerald-500" />{{ t('profit.total') }}</span>
             </div>
-          </div>
-        </section>
-      </template>
+            <svg v-if="historyReport.daily_series.length" viewBox="0 0 960 220" preserveAspectRatio="none" class="h-56 w-full overflow-visible" role="img" :aria-label="t('profit.dailyTrend')">
+              <line x1="0" x2="960" :y1="zeroY" :y2="zeroY" stroke="currentColor" class="text-gray-200 dark:text-dark-600" stroke-dasharray="4 5" />
+              <path :d="profitPath('balance_profit_usd')" fill="none" stroke="#3b82f6" stroke-width="3" vector-effect="non-scaling-stroke" />
+              <path :d="profitPath('subscription_profit_usd')" fill="none" stroke="#8b5cf6" stroke-width="3" vector-effect="non-scaling-stroke" />
+              <path :d="profitPath('total_profit_usd')" fill="none" stroke="#10b981" stroke-width="3" vector-effect="non-scaling-stroke" />
+            </svg>
+            <div v-if="historyReport.daily_series.length" class="flex justify-between text-[11px] text-gray-400">
+              <span>{{ historyReport.daily_series[0]?.date }}</span><span>{{ historyReport.daily_series[historyReport.daily_series.length - 1]?.date }}</span>
+            </div>
+            <div v-else class="flex h-48 items-center justify-center text-sm text-gray-500 dark:text-gray-400">{{ t('profit.noData') }}</div>
+          </section>
+
+          <section class="card overflow-hidden">
+            <div class="border-b border-gray-200 px-4 py-3 dark:border-dark-700">
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.dailyBreakdown') }}</h3>
+            </div>
+            <div v-if="!historyReport.daily_series.length" class="p-10 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('profit.noData') }}</div>
+            <div v-else class="overflow-x-auto">
+              <table class="min-w-full text-left text-sm">
+                <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-gray-400">
+                  <tr>
+                    <th class="px-4 py-3">{{ t('profit.date') }}</th>
+                    <th class="px-4 py-3">{{ t('profit.balanceUsage') }}</th>
+                    <th class="px-4 py-3">{{ t('profit.subscriptionUsage') }}</th>
+                    <th class="px-4 py-3">{{ t('profit.total') }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                  <tr v-for="day in historyReport.daily_series" :key="day.date" class="text-gray-700 dark:text-gray-300">
+                    <td class="whitespace-nowrap px-4 py-3 font-medium">{{ day.date }}</td>
+                    <td class="px-4 py-3"><MetricCell :revenue="day.balance_revenue_usd" :cost="day.balance_cost_usd" :profit="day.balance_profit_usd" /></td>
+                    <td class="px-4 py-3"><MetricCell :revenue="day.subscription_revenue_usd" :cost="day.subscription_cost_usd" :profit="day.subscription_profit_usd" :nominal="day.subscription_nominal_usage_usd" /></td>
+                    <td class="px-4 py-3"><MetricCell :revenue="day.total_revenue_usd" :cost="day.total_cost_usd" :profit="day.total_profit_usd" /></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section v-if="Object.keys(historyReport.summary.subscription.payment_received_by_currency || {}).length" class="card p-4">
+            <h3 class="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{{ t('profit.paymentReceived') }}</h3>
+            <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('profit.paymentReceivedHint') }}</p>
+            <div class="flex flex-wrap gap-3">
+              <div v-for="(amount, currency) in historyReport.summary.subscription.payment_received_by_currency" :key="currency" class="rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-800">
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ currency }}</p>
+                <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{{ formatCurrency(amount, currency) }}</p>
+              </div>
+            </div>
+          </section>
+        </template>
+        <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('profit.historyPrompt') }}</p>
+      </section>
     </div>
   </AppLayout>
 </template>
@@ -110,26 +152,43 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { adminPaymentAPI, type ProfitMetrics, type ProfitReport } from '@/api/admin/payment'
+import { adminPaymentAPI, type ProfitDailyStats, type ProfitMetrics, type ProfitReport } from '@/api/admin/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
-const loading = ref(false)
-const error = ref('')
-const report = ref<ProfitReport | null>(null)
-const endDate = ref(toDateInput(new Date()))
-const defaultStart = new Date()
-defaultStart.setDate(defaultStart.getDate() - 29)
-const startDate = ref(toDateInput(defaultStart))
-const isDateRangeValid = computed(() => Boolean(startDate.value && endDate.value && startDate.value <= endDate.value))
+const overviewLoading = ref(false)
+const overviewError = ref('')
+const overview = ref<ProfitReport | null>(null)
+const historyLoading = ref(false)
+const historyError = ref('')
+const historyReport = ref<ProfitReport | null>(null)
+const startDate = ref('')
+const endDate = ref('')
+const isHistoryRangeValid = computed(() => {
+  if (!startDate.value || !endDate.value || startDate.value > endDate.value) return false
+  const first = Date.parse(`${startDate.value}T00:00:00Z`)
+  const last = Date.parse(`${endDate.value}T00:00:00Z`)
+  return (last - first) / 86_400_000 < 366
+})
+const todayStats = computed(() => overview.value?.daily_series.find(day => day.date === overview.value?.end_date) ?? null)
 
-const presets = computed(() => [
-  { days: 7, label: t('profit.last7Days') },
-  { days: 30, label: t('profit.last30Days') },
-  { days: 90, label: t('profit.last90Days') },
-])
+function metricsForDay(day: ProfitDailyStats | null, kind: 'balance' | 'subscription' | 'total'): ProfitMetrics {
+  if (!day) return { revenue_usd: 0, cost_usd: 0, profit_usd: 0, nominal_usage_usd: 0 }
+  const prefix = `${kind}_`
+  const revenue = day[`${prefix}revenue_usd` as keyof ProfitDailyStats] as number
+  const cost = day[`${prefix}cost_usd` as keyof ProfitDailyStats] as number
+  const profit = day[`${prefix}profit_usd` as keyof ProfitDailyStats] as number
+  const nominal = kind === 'subscription' ? day.subscription_nominal_usage_usd : kind === 'balance' ? revenue : revenue
+  return { revenue_usd: revenue, cost_usd: cost, profit_usd: profit, nominal_usage_usd: nominal }
+}
 
-const allProfitValues = computed(() => report.value?.daily_series.flatMap(day => [
+const todayMetrics = computed(() => ({
+  balance: metricsForDay(todayStats.value, 'balance'),
+  subscription: metricsForDay(todayStats.value, 'subscription'),
+  total: metricsForDay(todayStats.value, 'total'),
+}))
+
+const allProfitValues = computed(() => historyReport.value?.daily_series.flatMap(day => [
   day.balance_profit_usd, day.subscription_profit_usd, day.total_profit_usd,
 ]) ?? [])
 const chartRange = computed(() => {
@@ -141,7 +200,7 @@ const chartRange = computed(() => {
 const zeroY = computed(() => 206 - ((0 - chartRange.value.min) / chartRange.value.span) * 192)
 
 function profitPath(field: 'balance_profit_usd' | 'subscription_profit_usd' | 'total_profit_usd'): string {
-  const days = report.value?.daily_series ?? []
+  const days = historyReport.value?.daily_series ?? []
   if (!days.length) return ''
   const { min, span } = chartRange.value
   return days.map((day, index) => {
@@ -151,35 +210,30 @@ function profitPath(field: 'balance_profit_usd' | 'subscription_profit_usd' | 't
   }).join(' ')
 }
 
-function toDateInput(date: Date): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-function setPreset(days: number) {
-  const end = new Date()
-  const start = new Date(end)
-  start.setDate(start.getDate() - (days - 1))
-  startDate.value = toDateInput(start)
-  endDate.value = toDateInput(end)
-  void loadReport()
-}
-
 function formatCurrency(amount: number, currency = 'USD'): string {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount) } catch { return `${currency} ${amount.toFixed(2)}` }
 }
 
-async function loadReport() {
-  if (!isDateRangeValid.value) return
-  loading.value = true
-  error.value = ''
+async function loadOverview() {
+  overviewLoading.value = true
+  overviewError.value = ''
   try {
-    report.value = (await adminPaymentAPI.getProfitReport({ start_date: startDate.value, end_date: endDate.value })).data
+    overview.value = (await adminPaymentAPI.getProfitReport()).data
   } catch (err: unknown) {
-    error.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
-  } finally { loading.value = false }
+    overviewError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
+  } finally { overviewLoading.value = false }
+}
+
+async function loadHistory() {
+  if (!isHistoryRangeValid.value) return
+  historyLoading.value = true
+  historyError.value = ''
+  historyReport.value = null
+  try {
+    historyReport.value = (await adminPaymentAPI.getProfitReport({ start_date: startDate.value, end_date: endDate.value })).data
+  } catch (err: unknown) {
+    historyError.value = extractI18nErrorMessage(err, t, 'profit', t('profit.loadFailed'))
+  } finally { historyLoading.value = false }
 }
 
 const ProfitSummaryCard = defineComponent({
@@ -208,5 +262,5 @@ const MetricCell = defineComponent({
   ]) },
 })
 
-onMounted(() => { void loadReport() })
+onMounted(() => { void loadOverview() })
 </script>

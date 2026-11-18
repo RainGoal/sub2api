@@ -37,8 +37,8 @@ func (h *PaymentHandler) GetProfitReport(c *gin.Context) {
 func parseProfitReportRange(startValue, endValue string) (time.Time, time.Time, error) {
 	loc := timezone.Location()
 	if startValue == "" && endValue == "" {
-		end := timezone.Today().AddDate(0, 0, 1)
-		return end.AddDate(0, 0, -30), end, nil
+		today := timezone.Today()
+		return timezone.StartOfMonth(today), today.AddDate(0, 0, 1), nil
 	}
 	if startValue == "" || endValue == "" {
 		return time.Time{}, time.Time{}, errProfitReportDateRangeRequired
