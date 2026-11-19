@@ -127,6 +127,12 @@ type AccountRepository interface {
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
 }
 
+// AccountGroupPriorityRepository updates exact per-group priorities without
+// changing the account-wide priority. It is optional for legacy test doubles.
+type AccountGroupPriorityRepository interface {
+	BindGroupsWithPriority(ctx context.Context, accountID int64, groups []AccountGroupPriorityInput) error
+}
+
 type AccountDuplicateRepository interface {
 	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
 	// and the scheduler outbox event for the new routing snapshot.

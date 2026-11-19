@@ -60,7 +60,7 @@ func scopedAccountFieldPermissions(fields map[string]json.RawMessage, create boo
 			}
 			permissions = append(permissions, "accounts.options.write")
 			continue
-		case "group_ids":
+		case "group_ids", "account_groups":
 			permission = "accounts.groups"
 		case "platform", "type":
 			if !create {
@@ -155,29 +155,36 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 	}
 	if id == 0 {
 		var input struct {
-			ProxyID        *int64         `json:"proxy_id"`
-			ProxyMode      string         `json:"proxy_mode"`
-			RandomProxy    bool           `json:"random_proxy"`
-			Name           string         `json:"name"`
-			Notes          *string        `json:"notes"`
-			Extra          map[string]any `json:"extra"`
-			Platform       string         `json:"platform"`
-			Type           string         `json:"type"`
-			Credentials    map[string]any `json:"credentials"`
-			RateMultiplier *float64       `json:"rate_multiplier"`
-			GroupIDs       []int64        `json:"group_ids"`
-			Concurrency    int            `json:"concurrency"`
-			Priority       int            `json:"priority"`
-			LoadFactor     *int           `json:"load_factor"`
-			ExpiresAt      *int64         `json:"expires_at"`
-			AutoPause      *bool          `json:"auto_pause_on_expired"`
+			ProxyID        *int64                      `json:"proxy_id"`
+			ProxyMode      string                      `json:"proxy_mode"`
+			RandomProxy    bool                        `json:"random_proxy"`
+			Name           string                      `json:"name"`
+			Notes          *string                     `json:"notes"`
+			Extra          map[string]any              `json:"extra"`
+			Platform       string                      `json:"platform"`
+			Type           string                      `json:"type"`
+			Credentials    map[string]any              `json:"credentials"`
+			RateMultiplier *float64                    `json:"rate_multiplier"`
+			GroupIDs       []int64                     `json:"group_ids"`
+			AccountGroups  []AccountGroupPriorityInput `json:"account_groups"`
+			Concurrency    int                         `json:"concurrency"`
+			Priority       int                         `json:"priority"`
+			LoadFactor     *int                        `json:"load_factor"`
+			ExpiresAt      *int64                      `json:"expires_at"`
+			AutoPause      *bool                       `json:"auto_pause_on_expired"`
 		}
 		body, _ := json.Marshal(fields)
 		if err = json.Unmarshal(body, &input); err != nil {
 			return nil, infraerrors.BadRequest("SCOPED_ACCOUNT_INPUT", "请求格式无效")
 		}
-		if strings.TrimSpace(input.Name) == "" || utf8.RuneCountInString(input.Name) > maxAccountNameRunes || len(input.Credentials) == 0 || fields["group_ids"] == nil {
+		if strings.TrimSpace(input.Name) == "" || utf8.RuneCountInString(input.Name) > maxAccountNameRunes || len(input.Credentials) == 0 || (fields["group_ids"] == nil && fields["account_groups"] == nil) {
 			return nil, infraerrors.BadRequest("SCOPED_ACCOUNT_INPUT", "创建须提供名称、凭证及明确分组")
+		}
+		if fields["account_groups"] != nil {
+			input.GroupIDs = accountGroupPriorityIDs(input.AccountGroups)
+			if err := validateAccountGroupPriorityInputs(input.AccountGroups); err != nil {
+				return nil, infraerrors.BadRequest("SCOPED_ACCOUNT_INPUT", err.Error())
+			}
 		}
 		if !slices.Contains([]string{"oauth", "setup-token", "apikey", "upstream", "bedrock", "service_account"}, input.Type) {
 			return nil, infraerrors.BadRequest("SCOPED_ACCOUNT_INPUT", "账户类型无效")
@@ -209,7 +216,7 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 		if e != nil {
 			return nil, e
 		}
-		return s.scopedAdminCreateTransaction(ctx, &CreateAccountInput{ProxyID: input.ProxyID, ProxyMode: proxyMode, Name: input.Name, Notes: input.Notes, Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra, RateMultiplier: input.RateMultiplier, GroupIDs: input.GroupIDs, Concurrency: input.Concurrency, Priority: input.Priority, LoadFactor: input.LoadFactor, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause, SkipDefaultGroupBind: true})
+		return s.scopedAdminCreateTransaction(ctx, &CreateAccountInput{ProxyID: input.ProxyID, ProxyMode: proxyMode, Name: input.Name, Notes: input.Notes, Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra, RateMultiplier: input.RateMultiplier, GroupIDs: input.GroupIDs, AccountGroups: input.AccountGroups, Concurrency: input.Concurrency, Priority: input.Priority, LoadFactor: input.LoadFactor, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause, SkipDefaultGroupBind: true})
 	}
 	result, err := s.scopedAdminTransaction(ctx, id, action == "accounts.delete", func(txctx context.Context) (*Account, error) {
 		a, e := s.accountRepo.GetByID(txctx, id)
@@ -260,27 +267,56 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 			return s.ClearAccountError(txctx, id)
 		}
 		var input struct {
-			ProxyID        *int64         `json:"proxy_id"`
-			ProxyMode      string         `json:"proxy_mode"`
-			RandomProxy    bool           `json:"random_proxy"`
-			Name           string         `json:"name"`
-			Notes          *string        `json:"notes"`
-			Credentials    map[string]any `json:"credentials"`
-			RateMultiplier *float64       `json:"rate_multiplier"`
-			Concurrency    *int           `json:"concurrency"`
-			Priority       *int           `json:"priority"`
-			LoadFactor     *int           `json:"load_factor"`
-			Status         string         `json:"status"`
-			GroupIDs       *[]int64       `json:"group_ids"`
-			ExpiresAt      *int64         `json:"expires_at"`
-			AutoPause      *bool          `json:"auto_pause_on_expired"`
-			Schedulable    *bool          `json:"schedulable"`
+			ProxyID        *int64                       `json:"proxy_id"`
+			ProxyMode      string                       `json:"proxy_mode"`
+			RandomProxy    bool                         `json:"random_proxy"`
+			Name           string                       `json:"name"`
+			Notes          *string                      `json:"notes"`
+			Credentials    map[string]any               `json:"credentials"`
+			RateMultiplier *float64                     `json:"rate_multiplier"`
+			Concurrency    *int                         `json:"concurrency"`
+			Priority       *int                         `json:"priority"`
+			LoadFactor     *int                         `json:"load_factor"`
+			Status         string                       `json:"status"`
+			GroupIDs       *[]int64                     `json:"group_ids"`
+			AccountGroups  *[]AccountGroupPriorityInput `json:"account_groups"`
+			ExpiresAt      *int64                       `json:"expires_at"`
+			AutoPause      *bool                        `json:"auto_pause_on_expired"`
+			Schedulable    *bool                        `json:"schedulable"`
 		}
 		body, _ := json.Marshal(fields)
 		if e = json.Unmarshal(body, &input); e != nil {
 			return nil, infraerrors.BadRequest("SCOPED_ACCOUNT_INPUT", "请求格式无效")
 		}
-		if input.GroupIDs != nil {
+		if input.AccountGroups != nil {
+			if err := validateAccountGroupPriorityInputs(*input.AccountGroups); err != nil {
+				return nil, infraerrors.BadRequest("SCOPED_ACCOUNT_INPUT", err.Error())
+			}
+			requestedIDs := accountGroupPriorityIDs(*input.AccountGroups)
+			groups, err := scopedAdminMergeGroups(principal.Policy, resource, a.GroupIDs, requestedIDs)
+			if err != nil {
+				return nil, err
+			}
+			input.GroupIDs = &groups
+			requested := make(map[int64]int, len(*input.AccountGroups))
+			for _, binding := range *input.AccountGroups {
+				requested[binding.GroupID] = binding.Priority
+			}
+			mergedBindings := make([]AccountGroupPriorityInput, 0, len(groups))
+			for _, groupID := range groups {
+				if priority, ok := requested[groupID]; ok {
+					mergedBindings = append(mergedBindings, AccountGroupPriorityInput{GroupID: groupID, Priority: priority})
+					continue
+				}
+				for _, existing := range a.AccountGroups {
+					if existing.GroupID == groupID {
+						mergedBindings = append(mergedBindings, AccountGroupPriorityInput{GroupID: groupID, Priority: existing.Priority})
+						break
+					}
+				}
+			}
+			input.AccountGroups = &mergedBindings
+		} else if input.GroupIDs != nil {
 			groups, err := scopedAdminMergeGroups(principal.Policy, resource, a.GroupIDs, *input.GroupIDs)
 			if err != nil {
 				return nil, err
@@ -304,7 +340,7 @@ func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, actio
 			maps.Copy(merged, input.Credentials)
 			input.Credentials = merged
 		}
-		updated, e := s.UpdateAccount(txctx, id, &UpdateAccountInput{ProxyID: input.ProxyID, Name: input.Name, Notes: input.Notes, Credentials: input.Credentials, RateMultiplier: input.RateMultiplier, Concurrency: input.Concurrency, Priority: input.Priority, LoadFactor: input.LoadFactor, Status: input.Status, GroupIDs: input.GroupIDs, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause})
+		updated, e := s.UpdateAccount(txctx, id, &UpdateAccountInput{ProxyID: input.ProxyID, Name: input.Name, Notes: input.Notes, Credentials: input.Credentials, RateMultiplier: input.RateMultiplier, Concurrency: input.Concurrency, Priority: input.Priority, LoadFactor: input.LoadFactor, Status: input.Status, GroupIDs: input.GroupIDs, AccountGroups: input.AccountGroups, ExpiresAt: input.ExpiresAt, AutoPauseOnExpired: input.AutoPause})
 		if e != nil {
 			return nil, e
 		}

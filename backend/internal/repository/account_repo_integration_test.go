@@ -721,6 +721,37 @@ func (s *AccountRepoSuite) TestGroupBinding_And_BindGroups() {
 	s.Require().Len(groups, 2, "expected 2 groups after bind")
 }
 
+func (s *AccountRepoSuite) TestBindGroupsPreservesAndSetsPerGroupPriority() {
+	g1 := mustCreateGroup(s.T(), s.client, &service.Group{Name: "priority-g1"})
+	g2 := mustCreateGroup(s.T(), s.client, &service.Group{Name: "priority-g2"})
+	g3 := mustCreateGroup(s.T(), s.client, &service.Group{Name: "priority-g3"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "priority-account", Priority: 7})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, g1.ID, 3)
+	mustBindAccountToGroup(s.T(), s.client, account.ID, g2.ID, 9)
+
+	s.Require().NoError(s.repo.BindGroups(s.ctx, account.ID, []int64{g1.ID, g2.ID, g3.ID}))
+	entries, err := s.client.AccountGroup.Query().Where(accountgroup.AccountIDEQ(account.ID)).All(s.ctx)
+	s.Require().NoError(err)
+	priorities := make(map[int64]int, len(entries))
+	for _, entry := range entries {
+		priorities[entry.GroupID] = entry.Priority
+	}
+	s.Require().Equal(map[int64]int{g1.ID: 3, g2.ID: 9, g3.ID: 7}, priorities)
+
+	s.Require().NoError(s.repo.BindGroupsWithPriority(s.ctx, account.ID, []service.AccountGroupPriorityInput{
+		{GroupID: g1.ID, Priority: 8},
+		{GroupID: g2.ID, Priority: 2},
+		{GroupID: g3.ID, Priority: 5},
+	}))
+	entries, err = s.client.AccountGroup.Query().Where(accountgroup.AccountIDEQ(account.ID)).All(s.ctx)
+	s.Require().NoError(err)
+	priorities = make(map[int64]int, len(entries))
+	for _, entry := range entries {
+		priorities[entry.GroupID] = entry.Priority
+	}
+	s.Require().Equal(map[int64]int{g1.ID: 8, g2.ID: 2, g3.ID: 5}, priorities)
+}
+
 func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-empty"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-empty"})

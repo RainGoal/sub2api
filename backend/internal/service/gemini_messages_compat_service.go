@@ -147,7 +147,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 
 	// 4. 按优先级 + LRU 选择最佳账号
 	// Select best account by priority + LRU
-	selected := s.selectBestGeminiAccount(ctx, accounts, requestedModel, excludedIDs, platform, useMixedScheduling)
+	selected := s.selectBestGeminiAccount(ctx, accounts, requestedModel, excludedIDs, platform, useMixedScheduling, groupID)
 
 	if selected == nil {
 		if requestedModel != "" {
@@ -339,6 +339,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 	excludedIDs map[int64]struct{},
 	platform string,
 	useMixedScheduling bool,
+	groupID *int64,
 ) *Account {
 	var selected *Account
 	precheckResult := s.buildPreCheckUsageResultMap(ctx, accounts, requestedModel)
@@ -362,7 +363,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 			continue
 		}
 
-		if s.isBetterGeminiAccount(acc, selected) {
+		if s.isBetterGeminiAccount(acc, selected, groupID) {
 			selected = acc
 		}
 	}
@@ -392,12 +393,14 @@ func (s *GeminiMessagesCompatService) buildPreCheckUsageResultMap(ctx context.Co
 //
 // isBetterGeminiAccount checks if candidate is better than current.
 // Rules: higher priority (lower value) wins; same priority: never used (OAuth > non-OAuth) > least recently used.
-func (s *GeminiMessagesCompatService) isBetterGeminiAccount(candidate, current *Account) bool {
+func (s *GeminiMessagesCompatService) isBetterGeminiAccount(candidate, current *Account, groupID *int64) bool {
 	// 优先级更高（数值更小）
-	if candidate.Priority < current.Priority {
+	candidatePriority := accountGroupPriority(candidate, groupID)
+	currentPriority := accountGroupPriority(current, groupID)
+	if candidatePriority < currentPriority {
 		return true
 	}
-	if candidate.Priority > current.Priority {
+	if candidatePriority > currentPriority {
 		return false
 	}
 

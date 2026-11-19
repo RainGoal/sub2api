@@ -131,6 +131,27 @@ func TestFilterByMinPriority_SelectsMinPriority(t *testing.T) {
 	require.Equal(t, int64(3), result[1].account.ID)
 }
 
+func TestGroupPriorityOverridesAccountPriority(t *testing.T) {
+	groupID := int64(101)
+	accounts := []*Account{
+		{ID: 1, Priority: 1, AccountGroups: []AccountGroup{{GroupID: groupID, Priority: 20}}},
+		{ID: 2, Priority: 100, AccountGroups: []AccountGroup{{GroupID: groupID, Priority: 2}}},
+		{ID: 3, Priority: 30},
+	}
+	sortAccountsByPriorityAndLastUsedForGroup(accounts, &groupID, false)
+	require.Equal(t, []int64{2, 1, 3}, []int64{accounts[0].ID, accounts[1].ID, accounts[2].ID})
+
+	loaded := []accountWithLoad{
+		makeAccWithLoad(1, 1, 10, nil, AccountTypeAPIKey),
+		makeAccWithLoad(2, 100, 10, nil, AccountTypeAPIKey),
+	}
+	loaded[0].account.AccountGroups = []AccountGroup{{GroupID: groupID, Priority: 20}}
+	loaded[1].account.AccountGroups = []AccountGroup{{GroupID: groupID, Priority: 2}}
+	filtered := filterByMinPriorityForGroup(loaded, &groupID)
+	require.Len(t, filtered, 1)
+	require.Equal(t, int64(2), filtered[0].account.ID)
+}
+
 // --- filterByMinLoadRate ---
 
 func TestFilterByMinLoadRate_Empty(t *testing.T) {

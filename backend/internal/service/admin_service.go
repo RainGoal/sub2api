@@ -417,6 +417,7 @@ type CreateAccountInput struct {
 	RateMultiplier     *float64 // 账号计费倍率（>=0，允许 0）
 	LoadFactor         *int
 	GroupIDs           []int64
+	AccountGroups      []AccountGroupPriorityInput
 	ExpiresAt          *int64
 	AutoPauseOnExpired *bool
 	ProbeEnabled       *bool
@@ -450,6 +451,7 @@ type UpdateAccountInput struct {
 	LoadFactor            *int
 	Status                string
 	GroupIDs              *[]int64
+	AccountGroups         *[]AccountGroupPriorityInput
 	ExpiresAt             *int64
 	AutoPauseOnExpired    *bool
 	ProbeEnabled          *bool

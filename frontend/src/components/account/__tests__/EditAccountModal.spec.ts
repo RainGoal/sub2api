@@ -356,6 +356,53 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('saves independent priority values for each assigned group', async () => {
+    const account = {
+      ...buildAccount(),
+      group_ids: [7, 9],
+      account_groups: [
+        { account_id: 1, group_id: 7, priority: 4 },
+        { account_id: 1, group_id: 9, priority: 8 }
+      ]
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    const firstGroupPriority = wrapper.get('[data-testid="group-priority-7"]')
+    const secondGroupPriority = wrapper.get('[data-testid="group-priority-9"]')
+    expect((firstGroupPriority.element as HTMLInputElement).value).toBe('4')
+    expect((secondGroupPriority.element as HTMLInputElement).value).toBe('8')
+
+    await firstGroupPriority.setValue(0)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      group_ids: [7, 9],
+      account_groups: [
+        { group_id: 7, priority: 0 },
+        { group_id: 9, priority: 8 }
+      ]
+    })
+  })
+
+  it('defaults a newly assigned group to the account priority', async () => {
+    const account = { ...buildAccount(), priority: 5 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="set-shadow-group"]').trigger('click')
+
+    const groupPriority = wrapper.get('[data-testid="group-priority-7"]')
+    expect((groupPriority.element as HTMLInputElement).value).toBe('5')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.account_groups).toEqual([
+      { group_id: 7, priority: 5 }
+    ])
+  })
+
   it('passes existing non-identity mappings to the whitelist selector and preserves them on save', async () => {
     const account = buildAccount()
     account.credentials.model_mapping = { 'gpt-5.2': 'gpt-5.2', 'gpt-latest': 'deepseek-chat' }

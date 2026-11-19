@@ -1173,6 +1173,12 @@ export default {
       loadFactorHint: 'Higher load factor increases scheduling frequency',
       priority: 'Priority',
       priorityHint: 'Lower value accounts are used first',
+      groupPriority: {
+        title: 'Priority by group',
+        hint: 'Set each group separately. Lower values come first. Accounts with the same priority are selected by the scheduler. New groups use the account priority by default.',
+        inputLabel: '{group} group priority',
+        invalid: 'Group priority must be a whole number greater than or equal to 0'
+      },
       billingRateMultiplier: 'Billing Rate Multiplier',
       billingRateMultiplierHint: '0 = free, affects account billing only',
       modelCostPricing: {

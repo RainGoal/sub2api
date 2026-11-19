@@ -11,3 +11,9 @@ type AccountGroup struct {
 	Account *Account
 	Group   *Group
 }
+
+// AccountGroupPriorityInput sets the priority of an account within one group.
+type AccountGroupPriorityInput struct {
+	GroupID  int64 `json:"group_id"`
+	Priority int   `json:"priority"`
+}

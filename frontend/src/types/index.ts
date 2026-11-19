@@ -1340,6 +1340,7 @@ export interface Account {
   proxy?: Proxy
   group_ids?: number[] // Groups this account belongs to
   groups?: Group[] // Preloaded group objects
+  account_groups?: AccountGroup[]
 
   // Rate limit & scheduling fields
   schedulable: boolean
@@ -1418,6 +1419,14 @@ export interface Account {
   parent_chatgpt_account_id?: string
 
   grok_model_diagnostics?: GrokModelDiagnostics
+}
+
+export interface AccountGroup {
+  account_id: number
+  group_id: number
+  priority: number
+  created_at?: string
+  group?: Pick<Group, 'id' | 'name'> | null
 }
 
 // The admin account list may return this compact shape when lite=1. Detail
@@ -1644,6 +1653,7 @@ export interface UpdateAccountRequest {
   schedulable?: boolean
   status?: 'active' | 'inactive' | 'error'
   group_ids?: number[]
+  account_groups?: Array<Pick<AccountGroup, 'group_id' | 'priority'>>
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   upstream_billing_probe_enabled?: boolean

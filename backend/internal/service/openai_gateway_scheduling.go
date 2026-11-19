@@ -1085,13 +1085,18 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	}
 	sort.SliceStable(eligible, func(i, j int) bool {
 		a, b := eligible[i], eligible[j]
+		aPriority := accountGroupPriority(a, groupID)
+		bPriority := accountGroupPriority(b, groupID)
+		if aPriority != bPriority {
+			return aPriority < bPriority
+		}
 		if requireCompact && compactTiers[a.ID] != compactTiers[b.ID] {
 			return compactTiers[a.ID] > compactTiers[b.ID]
 		}
 		if rateCmp := rateOrder.compare(a, b); rateCmp != 0 {
 			return rateCmp < 0
 		}
-		return s.isBetterAccount(a, b)
+		return s.isBetterAccount(a, b, groupID)
 	})
 	return eligible[0], compactBlocked, filterStats
 }
@@ -1101,13 +1106,15 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 //
 // isBetterAccount checks if candidate is better than current.
 // Rules: higher priority (lower value) wins; same priority: never used > least recently used.
-func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool {
+func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account, groupID *int64) bool {
 	// 优先级更高（数值更小）
 	// Higher priority (lower value)
-	if candidate.Priority < current.Priority {
+	candidatePriority := accountGroupPriority(candidate, groupID)
+	currentPriority := accountGroupPriority(current, groupID)
+	if candidatePriority < currentPriority {
 		return true
 	}
-	if candidate.Priority > current.Priority {
+	if candidatePriority > currentPriority {
 		return false
 	}
 
@@ -1344,8 +1351,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 		sort.SliceStable(available, func(i, j int) bool {
 			a, b := available[i], available[j]
-			if a.account.Priority != b.account.Priority {
-				return a.account.Priority < b.account.Priority
+			aPriority := accountGroupPriority(a.account, groupID)
+			bPriority := accountGroupPriority(b.account, groupID)
+			if aPriority != bPriority {
+				return aPriority < bPriority
 			}
 			if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
 				return a.loadInfo.LoadRate < b.loadInfo.LoadRate
@@ -1361,9 +1370,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
 			}
 		})
-		shuffleWithinSortGroups(available)
+		shuffleWithinSortGroupsForGroup(available, groupID)
 		if rateOrder.enabled {
 			sort.SliceStable(available, func(i, j int) bool {
+				aPriority := accountGroupPriority(available[i].account, groupID)
+				bPriority := accountGroupPriority(available[j].account, groupID)
+				if aPriority != bPriority {
+					return aPriority < bPriority
+				}
 				return rateOrder.compare(available[i].account, available[j].account) < 0
 			})
 		}
@@ -1417,9 +1431,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
 	if err != nil {
 		ordered := append([]*Account(nil), candidates...)
-		sortAccountsByPriorityAndLastUsed(ordered, false)
+		sortAccountsByPriorityAndLastUsedForGroup(ordered, groupID, false)
 		if rateOrder.enabled {
 			sort.SliceStable(ordered, func(i, j int) bool {
+				aPriority := accountGroupPriority(ordered[i], groupID)
+				bPriority := accountGroupPriority(ordered[j], groupID)
+				if aPriority != bPriority {
+					return aPriority < bPriority
+				}
 				return rateOrder.compare(ordered[i], ordered[j]) < 0
 			})
 		}
@@ -1467,9 +1486,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	// ============ Layer 3: Fallback wait ============
-	sortAccountsByPriorityAndLastUsed(candidates, false)
+	sortAccountsByPriorityAndLastUsedForGroup(candidates, groupID, false)
 	if rateOrder.enabled {
 		sort.SliceStable(candidates, func(i, j int) bool {
+			aPriority := accountGroupPriority(candidates[i], groupID)
+			bPriority := accountGroupPriority(candidates[j], groupID)
+			if aPriority != bPriority {
+				return aPriority < bPriority
+			}
 			return rateOrder.compare(candidates[i], candidates[j]) < 0
 		})
 	}

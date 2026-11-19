@@ -89,6 +89,20 @@ type Account struct {
 	headerOverrideCacheRawSig         uint64
 }
 
+// SchedulingPriorityForGroup returns the account's priority within groupID,
+// falling back to its account-wide priority when group metadata is unavailable.
+func (a *Account) SchedulingPriorityForGroup(groupID int64) int {
+	if a == nil {
+		return 0
+	}
+	for _, accountGroup := range a.AccountGroups {
+		if accountGroup.GroupID == groupID {
+			return accountGroup.Priority
+		}
+	}
+	return a.Priority
+}
+
 type OpenAIEndpointCapability string
 
 const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"

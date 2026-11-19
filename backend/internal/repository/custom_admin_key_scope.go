@@ -184,6 +184,14 @@ func (r *accountRepository) ScopedAdminCommitted(ctx context.Context, id int64, 
 // scopedAdminBindGroups 只增删变化的关联，保留现有关联的优先级和创建时间。
 // 调用者已在受限事务内验权并合并不可操作的分组，不得回退到全量重建。
 func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
+	groups := make([]service.AccountGroupPriorityInput, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		groups = append(groups, service.AccountGroupPriorityInput{GroupID: groupID})
+	}
+	return r.scopedAdminBindGroupsWithPriority(ctx, accountID, groups, false)
+}
+
+func (r *accountRepository) scopedAdminBindGroupsWithPriority(ctx context.Context, accountID int64, groups []service.AccountGroupPriorityInput, useRequestedPriorities bool) error {
 	if dbent.TxFromContext(ctx) == nil {
 		return fmt.Errorf("受限分组写入需要数据库事务")
 	}
@@ -192,6 +200,14 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 		return err
 	}
 	added, removed := []int64{}, []int64{}
+	groupIDs := make([]int64, 0, len(groups))
+	priorityByGroup := make(map[int64]int, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.GroupID)
+		if useRequestedPriorities {
+			priorityByGroup[group.GroupID] = group.Priority
+		}
+	}
 	for _, id := range groupIDs {
 		if !slices.Contains(existing, id) && !slices.Contains(added, id) {
 			added = append(added, id)
@@ -202,7 +218,18 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 			removed = append(removed, id)
 		}
 	}
-	if len(added) == 0 && len(removed) == 0 {
+	existingPriorities, err := r.loadAccountGroupPriorities(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	priorityChanged := false
+	for groupID, priority := range priorityByGroup {
+		if oldPriority, exists := existingPriorities[groupID]; exists && oldPriority != priority {
+			priorityChanged = true
+			break
+		}
+	}
+	if len(added) == 0 && len(removed) == 0 && !priorityChanged {
 		return nil
 	}
 	if err := lockLiveGroups(ctx, r.client, added); err != nil {
@@ -213,12 +240,36 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 			return err
 		}
 	}
+	account, err := r.client.Account.Query().Where(dbaccount.IDEQ(accountID)).Only(ctx)
+	if err != nil {
+		return err
+	}
+	defaultPriority := account.Priority
 	for _, id := range added {
-		if _, err := r.client.AccountGroup.Create().SetAccountID(accountID).SetGroupID(id).SetPriority(slices.Index(groupIDs, id) + 1).Save(ctx); err != nil {
+		priority := defaultPriority
+		if configured, ok := priorityByGroup[id]; ok {
+			priority = configured
+		}
+		if _, err := r.client.AccountGroup.Create().SetAccountID(accountID).SetGroupID(id).SetPriority(priority).Save(ctx); err != nil {
 			return err
 		}
 	}
-	return enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(mergeGroupIDs(existing, groupIDs)))
+	for id, priority := range priorityByGroup {
+		if slices.Contains(added, id) {
+			continue
+		}
+		if _, err := r.client.AccountGroup.Update().
+			Where(dbaccountgroup.AccountIDEQ(accountID), dbaccountgroup.GroupIDEQ(id)).
+			SetPriority(priority).
+			Save(ctx); err != nil {
+			return err
+		}
+	}
+	changedGroupIDs := mergeGroupIDs(existing, groupIDs)
+	if len(changedGroupIDs) == 0 {
+		return nil
+	}
+	return enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(changedGroupIDs))
 }
 
 // scopedAdminAccountPredicates 保证读取和导入候选查询使用相同的范围语义。

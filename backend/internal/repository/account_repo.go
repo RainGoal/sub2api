@@ -2000,6 +2000,10 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if err != nil {
 		return err
 	}
+	existingPriorities, err := r.loadAccountGroupPriorities(ctx, accountID)
+	if err != nil {
+		return err
+	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -2022,24 +2026,28 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
+	account, err := txClient.Account.Query().Where(dbaccount.IDEQ(accountID)).Only(ctx)
+	if err != nil {
+		return err
 	}
-
+	defaultPriority := account.Priority
 	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
-	for i, groupID := range groupIDs {
+	for _, groupID := range groupIDs {
+		priority := defaultPriority
+		if existing, ok := existingPriorities[groupID]; ok {
+			priority = existing
+		}
 		builders = append(builders, txClient.AccountGroup.Create().
 			SetAccountID(accountID).
 			SetGroupID(groupID).
-			SetPriority(i+1),
+			SetPriority(priority),
 		)
 	}
 
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-		return err
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
 	}
 
 	if tx != nil {
@@ -2053,6 +2061,67 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	}
 	return nil
 }
+
+// BindGroupsWithPriority replaces an account's group bindings and persists the
+// explicitly supplied priority for every binding.
+func (r *accountRepository) BindGroupsWithPriority(ctx context.Context, accountID int64, groups []service.AccountGroupPriorityInput) error {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.BindGroupsWithPriority(ctx, accountID, groups)
+	}
+	if adminaccess.RestrictedFromContext(ctx) != nil {
+		return r.scopedAdminBindGroupsWithPriority(ctx, accountID, groups, true)
+	}
+
+	groupIDs := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.GroupID)
+	}
+	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	txClient := r.client
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+		txClient = tx.Client()
+	}
+	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
+		return err
+	}
+	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
+		return err
+	}
+	builders := make([]*dbent.AccountGroupCreate, 0, len(groups))
+	for _, group := range groups {
+		builders = append(builders, txClient.AccountGroup.Create().
+			SetAccountID(accountID).
+			SetGroupID(group.GroupID).
+			SetPriority(group.Priority))
+	}
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	changedGroupIDs := mergeGroupIDs(existingGroupIDs, groupIDs)
+	if len(changedGroupIDs) > 0 {
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(changedGroupIDs)); err != nil {
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue prioritized group bindings failed: account=%d err=%v", accountID, err)
+		}
+	}
+	return nil
+}
+
+var _ service.AccountGroupPriorityRepository = (*accountRepository)(nil)
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {
 	accounts, err := r.schedulableAccountsQuery(time.Now()).All(ctx)
@@ -3663,6 +3732,20 @@ func (r *accountRepository) loadAccountGroupIDs(ctx context.Context, accountID i
 		ids = append(ids, entry.GroupID)
 	}
 	return ids, nil
+}
+
+func (r *accountRepository) loadAccountGroupPriorities(ctx context.Context, accountID int64) (map[int64]int, error) {
+	entries, err := r.client.AccountGroup.Query().
+		Where(dbaccountgroup.AccountIDEQ(accountID)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	priorities := make(map[int64]int, len(entries))
+	for _, entry := range entries {
+		priorities[entry.GroupID] = entry.Priority
+	}
+	return priorities, nil
 }
 
 func mergeGroupIDs(a []int64, b []int64) []int64 {

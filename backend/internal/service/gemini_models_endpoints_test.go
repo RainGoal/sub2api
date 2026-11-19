@@ -75,6 +75,25 @@ func TestSelectAccountForModelsEndpoints_PrefersAPIKeyOverVertex(t *testing.T) {
 	require.Equal(t, int64(19), account.ID)
 }
 
+func TestSelectAccountForModelsEndpoints_UsesGroupPriority(t *testing.T) {
+	groupID := int64(8)
+	first := Account{
+		ID: 21, Platform: PlatformGemini, Type: AccountTypeAPIKey, Priority: 1,
+		Credentials:   map[string]any{"api_key": "first"},
+		AccountGroups: []AccountGroup{{GroupID: groupID, Priority: 9}},
+	}
+	second := Account{
+		ID: 22, Platform: PlatformGemini, Type: AccountTypeAPIKey, Priority: 9,
+		Credentials:   map[string]any{"api_key": "second"},
+		AccountGroups: []AccountGroup{{GroupID: groupID, Priority: 2}},
+	}
+	svc := newGeminiModelsEndpointsTestService([]Account{first, second}, nil)
+
+	account, err := svc.SelectAccountForModelsEndpoints(context.Background(), &groupID)
+	require.NoError(t, err)
+	require.Equal(t, int64(22), account.ID)
+}
+
 func TestForwardListModels_VertexServiceAccountReturnsAIStudioFormat(t *testing.T) {
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		vertexModelsJSONResponse(http.StatusOK, `{"publisherModels":[

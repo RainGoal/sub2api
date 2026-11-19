@@ -1281,6 +1281,12 @@ export default {
       loadFactorHint: '提高负载因子可以提高对账号的调度频率',
       priority: '优先级',
       priorityHint: '优先级越小的账号优先使用',
+      groupPriority: {
+        title: '分组优先级',
+        hint: '每个分组单独设置，数字越小越优先。同一优先级时由系统选择。新分组默认使用账号优先级。',
+        inputLabel: '{group}分组优先级',
+        invalid: '分组优先级必须是大于或等于 0 的整数'
+      },
       billingRateMultiplier: '账号计费倍率',
       billingRateMultiplierHint: '0 表示不计费，仅影响账号计费',
       modelCostPricing: {

@@ -193,6 +193,46 @@ func duplicateAccountGroups(source *Account) ([]AccountGroup, []int64) {
 	return groups, groupIDs
 }
 
+func accountGroupPriorityIDs(groups []AccountGroupPriorityInput) []int64 {
+	ids := make([]int64, 0, len(groups))
+	seen := make(map[int64]struct{}, len(groups))
+	for _, group := range groups {
+		if group.GroupID <= 0 {
+			continue
+		}
+		if _, ok := seen[group.GroupID]; ok {
+			continue
+		}
+		seen[group.GroupID] = struct{}{}
+		ids = append(ids, group.GroupID)
+	}
+	return ids
+}
+
+func validateAccountGroupPriorityInputs(groups []AccountGroupPriorityInput) error {
+	seen := make(map[int64]struct{}, len(groups))
+	for _, group := range groups {
+		if group.GroupID <= 0 {
+			return errors.New("account_groups group_id must be a positive integer")
+		}
+		if group.Priority < 0 {
+			return errors.New("account_groups priority must be zero or greater")
+		}
+		if _, ok := seen[group.GroupID]; ok {
+			return errors.New("account_groups cannot contain duplicate group_id values")
+		}
+		seen[group.GroupID] = struct{}{}
+	}
+	return nil
+}
+
+func bindGroupsWithPriority(ctx context.Context, repo AccountRepository, accountID int64, groups []AccountGroupPriorityInput) error {
+	if priorityRepo, ok := repo.(AccountGroupPriorityRepository); ok {
+		return priorityRepo.BindGroupsWithPriority(ctx, accountID, groups)
+	}
+	return repo.BindGroups(ctx, accountID, accountGroupPriorityIDs(groups))
+}
+
 func duplicateAccountOperationID(sourceID int64, actorScope, operationKey string) string {
 	operationKey = strings.TrimSpace(operationKey)
 	if operationKey == "" {
@@ -482,6 +522,11 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if input.AccountGroups != nil {
+		if err := validateAccountGroupPriorityInputs(input.AccountGroups); err != nil {
+			return nil, err
+		}
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -500,8 +545,11 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	// 绑定分组
 	groupIDs := input.GroupIDs
+	if input.AccountGroups != nil {
+		groupIDs = accountGroupPriorityIDs(input.AccountGroups)
+	}
 	// 如果没有指定分组,自动绑定对应平台的默认分组
-	if len(groupIDs) == 0 && !input.SkipDefaultGroupBind {
+	if input.AccountGroups == nil && len(groupIDs) == 0 && !input.SkipDefaultGroupBind {
 		defaultGroupName := input.Platform + "-default"
 		groups, err := s.groupRepo.ListActiveByPlatform(ctx, input.Platform)
 		if err == nil {
@@ -550,7 +598,13 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	// 绑定分组
 	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+		var err error
+		if len(input.AccountGroups) > 0 {
+			err = bindGroupsWithPriority(ctx, s.accountRepo, account.ID, input.AccountGroups)
+		} else {
+			err = s.accountRepo.BindGroups(ctx, account.ID, groupIDs)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -586,6 +640,14 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	groupIDs := input.GroupIDs
+	if input.AccountGroups != nil {
+		if err := validateAccountGroupPriorityInputs(*input.AccountGroups); err != nil {
+			return nil, err
+		}
+		ids := accountGroupPriorityIDs(*input.AccountGroups)
+		groupIDs = &ids
+	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -873,17 +935,17 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 
 	// 先验证分组是否存在（在任何写操作之前）
-	if input.GroupIDs != nil {
-		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
+	if groupIDs != nil {
+		if err := s.validateGroupIDsExist(ctx, *groupIDs); err != nil {
 			return nil, err
 		}
-		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
+		if err := s.ValidateAccountGroupBindings(ctx, *groupIDs); err != nil {
 			return nil, err
 		}
 
 		// 检查混合渠道风险（除非用户已确认）
 		if !input.SkipMixedChannelCheck {
-			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *input.GroupIDs); err != nil {
+			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *groupIDs); err != nil {
 				return nil, err
 			}
 		}
@@ -946,9 +1008,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 
 	// 绑定分组
-	if input.GroupIDs != nil {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, *input.GroupIDs); err != nil {
-			return nil, err
+	if groupIDs != nil {
+		var bindErr error
+		if input.AccountGroups != nil {
+			bindErr = bindGroupsWithPriority(ctx, s.accountRepo, account.ID, *input.AccountGroups)
+		} else {
+			bindErr = s.accountRepo.BindGroups(ctx, account.ID, *groupIDs)
+		}
+		if bindErr != nil {
+			return nil, bindErr
 		}
 	}
 

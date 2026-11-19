@@ -560,6 +560,8 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityUsesConfiguredOAuthReference(t
 		account.Status = StatusActive
 		account.Schedulable = true
 		account.Concurrency = 1
+		account.GroupIDs = []int64{1}
+		account.AccountGroups = []AccountGroup{{GroupID: 1, Priority: 50}}
 	}
 	cheap.Priority, oauth.Priority, expensive.Priority = 20, 10, 0
 
@@ -621,6 +623,10 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityIsIndependentFromAdvancedSched
 	cheap.Status, cheap.Schedulable, cheap.Concurrency, cheap.Priority = StatusActive, true, 1, 10
 	expensive := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.8, now.Add(-time.Minute), 30*time.Minute)
 	expensive.Status, expensive.Schedulable, expensive.Concurrency, expensive.Priority = StatusActive, true, 1, 0
+	cheap.GroupIDs = []int64{1}
+	cheap.AccountGroups = []AccountGroup{{GroupID: 1, Priority: 50}}
+	expensive.GroupIDs = []int64{1}
+	expensive.AccountGroups = []AccountGroup{{GroupID: 1, Priority: 50}}
 	accounts := []Account{*cheap, *expensive}
 	groupID := int64(1)
 

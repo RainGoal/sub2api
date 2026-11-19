@@ -3375,6 +3375,35 @@
         data-tour="account-form-groups"
       />
 
+      <div v-if="selectedPriorityGroups.length" class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div>
+          <h3 class="text-sm font-medium text-gray-900 dark:text-gray-100">
+            {{ t('admin.accounts.groupPriority.title') }}
+          </h3>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.groupPriority.hint') }}
+          </p>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label
+            v-for="group in selectedPriorityGroups"
+            :key="group.id"
+            class="flex items-center justify-between gap-3 rounded-md bg-gray-50 px-3 py-2 dark:bg-dark-800"
+          >
+            <span class="min-w-0 truncate text-sm text-gray-700 dark:text-gray-200">{{ group.name }}</span>
+            <input
+              v-model.number="groupPriorities[group.id]"
+              type="number"
+              min="0"
+              step="1"
+              class="input w-24"
+              :aria-label="t('admin.accounts.groupPriority.inputLabel', { group: group.name })"
+              :data-testid="`group-priority-${group.id}`"
+            />
+          </label>
+        </div>
+      </div>
+
     </form>
 
     <template #footer>
@@ -3601,6 +3630,14 @@ const selectableGroups = computed(() => {
     }
   }
   return Array.from(groups.values())
+})
+
+const selectedPriorityGroups = computed(() => {
+  return form.group_ids.map(groupID => {
+    const group = selectableGroups.value.find(candidate => candidate.id === groupID)
+    const binding = props.account?.account_groups?.find(candidate => candidate.group_id === groupID)
+    return { id: groupID, name: group?.name ?? binding?.group?.name ?? `#${groupID}` }
+  })
 })
 
 // Spark 影子账号(parent_account_id 非空):代理恒继承母账号,不可独立编辑(外审 B/P1),
@@ -4620,6 +4657,15 @@ const form = reactive({
   group_ids: [] as number[],
   expires_at: null as number | null
 })
+const groupPriorities = reactive<Record<number, number>>({})
+
+watch(() => [...form.group_ids], groupIDs => {
+  for (const groupID of groupIDs) {
+    if (groupPriorities[groupID] == null) {
+      groupPriorities[groupID] = form.priority
+    }
+  }
+})
 
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   upstreamBillingRateSyncEnabled.value = enabled
@@ -4731,6 +4777,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     ? newAccount.status
     : 'active'
   form.group_ids = newAccount.group_ids || []
+  for (const groupID of Object.keys(groupPriorities)) {
+    delete groupPriorities[Number(groupID)]
+  }
+  for (const groupID of form.group_ids) {
+    const binding = newAccount.account_groups?.find(candidate => candidate.group_id === groupID)
+    groupPriorities[groupID] = binding?.priority ?? newAccount.priority
+  }
   form.expires_at = newAccount.expires_at ?? null
 
   // Load intercept warmup requests setting (applies to all account types)
@@ -5805,6 +5858,18 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
+  const invalidGroupPriority = form.group_ids.some(groupID => {
+    const priority = groupPriorities[groupID]
+    return !Number.isInteger(priority) || priority < 0
+  })
+  if (invalidGroupPriority) {
+    appStore.showError(t('admin.accounts.groupPriority.invalid'))
+    return
+  }
+  updatePayload.account_groups = form.group_ids.map(groupID => ({
+    group_id: groupID,
+    priority: groupPriorities[groupID] ?? form.priority
+  }))
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {
