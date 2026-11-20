@@ -2130,6 +2130,9 @@ func (r *accountRepository) UpdateAccountGroupPriority(ctx context.Context, acco
 	if tx := dbent.TxFromContext(ctx); tx != nil {
 		return r.updateAccountGroupPriority(ctx, accountID, groupID, priority)
 	}
+	if _, alreadyTransactional := r.sql.(*dbent.Tx); alreadyTransactional {
+		return r.updateAccountGroupPriority(ctx, accountID, groupID, priority)
+	}
 
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
