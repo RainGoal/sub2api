@@ -39,7 +39,7 @@ var definitions = []permissionDefinition{
 	{Permission{"accounts.models.write", "编辑账户白名单模型 ID 与映射", "账户", "account"}, []string{"PUT /accounts/:id", "POST /accounts/bulk-update"}},
 	{Permission{"accounts.network", "修改接入地址、代理与连接选项", "账户", "account"}, []string{"PUT /accounts/:id"}},
 	{Permission{"accounts.status", "启用、停用与调度开关", "账户", "account"}, []string{"PUT /accounts/:id", "POST /accounts/:id/schedulable"}},
-	{Permission{"accounts.schedule", "修改并发、优先级与有效期", "账户", "account"}, []string{"PUT /accounts/:id"}},
+	{Permission{"accounts.schedule", "修改并发、优先级与有效期", "账户", "account"}, []string{"PUT /accounts/:id", "PUT /accounts/:id/groups/:group_id/priority"}},
 	{Permission{"accounts.refresh", "刷新 OAuth 凭证", "账户", "account"}, []string{"POST /accounts/:id/refresh"}},
 	{Permission{"accounts.recover", "清除账户错误与限流状态", "账户", "account"}, []string{"POST /accounts/:id/clear-error"}},
 	{Permission{"accounts.delete", "删除账户（影响共享分组）", "账户", "account"}, []string{"DELETE /accounts/:id"}},

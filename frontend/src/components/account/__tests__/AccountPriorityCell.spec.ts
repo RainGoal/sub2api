@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountPriorityCell from '../AccountPriorityCell.vue'
 import type { Account } from '@/types'
-import { update } from '@/api/admin/accounts'
+import { update, updateGroupPriority } from '@/api/admin/accounts'
 
-vi.mock('@/api/admin/accounts', () => ({ update: vi.fn() }))
+vi.mock('@/api/admin/accounts', () => ({ update: vi.fn(), updateGroupPriority: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 const account = (overrides: Partial<Account> = {}) => ({
@@ -17,6 +17,7 @@ const mountCell = (value = account()) => mount(AccountPriorityCell, { props: { a
 beforeEach(() => {
   vi.useFakeTimers()
   vi.mocked(update).mockReset().mockImplementation(async (id, req) => account({ id, priority: req.priority }))
+  vi.mocked(updateGroupPriority).mockReset().mockResolvedValue()
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -49,6 +50,22 @@ describe('AccountPriorityCell', () => {
     await dec.trigger('click')
     await vi.runAllTimersAsync()
     expect(update).not.toHaveBeenCalled()
+  })
+
+  it('updates only the selected group priority and allows zero', async () => {
+    const wrapper = mount(AccountPriorityCell, {
+      props: { account: account({ group_priority: 0 }), groupId: 12 }
+    })
+    expect(wrapper.get('[data-testid="account-priority-value"]').text()).toBe('0')
+    expect(wrapper.get('[data-testid="account-priority-decrement"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-testid="account-priority-increment"]').trigger('click')
+    await vi.runAllTimersAsync()
+    await flushPromises()
+
+    expect(updateGroupPriority).toHaveBeenCalledWith(7, 12, 1)
+    expect(update).not.toHaveBeenCalled()
+    expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ priority: 3, group_priority: 1 })
   })
 
   it('saves a typed value on Enter and ignores unchanged input', async () => {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -54,6 +55,46 @@ func (s *adminServiceImpl) ListOpenAISchedulableAccountsForSchedulerScore(ctx co
 
 func (s *adminServiceImpl) GetAccount(ctx context.Context, id int64) (*Account, error) {
 	return s.accountRepo.GetByID(ctx, id)
+}
+
+func (s *adminServiceImpl) UpdateAccountGroupPriority(ctx context.Context, accountID, groupID int64, priority int) error {
+	if accountID <= 0 || groupID <= 0 || priority < 0 {
+		return infraerrors.BadRequest("INVALID_ACCOUNT_GROUP_PRIORITY", "account, group, and priority must be valid")
+	}
+
+	update := func(ctx context.Context) error {
+		repo, ok := s.accountRepo.(AccountGroupPriorityUpdater)
+		if !ok {
+			return errors.New("account group priority update is unavailable")
+		}
+		return repo.UpdateAccountGroupPriority(ctx, accountID, groupID, priority)
+	}
+
+	if principal := adminaccess.RestrictedFromContext(ctx); principal != nil {
+		_, err := s.ScopedAdminWrite(ctx, accountID, "accounts.schedule", nil, func(txctx context.Context, account *Account) (*Account, error) {
+			resource := adminaccess.Account{ID: account.ID, GroupIDs: account.GroupIDs, Type: account.Type, Platform: account.Platform}
+			if !principal.Policy.AllowsGroup("accounts.schedule", resource, groupID) {
+				return nil, infraerrors.Forbidden("SCOPED_ACCOUNT_FORBIDDEN", "target group is not authorized")
+			}
+			belongsToGroup := false
+			for _, existingGroupID := range account.GroupIDs {
+				if existingGroupID == groupID {
+					belongsToGroup = true
+					break
+				}
+			}
+			if !belongsToGroup {
+				return nil, ErrAccountNotFound
+			}
+			if err := update(txctx); err != nil {
+				return nil, err
+			}
+			return account, nil
+		})
+		return err
+	}
+
+	return update(ctx)
 }
 
 func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error) {

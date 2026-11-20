@@ -164,6 +164,10 @@ type UpdateAccountRequest struct {
 	ConfirmMixedChannelRisk *bool                          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
+type UpdateAccountGroupPriorityRequest struct {
+	Priority *int `json:"priority"`
+}
+
 type AccountGroupPriorityRequest struct {
 	GroupID  int64 `json:"group_id" binding:"gt=0"`
 	Priority int   `json:"priority" binding:"gte=0"`
@@ -873,8 +877,20 @@ func (h *AccountHandler) List(c *gin.Context) {
 		compact := make([]AccountListItemWithConcurrency, len(result))
 		for i := range result {
 			item := result[i]
+			listItem := dto.AccountListItemFromAccount(item.Account)
+			if groupID > 0 {
+				for _, accountGroup := range accounts[i].AccountGroups {
+					if accountGroup.GroupID == groupID {
+						priority := accountGroup.Priority
+						listItem.GroupPriority = &priority
+						selectedGroup := groupID
+						listItem.GroupPriorityGroupID = &selectedGroup
+						break
+					}
+				}
+			}
 			compact[i] = AccountListItemWithConcurrency{
-				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
+				AccountListItem:    listItem,
 				CurrentConcurrency: item.CurrentConcurrency,
 				SchedulerScore:     item.SchedulerScore,
 				SchedulerScores:    item.SchedulerScores,
@@ -883,7 +899,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentRPM:         item.CurrentRPM,
 			}
 		}
-		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)
+		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, groupID, true)
 		if etag != "" {
 			c.Header("ETag", etag)
 			c.Header("Vary", "If-None-Match")
@@ -896,7 +912,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		return
 	}
 
-	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, false)
+	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, groupID, false)
 	if etag != "" {
 		c.Header("ETag", etag)
 		c.Header("Vary", "If-None-Match")
@@ -914,6 +930,7 @@ func buildAccountsListETag[T any](
 	total int64,
 	page, pageSize int,
 	platform, accountType, status, search string,
+	groupID int64,
 	lite bool,
 ) string {
 	payload := struct {
@@ -924,6 +941,7 @@ func buildAccountsListETag[T any](
 		AccountType string `json:"type"`
 		Status      string `json:"status"`
 		Search      string `json:"search"`
+		GroupID     int64  `json:"group_id"`
 		Lite        bool   `json:"lite"`
 		Items       []T    `json:"items"`
 	}{
@@ -934,6 +952,7 @@ func buildAccountsListETag[T any](
 		AccountType: accountType,
 		Status:      status,
 		Search:      search,
+		GroupID:     groupID,
 		Lite:        lite,
 		Items:       items,
 	}
@@ -1249,6 +1268,35 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// UpdateGroupPriority updates only one account's priority within one group.
+// PUT /api/v1/admin/accounts/:id/groups/:group_id/priority
+func (h *AccountHandler) UpdateGroupPriority(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil || groupID <= 0 {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+	var req UpdateAccountGroupPriorityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.Priority == nil || *req.Priority < 0 {
+		response.BadRequest(c, "priority must be zero or greater")
+		return
+	}
+	if err := h.adminService.UpdateAccountGroupPriority(c.Request.Context(), accountID, groupID, *req.Priority); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"account_id": accountID, "group_id": groupID, "priority": *req.Priority})
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。

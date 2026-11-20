@@ -2121,7 +2121,54 @@ func (r *accountRepository) BindGroupsWithPriority(ctx context.Context, accountI
 	return nil
 }
 
+// UpdateAccountGroupPriority updates one existing binding and leaves all other
+// account and group priorities untouched.
+func (r *accountRepository) UpdateAccountGroupPriority(ctx context.Context, accountID, groupID int64, priority int) error {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.updateAccountGroupPriority(ctx, accountID, groupID, priority)
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return r.updateAccountGroupPriority(ctx, accountID, groupID, priority)
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txctx := dbent.NewTxContext(ctx, tx)
+	scoped := *r
+	scoped.client = tx.Client()
+	scoped.sql = tx.Client()
+	scoped.schedulerCache = nil
+	if err := scoped.updateAccountGroupPriority(txctx, accountID, groupID, priority); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *accountRepository) updateAccountGroupPriority(ctx context.Context, accountID, groupID int64, priority int) error {
+	if err := lockLiveGroups(ctx, r.sql, []int64{groupID}); err != nil {
+		return err
+	}
+	updated, err := r.client.AccountGroup.Update().
+		Where(dbaccountgroup.AccountIDEQ(accountID), dbaccountgroup.GroupIDEQ(groupID)).
+		SetPriority(priority).
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return service.ErrAccountGroupBindingNotFound
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload([]int64{groupID})); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account group priority update failed: account=%d group=%d err=%v", accountID, groupID, err)
+	}
+	return nil
+}
+
 var _ service.AccountGroupPriorityRepository = (*accountRepository)(nil)
+var _ service.AccountGroupPriorityUpdater = (*accountRepository)(nil)
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {
 	accounts, err := r.schedulableAccountsQuery(time.Now()).All(ctx)

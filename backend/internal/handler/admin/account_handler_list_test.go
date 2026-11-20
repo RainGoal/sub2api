@@ -24,7 +24,7 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 		ID: 501, Name: "compact-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
 		Credentials: map[string]any{"email": "compact@example.com", "access_token": strings.Repeat("x", 4096)},
 		Extra:       map[string]any{"privacy_mode": "training_off"}, Status: service.StatusActive,
-		Schedulable: true, Concurrency: 4, GroupIDs: []int64{groupID},
+		Schedulable: true, Concurrency: 4, Priority: 11, GroupIDs: []int64{groupID},
 		Groups:        []*service.Group{{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}},
 		AccountGroups: []service.AccountGroup{{AccountID: 501, GroupID: groupID, Priority: 2, Group: &service.Group{ID: groupID, Name: "codex", Platform: service.PlatformOpenAI}}},
 		CreatedAt:     now, UpdatedAt: now,
@@ -49,6 +49,7 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.Equal(t, true, liteItem["schedulable"])
 	require.NotContains(t, liteItem, "groups")
 	require.NotContains(t, liteItem, "account_groups")
+	require.NotContains(t, liteItem, "group_priority")
 	credentials, ok := liteItem["credentials"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "compact@example.com", credentials["email"])
@@ -64,6 +65,21 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	router.ServeHTTP(rec304, req304)
 	require.Equal(t, http.StatusNotModified, rec304.Code)
 
+	recGroup := httptest.NewRecorder()
+	reqGroup := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20&lite=1&group=77", nil)
+	router.ServeHTTP(recGroup, reqGroup)
+	require.Equal(t, http.StatusOK, recGroup.Code)
+	require.NotEqual(t, rec.Header().Get("ETag"), recGroup.Header().Get("ETag"))
+	var groupPayload struct {
+		Data struct {
+			Items []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recGroup.Body.Bytes(), &groupPayload))
+	require.Equal(t, float64(11), groupPayload.Data.Items[0]["priority"])
+	require.Equal(t, float64(2), groupPayload.Data.Items[0]["group_priority"])
+	require.Equal(t, float64(77), groupPayload.Data.Items[0]["group_priority_group_id"])
+
 	// Omitting lite preserves the legacy full response shape.
 	recFull := httptest.NewRecorder()
 	reqFull := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil)
@@ -77,6 +93,31 @@ func TestAccountHandlerListLiteUsesCompactDTOAndETag(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recFull.Body.Bytes(), &fullPayload))
 	require.Contains(t, fullPayload.Data.Items[0], "groups")
 	require.Contains(t, fullPayload.Data.Items[0], "account_groups")
+}
+
+func TestAccountHandlerUpdateGroupPriorityOnlyAcceptsNonNegativePriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	adminSvc := newStubAdminService()
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router.PUT("/api/v1/admin/accounts/:id/groups/:group_id/priority", handler.UpdateGroupPriority)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/42/groups/7/priority", strings.NewReader(`{"priority":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, int64(42), adminSvc.updatedAccountGroupPriority.accountID)
+	require.Equal(t, int64(7), adminSvc.updatedAccountGroupPriority.groupID)
+	require.Equal(t, 0, adminSvc.updatedAccountGroupPriority.priority)
+	require.Equal(t, 1, adminSvc.updatedAccountGroupPriority.calls)
+
+	bad := httptest.NewRecorder()
+	badReq := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/42/groups/7/priority", strings.NewReader(`{"priority":-1}`))
+	badReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(bad, badReq)
+	require.Equal(t, http.StatusBadRequest, bad.Code)
+	require.Equal(t, 1, adminSvc.updatedAccountGroupPriority.calls)
 }
 
 func TestAccountHandlerListLiteStaysBelowResponseBudget(t *testing.T) {

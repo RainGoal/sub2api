@@ -80,6 +80,15 @@ func TestScopedAdminPolicyGroupChanges(t *testing.T) {
 	require.False(t, p.AllowsGroup("accounts.groups", a, 0))
 }
 
+func TestScopedAdminSchedulePermissionCoversGroupPriorityRouteAndScope(t *testing.T) {
+	account := Account{GroupIDs: []int64{1, 2}, Type: "oauth", Platform: "openai"}
+	policy := Policy{Rules: []Rule{{Permissions: []string{"accounts.schedule"}, GroupIDs: []int64{1}, AccountTypes: []string{"oauth"}}}}
+
+	require.True(t, RouteAllowed(policy, "PUT", "/api/v1/admin/accounts/:id/groups/:group_id/priority"))
+	require.True(t, policy.AllowsGroup("accounts.schedule", account, 1))
+	require.False(t, policy.AllowsGroup("accounts.schedule", account, 2))
+}
+
 func TestScopedAdminPolicyExplicitAllAndUngrouped(t *testing.T) {
 	p := Policy{Rules: []Rule{{Permissions: []string{"accounts.read"}, AllGroups: true, AccountTypes: []string{"oauth"}}}}
 	require.True(t, p.AllowsAccount("accounts.read", Account{GroupIDs: []int64{999}, Type: "oauth"}))

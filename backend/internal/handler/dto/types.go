@@ -358,6 +358,8 @@ type AccountListItem struct {
 	Concurrency             int        `json:"concurrency"`
 	LoadFactor              *int       `json:"load_factor,omitempty"`
 	Priority                int        `json:"priority"`
+	GroupPriority           *int       `json:"group_priority,omitempty"`
+	GroupPriorityGroupID    *int64     `json:"group_priority_group_id,omitempty"`
 	RateMultiplier          float64    `json:"rate_multiplier"`
 	Status                  string     `json:"status"`
 	ErrorMessage            string     `json:"error_message"`

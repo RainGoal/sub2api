@@ -44,9 +44,16 @@ type stubAdminService struct {
 	lastBulkUpdateAccountInput          *service.BulkUpdateAccountsInput
 	getAccountResult                    *service.Account
 	updateAccountCalls                  int
-	updateAccountExtraCalls             int
-	checkMixedErr                       error
-	lastMixedCheck                      struct {
+	updatedAccountGroupPriority         struct {
+		accountID int64
+		groupID   int64
+		priority  int
+		calls     int
+	}
+	updateAccountGroupPriorityErr error
+	updateAccountExtraCalls       int
+	checkMixedErr                 error
+	lastMixedCheck                struct {
 		accountID int64
 		platform  string
 		groupIDs  []int64
@@ -502,6 +509,14 @@ func (s *stubAdminService) GetAccount(ctx context.Context, id int64) (*service.A
 	}
 	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
 	return &account, nil
+}
+
+func (s *stubAdminService) UpdateAccountGroupPriority(_ context.Context, accountID, groupID int64, priority int) error {
+	s.updatedAccountGroupPriority.accountID = accountID
+	s.updatedAccountGroupPriority.groupID = groupID
+	s.updatedAccountGroupPriority.priority = priority
+	s.updatedAccountGroupPriority.calls++
+	return s.updateAccountGroupPriorityErr
 }
 
 func (s *stubAdminService) GetAccountsByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {

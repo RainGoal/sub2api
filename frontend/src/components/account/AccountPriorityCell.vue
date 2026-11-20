@@ -12,7 +12,7 @@
       type="button"
       class="flex h-full w-6 items-center justify-center rounded-l-lg text-gray-500 opacity-0 transition hover:bg-gray-200/70 hover:text-primary-600 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent disabled:hover:text-gray-300 dark:disabled:text-dark-600 dark:disabled:hover:text-dark-600 group-hover/priority:opacity-100 group-focus-within/priority:opacity-100 dark:text-gray-400 dark:hover:bg-dark-600 dark:hover:text-primary-400 [@media(hover:none)]:opacity-100"
       :class="{ '!opacity-100': editing || dirty }"
-      :disabled="saving || draft <= MIN_PRIORITY"
+      :disabled="saving || draft <= minPriority"
       :title="t('admin.accounts.priorityQuick.raise')"
       :aria-label="t('admin.accounts.priorityQuick.raise')"
       data-testid="account-priority-decrement"
@@ -30,7 +30,7 @@
       type="text"
       inputmode="numeric"
       class="h-full w-10 border-0 bg-transparent p-0 text-center font-mono text-sm tabular-nums text-gray-900 focus:outline-none focus:ring-0 dark:text-white"
-      :aria-label="t('admin.accounts.columns.priority')"
+      :aria-label="t(groupId ? 'admin.accounts.columns.groupPriority' : 'admin.accounts.columns.priority')"
       data-testid="account-priority-input"
       @keydown.enter.prevent="commitInput"
       @keydown.esc.prevent="cancelInput"
@@ -76,16 +76,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { update as updateAccount } from '@/api/admin/accounts'
+import { update as updateAccount, updateGroupPriority } from '@/api/admin/accounts'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import type { Account } from '@/types'
+import type { Account, AccountListItem } from '@/types'
 
 const MIN_PRIORITY = 1
 const MAX_PRIORITY = 9999
 // 连续点击时合并为一次保存，避免每次 +/- 都打一次接口
 const SAVE_DEBOUNCE_MS = 450
 
-const props = defineProps<{ account: Account }>()
+const props = defineProps<{ account: AccountListItem; groupId?: number | null }>()
 const emit = defineEmits<{
   (e: 'updated', account: Account): void
   (e: 'error', message: string): void
@@ -93,23 +93,28 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const draft = ref(props.account.priority)
+const currentPriority = computed(() => {
+  if (props.groupId) return props.account.group_priority ?? props.account.priority
+  return props.account.priority
+})
+const minPriority = computed(() => props.groupId ? 0 : MIN_PRIORITY)
+const draft = ref(currentPriority.value)
 const saving = ref(false)
 const editing = ref(false)
 const inputValue = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-const dirty = computed(() => draft.value !== props.account.priority)
+const dirty = computed(() => draft.value !== currentPriority.value)
 
 watch(
-  () => props.account.priority,
+  () => [props.groupId, currentPriority.value] as const,
   (next) => {
-    if (!saving.value && !saveTimer && !editing.value) draft.value = next
+    if (!saving.value && !saveTimer && !editing.value) draft.value = next[1]
   }
 )
 
-const clamp = (value: number) => Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.round(value)))
+const clamp = (value: number) => Math.min(MAX_PRIORITY, Math.max(minPriority.value, Math.round(value)))
 
 const clearTimer = () => {
   if (saveTimer) {
@@ -121,13 +126,18 @@ const clearTimer = () => {
 const save = async () => {
   clearTimer()
   const target = draft.value
-  if (target === props.account.priority) return
+  if (target === currentPriority.value) return
   saving.value = true
   try {
-    const updated = await updateAccount(props.account.id, { priority: target })
-    emit('updated', updated)
+    if (props.groupId) {
+      await updateGroupPriority(props.account.id, props.groupId, target)
+      emit('updated', { ...props.account, group_priority: target } as Account)
+    } else {
+      const updated = await updateAccount(props.account.id, { priority: target })
+      emit('updated', updated)
+    }
   } catch (error) {
-    draft.value = props.account.priority
+    draft.value = currentPriority.value
     emit('error', extractApiErrorMessage(error, t('admin.accounts.priorityQuick.failed')))
   } finally {
     saving.value = false
@@ -172,7 +182,7 @@ const commitInput = () => {
 
 const cancelInput = () => {
   editing.value = false
-  if (!saving.value) draft.value = props.account.priority
+  if (!saving.value) draft.value = currentPriority.value
 }
 
 onBeforeUnmount(() => {

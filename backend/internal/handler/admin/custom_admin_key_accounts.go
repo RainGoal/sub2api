@@ -16,7 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func scopedAdminAccountDTO(a *service.Account, p adminaccess.Policy) gin.H {
+func scopedAdminAccountDTO(a *service.Account, p adminaccess.Policy, selectedGroupID ...int64) gin.H {
 	resource := adminaccess.Account{ID: a.ID, Type: a.Type, Platform: a.Platform, GroupIDs: a.GroupIDs}
 	groups := []int64{}
 	for _, g := range a.GroupIDs {
@@ -25,6 +25,15 @@ func scopedAdminAccountDTO(a *service.Account, p adminaccess.Policy) gin.H {
 		}
 	}
 	result := gin.H{"id": a.ID, "name": a.Name, "notes": a.Notes, "platform": a.Platform, "type": a.Type, "status": a.Status, "schedulable": a.Schedulable, "concurrency": a.Concurrency, "priority": a.Priority, "group_ids": groups, "expires_at": a.ExpiresAt, "rate_limit_reset_at": a.RateLimitResetAt, "overload_until": a.OverloadUntil, "temp_unschedulable_until": a.TempUnschedulableUntil}
+	if len(selectedGroupID) > 0 && p.AllowsGroup("accounts.schedule", resource, selectedGroupID[0]) {
+		for _, accountGroup := range a.AccountGroups {
+			if accountGroup.GroupID == selectedGroupID[0] {
+				result["group_priority"] = accountGroup.Priority
+				result["group_priority_group_id"] = selectedGroupID[0]
+				break
+			}
+		}
+	}
 	// 兼容原账户读取结构，仅返回模型映射，凭证及扩展字段继续脱敏。
 	if p.AllowsAccount("accounts.read", resource) {
 		mapping := map[string]string{}
@@ -137,13 +146,33 @@ func (h *AccountHandler) ScopedAdminKeyAccounts(c *gin.Context) {
 		items := make([]gin.H, 0, len(accounts))
 		for i := range accounts {
 			if principal.Policy.AllowsAccount("accounts.read", adminaccess.Account{ID: accounts[i].ID, GroupIDs: accounts[i].GroupIDs, Type: accounts[i].Type, Platform: accounts[i].Platform}) {
-				items = append(items, scopedAdminAccountDTO(&accounts[i], principal.Policy))
+				items = append(items, scopedAdminAccountDTO(&accounts[i], principal.Policy, groupID))
 			}
 		}
 		response.Paginated(c, items, total, page, size)
 		return
 	}
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if path == base+"/:id/groups/:group_id/priority" && c.Request.Method == "PUT" {
+		groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+		if id <= 0 || err != nil || groupID <= 0 {
+			response.BadRequest(c, "账号或分组 ID 无效")
+			return
+		}
+		var fields struct {
+			Priority *int `json:"priority"`
+		}
+		if c.ShouldBindJSON(&fields) != nil || fields.Priority == nil || *fields.Priority < 0 {
+			response.BadRequest(c, "优先级必须是大于等于 0 的整数")
+			return
+		}
+		if err := h.adminService.UpdateAccountGroupPriority(ctx, id, groupID, *fields.Priority); err != nil {
+			scopedAdminAccountError(c, err)
+			return
+		}
+		response.Success(c, gin.H{"account_id": id, "group_id": groupID, "priority": *fields.Priority})
+		return
+	}
 
 	if (path == base+"/:id" || path == base+"/:id/models") && c.Request.Method == "GET" {
 		a, err := h.adminService.GetAccount(ctx, id)

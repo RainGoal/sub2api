@@ -385,6 +385,21 @@
               @error="(message: string) => appStore.showError(message)"
             />
           </template>
+          <template #cell-group_priority="{ row }">
+            <AccountPriorityCell
+              v-if="
+                selectedGroupID !== null &&
+                row.group_priority_group_id === selectedGroupID &&
+                row.group_priority != null
+              "
+              :key="`${row.id}-${selectedGroupID}`"
+              :account="row"
+              :group-id="selectedGroupID"
+              @updated="handleAccountUpdated"
+              @error="(message: string) => appStore.showError(message)"
+            />
+            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+          </template>
           <template #header-scheduler_score="{ column }">
             <div class="flex items-center">
               <span>{{ column.label }}</span>
@@ -1820,6 +1835,11 @@ function getAntigravityTierClass(row: any): string {
   }
 }
 
+const selectedGroupID = computed(() => {
+  const groupID = Number(params.group)
+  return Number.isSafeInteger(groupID) && groupID > 0 ? groupID : null
+})
+
 // All available columns
 const allColumns = computed(() => {
   const c = [
@@ -1839,6 +1859,9 @@ const allColumns = computed(() => {
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
+    ...(selectedGroupID.value !== null
+      ? [{ key: 'group_priority', label: t('admin.accounts.columns.groupPriority'), sortable: false }]
+      : []),
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
@@ -2243,7 +2266,15 @@ const syncPaginationAfterLocalRemoval = () => {
 const patchAccountInList = (updatedAccount: Account) => {
   const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
   if (index === -1) return
-  const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
+  let mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
+  if (selectedGroupID.value !== null && updatedAccount.account_groups) {
+    const selectedGroup = updatedAccount.account_groups.find(group => group.group_id === selectedGroupID.value)
+    mergedAccount = {
+      ...mergedAccount,
+      group_priority: selectedGroup?.priority ?? null,
+      group_priority_group_id: selectedGroup ? selectedGroupID.value : null
+    }
+  }
   if (!accountMatchesCurrentFilters(mergedAccount)) {
     accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
     syncPaginationAfterLocalRemoval()

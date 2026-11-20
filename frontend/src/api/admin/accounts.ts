@@ -244,6 +244,14 @@ export async function update(id: number, updates: UpdateAccountRequest): Promise
   return data
 }
 
+export async function updateGroupPriority(
+  accountId: number,
+  groupId: number,
+  priority: number
+): Promise<void> {
+  await apiClient.put(`/admin/accounts/${accountId}/groups/${groupId}/priority`, { priority })
+}
+
 export async function getGrokMediaEligibility(id: number): Promise<GrokMediaEligibilityState> {
   const { data } = await apiClient.get<GrokMediaEligibilityState>(
     `/admin/accounts/${id}/grok-media-eligibility`

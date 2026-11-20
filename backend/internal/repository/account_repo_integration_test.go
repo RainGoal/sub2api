@@ -752,6 +752,24 @@ func (s *AccountRepoSuite) TestBindGroupsPreservesAndSetsPerGroupPriority() {
 	s.Require().Equal(map[int64]int{g1.ID: 8, g2.ID: 2, g3.ID: 5}, priorities)
 }
 
+func (s *AccountRepoSuite) TestUpdateAccountGroupPriorityOnlyChangesSelectedBinding() {
+	g1 := mustCreateGroup(s.T(), s.client, &service.Group{Name: "quick-priority-g1"})
+	g2 := mustCreateGroup(s.T(), s.client, &service.Group{Name: "quick-priority-g2"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "quick-priority-account", Priority: 7})
+	mustBindAccountToGroup(s.T(), s.client, account.ID, g1.ID, 3)
+	mustBindAccountToGroup(s.T(), s.client, account.ID, g2.ID, 9)
+
+	s.Require().NoError(s.repo.UpdateAccountGroupPriority(s.ctx, account.ID, g1.ID, 0))
+	updated, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(7, updated.Priority)
+	priorities := make(map[int64]int, len(updated.AccountGroups))
+	for _, group := range updated.AccountGroups {
+		priorities[group.GroupID] = group.Priority
+	}
+	s.Require().Equal(map[int64]int{g1.ID: 0, g2.ID: 9}, priorities)
+}
+
 func (s *AccountRepoSuite) TestBindGroups_EmptyList() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-empty"})
 	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "g-empty"})

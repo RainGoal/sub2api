@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountNotFound             = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountGroupBindingNotFound = infraerrors.NotFound("ACCOUNT_GROUP_BINDING_NOT_FOUND", "account is not assigned to this group")
+	ErrAccountNilInput             = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback        = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -131,6 +132,12 @@ type AccountRepository interface {
 // changing the account-wide priority. It is optional for legacy test doubles.
 type AccountGroupPriorityRepository interface {
 	BindGroupsWithPriority(ctx context.Context, accountID int64, groups []AccountGroupPriorityInput) error
+}
+
+// AccountGroupPriorityUpdater updates one existing account-group binding without
+// changing the account-wide priority or any other group binding.
+type AccountGroupPriorityUpdater interface {
+	UpdateAccountGroupPriority(ctx context.Context, accountID, groupID int64, priority int) error
 }
 
 type AccountDuplicateRepository interface {
