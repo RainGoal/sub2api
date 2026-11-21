@@ -1,28 +1,29 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-[1600px] space-y-5 pb-8">
-      <header class="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-primary-400">{{ t('nav.securityAudit') }}</p>
-          <h1 class="mt-1 text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">{{ t('admin.requestAudit.title') }}</h1>
-          <p class="mt-2 max-w-3xl text-sm text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.description') }}</p>
+    <div class="mx-auto max-w-[1600px] space-y-4 pb-8">
+      <header class="flex flex-wrap items-center justify-between gap-3 lg:justify-end">
+        <div class="min-w-0 lg:hidden">
+          <h1 class="page-title text-xl font-semibold">{{ t('admin.requestAudit.title') }}</h1>
+          <p class="page-description mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.description') }}</p>
         </div>
         <button class="btn btn-secondary" :disabled="loading.list || loading.status || loading.config || loading.bans || loading.save" @click="refresh">{{ t('admin.requestAudit.refresh') }}</button>
       </header>
 
-      <div role="note" class="border-l-2 border-amber-500 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+      <div role="note" class="request-audit-notice rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
         {{ t('admin.requestAudit.sensitiveNotice') }}
       </div>
 
-      <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.capture') }}</span><p class="mt-1 font-semibold" :class="config?.enabled ? 'text-emerald-500' : 'text-gray-500'">{{ config ? t(`admin.requestAudit.${config.enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</p></div>
-        <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.retention') }}</span><p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ config ? formatRetention(retentionMinutes(config)) : '—' }}</p></div>
-        <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.banEnforcement') }}</span><p class="mt-1 font-semibold" :class="config?.session_ban_enabled ? 'text-amber-500' : 'text-gray-500'">{{ config ? t(`admin.requestAudit.${config.session_ban_enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</p></div>
-        <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.deviceBanEnforcement') }}</span><p class="mt-1 font-semibold" :class="config?.device_ban_enabled ? 'text-amber-500' : 'text-gray-500'">{{ config ? t(`admin.requestAudit.${config.device_ban_enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</p></div>
-      </div>
-      <div class="card flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm" data-test="health-summary">
-        <div class="min-w-0"><p class="font-medium" :class="healthState === 'healthy' ? 'text-emerald-500' : 'text-amber-500'">{{ t(`admin.requestAudit.health.${healthState}`) }}</p><p class="mt-1 break-all text-xs text-gray-500">{{ errors.status || t('admin.requestAudit.instanceHint') }}</p></div>
-        <p v-if="status" class="font-mono text-xs text-gray-500">{{ t('admin.requestAudit.lossCounts', { requests: status.dropped_requests, events: status.dropped_events, writes: status.write_failures }) }}</p>
+      <div class="card overflow-hidden">
+        <dl class="request-audit-summary grid grid-cols-2 xl:grid-cols-4">
+          <div class="min-w-0 px-4 py-3"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.capture') }}</dt><dd class="mt-1 font-semibold" :class="config?.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-dark-300'">{{ config ? t(`admin.requestAudit.${config.enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</dd></div>
+          <div class="min-w-0 px-4 py-3"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.retention') }}</dt><dd class="mt-1 font-semibold tabular-nums">{{ config ? formatRetention(retentionMinutes(config)) : '—' }}</dd></div>
+          <div class="min-w-0 px-4 py-3"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.banEnforcement') }}</dt><dd class="mt-1 font-semibold" :class="config?.session_ban_enabled ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-dark-300'">{{ config ? t(`admin.requestAudit.${config.session_ban_enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</dd></div>
+          <div class="min-w-0 px-4 py-3"><dt class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.deviceBanEnforcement') }}</dt><dd class="mt-1 font-semibold" :class="config?.device_ban_enabled ? 'text-amber-700 dark:text-amber-400' : 'text-gray-500 dark:text-dark-300'">{{ config ? t(`admin.requestAudit.${config.device_ban_enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</dd></div>
+        </dl>
+        <div class="request-audit-divider flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm" data-test="health-summary">
+          <div class="min-w-0"><p class="font-medium" :class="healthState === 'healthy' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'">{{ t(`admin.requestAudit.health.${healthState}`) }}</p><p class="mt-1 break-words text-xs text-gray-500 dark:text-dark-300">{{ errors.status || t('admin.requestAudit.instanceHint') }}</p></div>
+          <p v-if="status" class="text-xs tabular-nums text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.lossCounts', { requests: status.dropped_requests, events: status.dropped_events, writes: status.write_failures }) }}</p>
+        </div>
       </div>
       <p v-if="errors.config && activeTab !== 'settings'" role="alert" class="text-sm text-red-500">{{ errors.config }}</p>
       <div class="tabs inline-flex max-w-full overflow-x-auto" role="tablist" :aria-label="t('admin.requestAudit.title')">
@@ -30,8 +31,8 @@
       </div>
 
       <section v-if="activeTab === 'requests'" class="card overflow-hidden">
-        <form class="request-audit-filters space-y-5 border-b border-gray-200 p-5 dark:border-dark-700" @submit.prevent="search">
-          <div class="grid grid-cols-1 items-start gap-x-5 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
+        <form class="request-audit-filters request-audit-search request-audit-divider space-y-3 border-b p-4" @submit.prevent="search">
+          <div class="grid grid-cols-1 items-start gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
             <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.from') }}</span><input v-model="filters.from" type="datetime-local" class="input h-11 min-w-0" /></label>
             <label class="request-audit-filter-field"><span>{{ t('admin.requestAudit.to') }}</span><input v-model="filters.to" type="datetime-local" class="input h-11 min-w-0" /></label>
             <RequestAuditUserFilter :key="`user-${filterRevision}`" v-model="filters.user" v-model:label="filters.userLabel" />
@@ -45,7 +46,7 @@
             <div class="request-audit-filter-field"><label for="request-audit-kind">{{ t('admin.requestAudit.kind') }}</label><Select id="request-audit-kind" v-model="filters.kind" :options="kindOptions" :searchable="false" :aria-label="t('admin.requestAudit.kind')" /></div>
             <div class="request-audit-filter-field"><label for="request-audit-state">{{ t('admin.requestAudit.integrity') }}</label><Select id="request-audit-state" v-model="filters.state" :options="stateOptions" :searchable="false" :aria-label="t('admin.requestAudit.integrity')" /></div>
           </div>
-          <div class="flex flex-col gap-4 border-t border-gray-200 pt-4 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+          <div class="request-audit-divider flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
             <p id="request-audit-request-id-hint" class="text-xs leading-5 text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.requestIdHint') }}</p>
             <div class="flex shrink-0 gap-3"><button type="submit" class="btn btn-primary h-11 flex-1 sm:flex-none" :disabled="loading.list">{{ t('admin.requestAudit.search') }}</button><button type="button" data-test="reset-filters" class="btn btn-secondary h-11 flex-1 sm:flex-none" :disabled="loading.list" @click="resetFilters">{{ t('common.reset') }}</button></div>
           </div>
@@ -54,33 +55,33 @@
         <p v-if="loading.list" role="status" class="p-10 text-center text-sm text-gray-500">{{ t('common.loading') }}</p>
         <p v-else-if="!records.items.length && !errors.list" class="p-12 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.empty') }}</p>
         <div v-else-if="records.items.length" class="overflow-x-auto">
-          <table class="w-full whitespace-nowrap text-left text-sm">
+          <table class="request-audit-table w-full whitespace-nowrap text-left text-sm">
             <thead class="border-b border-gray-200 bg-gray-50 text-xs text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300">
-              <tr><th v-for="column in ['time', 'user', 'apiKey', 'group', 'request', 'result', 'integrity', 'dataSize', 'actions']" :key="column" class="px-4 py-3 font-medium" :class="{ 'sticky right-0 bg-gray-50 dark:bg-dark-800': column === 'actions' }">{{ t(`admin.requestAudit.${column}`) }}</th></tr>
+              <tr><th v-for="column in ['time', 'user', 'apiKey', 'group', 'request', 'result', 'integrity', 'dataSize', 'actions']" :key="column" scope="col" class="px-4 py-2.5 font-medium" :class="{ 'request-audit-action-cell sticky right-0 bg-gray-50 dark:bg-dark-800': column === 'actions' }">{{ t(`admin.requestAudit.${column}`) }}</th></tr>
             </thead>
-            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+            <tbody class="request-audit-rows divide-y divide-gray-100 dark:divide-dark-700">
               <tr v-for="item in records.items" :key="item.id" class="align-top hover:bg-gray-50 dark:hover:bg-dark-800/60" :data-test="`record-${item.id}`">
-                <td class="px-4 py-4 font-mono text-xs tabular-nums text-gray-600 dark:text-dark-200"><time :datetime="item.received_at">{{ new Date(item.received_at).toLocaleDateString(locale) }}<span class="mt-1 block text-gray-500 dark:text-dark-300">{{ new Date(item.received_at).toLocaleTimeString(locale) }}</span></time></td>
-                <td class="px-4 py-4">
+                <td class="px-4 py-3 text-xs tabular-nums text-gray-600 dark:text-dark-200"><time :datetime="item.received_at">{{ new Date(item.received_at).toLocaleDateString(locale) }}<span class="mt-1 block text-gray-500 dark:text-dark-300">{{ new Date(item.received_at).toLocaleTimeString(locale) }}</span></time></td>
+                <td class="px-4 py-3">
                   <p class="max-w-48 truncate font-medium text-gray-900 dark:text-white" :title="userName(item)">{{ userName(item) }}</p>
                   <p v-if="item.user_username && item.user_email" class="mt-1 max-w-48 truncate text-xs text-gray-500 dark:text-dark-300" :title="item.user_email">{{ item.user_email }}</p>
                 </td>
-                <td class="px-4 py-4"><p class="max-w-44 truncate text-gray-700 dark:text-dark-100" :title="keyName(item)">{{ keyName(item) }}</p></td>
+                <td class="px-4 py-3"><p class="max-w-44 truncate text-gray-700 dark:text-dark-100" :title="keyName(item)">{{ keyName(item) }}</p></td>
                 <td class="px-4 py-3"><RequestAuditPlatform :platform="item.group_platform" :group-name="groupName(item)" /></td>
-                <td class="px-4 py-4">
-                  <p class="max-w-64 truncate font-mono text-xs text-gray-800 dark:text-dark-100" :title="`${item.method || ''} ${item.route_pattern || item.kind}`"><span class="text-primary-600 dark:text-primary-400">{{ item.method }}</span> {{ item.route_pattern || kindLabel(item.kind) }}</p>
+                <td class="px-4 py-3">
+                  <p class="max-w-64 truncate font-mono text-xs text-gray-800 dark:text-dark-100" :title="`${item.method || ''} ${item.route_pattern || item.kind}`"><span class="font-semibold">{{ item.method }}</span> {{ item.route_pattern || kindLabel(item.kind) }}</p>
                   <p class="mt-1 max-w-56 truncate text-xs text-gray-500 dark:text-dark-300" :title="item.model || ''">{{ item.model || '—' }}</p>
                   <p class="mt-1 max-w-56 truncate font-mono text-[11px] text-gray-400 dark:text-dark-400" :title="item.session_id || ''">{{ item.session_id || t('admin.requestAudit.noSession') }}</p>
                 </td>
-                <td class="px-4 py-4"><span class="font-mono text-xs font-semibold" :class="(item.http_status || 0) >= 400 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-dark-100'">{{ item.http_status || item.outcome || '—' }}</span><p class="mt-1 font-mono text-xs text-gray-500 dark:text-dark-300">{{ item.duration_ms ?? '—' }} ms</p></td>
-                <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs" :class="item.capture_state === 'complete' ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400' : 'border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400'"><span class="h-1 w-1 rounded-full bg-current" aria-hidden="true" />{{ stateLabel(item.capture_state) }}</span></td>
-                <td class="px-4 py-4 font-mono text-xs tabular-nums text-gray-600 dark:text-dark-200">{{ formatBytes(item.stored_body_bytes || 0) }}<p class="mt-1 text-gray-400 dark:text-dark-400">/ {{ formatBytes(item.observed_body_bytes || 0) }}</p></td>
-                <td class="sticky right-0 bg-white px-4 py-3 dark:bg-dark-900"><button class="btn btn-secondary btn-sm" :data-test="`detail-${item.id}`" @click="openDetail(item.id)">{{ t('admin.requestAudit.details') }}</button></td>
+                <td class="px-4 py-3 text-xs tabular-nums"><span class="font-semibold" :class="(item.http_status || 0) >= 400 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-dark-100'">{{ item.http_status || item.outcome || '—' }}</span><p class="mt-1 text-gray-500 dark:text-dark-300">{{ item.duration_ms ?? '—' }} ms</p></td>
+                <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs" :class="item.capture_state === 'complete' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'"><span class="h-1 w-1 rounded-full bg-current" aria-hidden="true" />{{ stateLabel(item.capture_state) }}</span></td>
+                <td class="px-4 py-3 text-xs tabular-nums text-gray-600 dark:text-dark-200">{{ formatBytes(item.stored_body_bytes || 0) }}<p class="mt-1 text-gray-500 dark:text-dark-300">/ {{ formatBytes(item.observed_body_bytes || 0) }}</p></td>
+                <td class="request-audit-action-cell sticky right-0 bg-white px-4 py-3 dark:bg-dark-900"><button class="btn btn-secondary btn-sm" :data-test="`detail-${item.id}`" @click="openDetail(item.id)">{{ t('admin.requestAudit.details') }}</button></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="flex justify-end gap-2 border-t border-gray-200 p-3 dark:border-dark-700"><button class="btn btn-secondary btn-sm" :disabled="!cursorHistory.length || loading.list" @click="previousPage">{{ t('admin.requestAudit.previous') }}</button><button class="btn btn-secondary btn-sm" :disabled="!records.has_more || loading.list" @click="nextPage">{{ t('admin.requestAudit.next') }}</button></div>
+        <div class="request-audit-divider flex justify-end gap-2 border-t p-3"><button class="btn btn-secondary btn-sm" :disabled="!cursorHistory.length || loading.list" @click="previousPage">{{ t('admin.requestAudit.previous') }}</button><button class="btn btn-secondary btn-sm" :disabled="!records.has_more || loading.list" @click="nextPage">{{ t('admin.requestAudit.next') }}</button></div>
       </section>
 
       <section v-else-if="activeTab === 'bans' || activeTab === 'deviceBans'" class="card overflow-hidden">
@@ -153,10 +154,12 @@
       <p v-if="loading.detail && !detail" class="py-8 text-center text-gray-500">{{ t('common.loading') }}</p>
       <div v-if="detail" class="space-y-4">
         <RequestAuditMetadata :record="detail" />
-        <div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary btn-sm" :disabled="!detail.api_key_id || !detail.session_id" @click="showSessionRequests">{{ t('admin.requestAudit.sameSession') }}</button><button class="btn btn-danger btn-sm" data-test="open-ban" :disabled="!detail.api_key_id || !detail.session_id || loading.detail || !!detailBans.length" @click="openBan('session')">{{ t('admin.requestAudit.ban') }}</button><span v-if="!detail.api_key_id || !detail.session_id" class="text-xs text-gray-500">{{ t('admin.requestAudit.banUnavailable') }}</span></div>
-        <div v-if="detailBans.length" class="rounded border border-amber-500/30 p-3 text-sm text-amber-500">{{ t('admin.requestAudit.alreadyBanned') }}: {{ detailBans[0]?.public_reason }}</div>
-        <div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary btn-sm" data-test="same-device" :disabled="!hasDevice(detail)" @click="showDeviceRequests">{{ t('admin.requestAudit.sameDevice') }}</button><button class="btn btn-danger btn-sm" data-test="open-device-ban" :disabled="!hasDevice(detail) || loading.detail || !!detailDeviceBans.length" @click="openBan('device')">{{ t('admin.requestAudit.banDevice') }}</button><span v-if="!hasDevice(detail)" class="text-xs text-gray-500">{{ t('admin.requestAudit.deviceBanUnavailable') }}</span></div>
-        <div v-if="detailDeviceBans.length" class="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-500/30 p-3 text-sm text-amber-500"><span>{{ t('admin.requestAudit.deviceAlreadyBanned') }}: {{ detailDeviceBans[0]?.public_reason }}</span><button class="btn btn-secondary btn-sm" data-test="revoke-detail-device-ban" :disabled="loading.revoke" @click="revokeTarget = detailDeviceBans[0] || null">{{ t('admin.requestAudit.revoke') }}</button></div>
+        <div class="request-audit-divider space-y-2 border-y py-3">
+          <div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary btn-sm" :disabled="!detail.api_key_id || !detail.session_id" @click="showSessionRequests">{{ t('admin.requestAudit.sameSession') }}</button><button class="btn btn-danger btn-sm" data-test="open-ban" :disabled="!detail.api_key_id || !detail.session_id || loading.detail || !!detailBans.length" @click="openBan('session')">{{ t('admin.requestAudit.ban') }}</button><span v-if="!detail.api_key_id || !detail.session_id" class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.banUnavailable') }}</span></div>
+          <div v-if="detailBans.length" class="rounded border border-amber-500/30 p-3 text-sm text-amber-700 dark:text-amber-400">{{ t('admin.requestAudit.alreadyBanned') }}: {{ detailBans[0]?.public_reason }}</div>
+          <div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary btn-sm" data-test="same-device" :disabled="!hasDevice(detail)" @click="showDeviceRequests">{{ t('admin.requestAudit.sameDevice') }}</button><button class="btn btn-danger btn-sm" data-test="open-device-ban" :disabled="!hasDevice(detail) || loading.detail || !!detailDeviceBans.length" @click="openBan('device')">{{ t('admin.requestAudit.banDevice') }}</button><span v-if="!hasDevice(detail)" class="text-xs text-gray-500 dark:text-dark-300">{{ t('admin.requestAudit.deviceBanUnavailable') }}</span></div>
+          <div v-if="detailDeviceBans.length" class="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-500/30 p-3 text-sm text-amber-700 dark:text-amber-400"><span>{{ t('admin.requestAudit.deviceAlreadyBanned') }}: {{ detailDeviceBans[0]?.public_reason }}</span><button class="btn btn-secondary btn-sm" data-test="revoke-detail-device-ban" :disabled="loading.revoke" @click="revokeTarget = detailDeviceBans[0] || null">{{ t('admin.requestAudit.revoke') }}</button></div>
+        </div>
         <RequestAuditPayloads :key="detail.id" :record="detail" />
         <RequestAuditAttempts :key="detail.id" :record-id="detail.id" />
       </div>
@@ -453,10 +456,48 @@ onUnmounted(() => { detailGeneration++; recordsGeneration++; bansGeneration++ })
 </script>
 
 <style scoped>
+.request-audit-divider {
+  @apply border-gray-200 dark:border-dark-700;
+}
+.request-audit-summary {
+  @apply gap-px bg-gray-200 dark:bg-dark-700;
+}
+.request-audit-summary > div {
+  @apply bg-white dark:bg-dark-900;
+}
 .request-audit-filter-field {
-  @apply flex min-w-0 flex-col gap-2 text-xs font-medium leading-5 text-gray-500 dark:text-dark-300;
+  @apply flex min-w-0 flex-col gap-1.5 text-xs font-medium leading-5 text-gray-500 dark:text-dark-300;
 }
 .request-audit-filters :deep(.select-trigger) {
   height: 2.75rem;
+}
+.request-audit-search :is(input, button) {
+  height: 2.5rem;
+}
+.request-audit-search :deep(.select-trigger) {
+  height: 2.5rem;
+}
+
+:global(html[data-admin-brand='wsapi'] .request-audit-divider),
+:global(html[data-admin-brand='wsapi'] .request-audit-table thead),
+:global(html[data-admin-brand='wsapi'] .request-audit-table .request-audit-rows > tr + tr) {
+  border-color: var(--ws-line-soft);
+}
+:global(html[data-admin-brand='wsapi'] .request-audit-summary) {
+  background: var(--ws-line-soft);
+}
+:global(html[data-admin-brand='wsapi'] .request-audit-summary > div),
+:global(html[data-admin-brand='wsapi'] .request-audit-table thead),
+:global(html[data-admin-brand='wsapi'] .request-audit-action-cell) {
+  background: var(--ws-panel);
+}
+:global(html[data-admin-brand='wsapi'] .request-audit-table tr:hover > td) {
+  background: var(--ws-hover);
+}
+:global(html[data-admin-brand='wsapi'] .request-audit-notice) {
+  border-color: color-mix(in srgb, var(--ws-warning) 25%, transparent);
+  border-radius: var(--ws-radius-control);
+  background: color-mix(in srgb, var(--ws-warning) 8%, var(--ws-panel));
+  color: var(--ws-warning);
 }
 </style>

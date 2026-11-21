@@ -2,7 +2,7 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
+        <div class="flex flex-wrap items-start justify-between gap-x-5 gap-y-2">
           <AccountTableFilters
             v-model:searchQuery="params.search"
             :filters="params"
@@ -12,6 +12,7 @@
             @update:searchQuery="debouncedReload"
           />
           <AccountTableActions
+            class="ml-auto w-full justify-end sm:w-auto"
             :loading="loading"
             @refresh="handleManualRefresh"
             @create="showCreate = true"
@@ -24,11 +25,13 @@
                     showAutoRefreshDropdown = !showAutoRefreshDropdown;
                     showAccountToolsDropdown = false
                   "
-                  class="btn btn-secondary px-2 md:px-3"
+                  type="button"
+                  class="btn btn-secondary tabular-nums"
+                  :aria-expanded="showAutoRefreshDropdown"
                   :title="t('admin.accounts.autoRefresh')"
                 >
-                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '']" />
-                  <span class="hidden md:inline">
+                  <Icon name="clock" size="sm" />
+                  <span class="sr-only md:not-sr-only">
                     {{
                       autoRefreshEnabled
                         ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
@@ -38,7 +41,7 @@
                 </button>
                 <div
                   v-if="showAutoRefreshDropdown"
-                  class="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
+                  class="account-tools-popover absolute right-0 z-50 mt-2 w-56"
                 >
                   <div class="p-2">
                     <button
@@ -67,41 +70,41 @@
                 <button
                   ref="accountToolsTriggerRef"
                   @click="toggleAccountToolsDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
+                  type="button"
+                  class="btn btn-secondary"
                   :title="t('admin.accounts.moreActions')"
                   :aria-expanded="showAccountToolsDropdown"
                 >
-                  <Icon name="more" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.accounts.moreActions') }}</span>
-                  <Icon name="chevronDown" size="xs" class="ml-1 hidden md:inline" />
+                  <Icon name="more" size="sm" />
+                  <span class="sr-only md:not-sr-only">{{ t('admin.accounts.moreActions') }}</span>
                 </button>
                 <Teleport to="body">
                   <div
                     v-if="showAccountToolsDropdown"
-                    class="fixed z-[9999] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
+                    class="account-tools-popover fixed z-[9999] overflow-hidden"
                     :style="accountToolsDropdownStyle"
                     @click.stop
                   >
                     <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
                       <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                        <div class="account-tools-label">
                           {{ t('admin.accounts.dataActions') }}
                         </div>
                       </div>
                       <button class="account-tools-menu-item" @click="openSyncFromCrs">
-                        <span class="account-tools-menu-icon bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+                        <span class="account-tools-menu-icon">
                           <Icon name="sync" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.accounts.syncFromCrs') }}</span>
                       </button>
                       <button class="account-tools-menu-item" @click="openImportData">
-                        <span class="account-tools-menu-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300">
+                        <span class="account-tools-menu-icon">
                           <Icon name="upload" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
                       </button>
                       <button class="account-tools-menu-item" @click="openExportDataDialogFromMenu">
-                        <span class="account-tools-menu-icon bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300">
+                        <span class="account-tools-menu-icon">
                           <Icon name="download" size="sm" />
                         </span>
                         <span class="flex-1 text-left">
@@ -117,18 +120,18 @@
 
                       <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
                       <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                        <div class="account-tools-label">
                           {{ t('admin.accounts.toolActions') }}
                         </div>
                       </div>
                       <button class="account-tools-menu-item" @click="openErrorPassthrough">
-                        <span class="account-tools-menu-icon bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300">
+                        <span class="account-tools-menu-icon">
                           <Icon name="shield" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
                       </button>
                       <button class="account-tools-menu-item" @click="openTLSFingerprintProfiles">
-                        <span class="account-tools-menu-icon bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+                        <span class="account-tools-menu-icon">
                           <Icon name="lock" size="sm" />
                         </span>
                         <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
@@ -137,7 +140,7 @@
                       <div class="my-2 border-t border-gray-100 dark:border-dark-700"></div>
                       <div class="px-2 py-2">
                         <div class="flex items-center justify-between gap-3">
-                          <span class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                          <span class="account-tools-label">
                             {{ t('admin.accounts.viewColumns') }}
                           </span>
                           <Icon name="grid" size="sm" class="text-gray-400" />
@@ -163,11 +166,11 @@
         </div>
         <div
           v-if="hasPendingListSync"
-          class="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
+          class="account-sync-notice mt-2 flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
         >
           <span>{{ t('admin.accounts.listPendingSyncHint') }}</span>
           <button
-            class="btn btn-secondary px-2 py-1 text-xs"
+            class="btn btn-secondary btn-sm"
             @click="syncPendingListChanges"
           >
             {{ t('admin.accounts.listPendingSyncAction') }}
@@ -220,10 +223,10 @@
             <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
           </template>
           <template #cell-id="{ value }">
-            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
+            <span class="account-cell-secondary font-mono">#{{ value }}</span>
           </template>
           <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
+            <div class="flex min-w-0 flex-col gap-0.5">
               <HelpTooltip
                 v-if="accountHomepageUrl(row)"
                 :content="accountHomepageUrl(row)"
@@ -241,10 +244,10 @@
                   </a>
                 </template>
               </HelpTooltip>
-              <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span v-else class="account-name">{{ value }}</span>
               <span
                 v-if="accountDisplayEmail(row)"
-                class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
+                class="account-cell-secondary max-w-[200px] truncate"
                 :title="accountDisplayEmail(row) + (row.parent_chatgpt_account_id ? ' · ' + row.parent_chatgpt_account_id : '')"
               >
                 {{ accountDisplayEmail(row) }}
@@ -348,7 +351,7 @@
             </div>
           </template>
           <template #cell-rate_multiplier="{ row }">
-            <span class="inline-flex items-center gap-1 text-sm font-mono text-gray-700 dark:text-gray-300">
+            <span class="inline-flex items-center gap-1 text-sm tabular-nums text-gray-700 dark:text-gray-300">
               <span>{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
               <span
                 v-if="row.extra?.upstream_billing_rate_sync_enabled === true"
@@ -424,14 +427,14 @@
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-last_used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatRelativeTime(value) }}</span>
+            <span class="account-cell-secondary tabular-nums">{{ formatRelativeTime(value) }}</span>
           </template>
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
+            <span class="account-cell-secondary tabular-nums">{{ formatDateTime(value) }}</span>
           </template>
           <template #cell-expires_at="{ row, value }">
             <div class="flex flex-col items-start gap-1">
-              <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatExpiresAt(value) }}</span>
+              <span class="account-cell-secondary tabular-nums">{{ formatExpiresAt(value) }}</span>
               <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
                 <span
                   v-if="isExpired(value)"
@@ -449,18 +452,29 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
-                <span class="text-xs">{{ t('common.edit') }}</span>
+            <div class="flex items-center justify-end gap-1 whitespace-nowrap">
+              <button type="button" class="btn btn-ghost btn-sm" @click="handleEdit(row)">
+                <Icon name="edit" size="sm" />
+                {{ t('common.edit') }}
               </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                <span class="text-xs">{{ t('common.delete') }}</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm account-row-icon account-row-delete"
+                :aria-label="t('common.delete')"
+                :title="t('common.delete')"
+                @click="handleDelete(row)"
+              >
+                <Icon name="trash" size="sm" />
               </button>
-              <button @click="openMenu(row, $event)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
-                <span class="text-xs">{{ t('common.more') }}</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm account-row-icon"
+                :aria-expanded="menu.show && menu.acc?.id === row.id"
+                :title="t('common.more')"
+                @click="openMenu(row, $event)"
+              >
+                <Icon name="more" size="sm" />
+                <span class="sr-only">{{ t('common.more') }}</span>
               </button>
             </div>
           </template>
@@ -2656,11 +2670,61 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.account-tools-popover {
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-card);
+  background: var(--ws-panel);
+  box-shadow: var(--ws-shadow-float);
+}
+
+.account-tools-label,
+.account-cell-secondary {
+  color: var(--ws-muted);
+  font-size: 12px;
+}
+
 .account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700;
+  @apply flex w-full items-center gap-2 px-2 py-1.5 text-sm transition-colors;
+  border-radius: var(--ws-radius-control);
+  color: var(--ws-text-soft);
+}
+
+.account-tools-menu-item:hover {
+  background: var(--ws-hover);
+  color: var(--ws-text);
 }
 
 .account-tools-menu-icon {
-  @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
+  @apply inline-flex h-6 w-6 shrink-0 items-center justify-center;
+  color: var(--ws-muted);
+}
+
+.account-sync-notice {
+  border: 1px solid color-mix(in srgb, var(--ws-warning) 30%, var(--ws-line));
+  border-radius: var(--ws-radius-control);
+  background: color-mix(in srgb, var(--ws-warning) 8%, var(--ws-panel));
+  color: var(--ws-warning);
+}
+
+.account-name {
+  color: var(--ws-text-strong);
+  font-weight: 500;
+}
+
+.account-row-icon.btn {
+  min-width: 30px;
+  padding-inline: 6px;
+}
+
+.account-row-delete.btn.btn-ghost:hover:not(:disabled) {
+  background: var(--ws-danger-soft);
+  color: var(--ws-danger);
+}
+
+@media (max-width: 1023px) {
+  .account-row-icon.btn {
+    min-width: 40px;
+    min-height: 40px;
+  }
 }
 </style>

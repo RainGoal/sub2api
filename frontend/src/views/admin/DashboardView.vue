@@ -7,8 +7,37 @@
       </div>
 
       <template v-else-if="stats">
-        <!-- Row 1: Core Stats -->
-        <div class="dashboard-metrics grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div class="dashboard-toolbar flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="dashboard-filter-label text-xs font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.dashboard.timeRange') }}
+            </span>
+            <DateRangePicker
+              v-model:start-date="startDate"
+              v-model:end-date="endDate"
+              @change="onDateRangeChange"
+            />
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="dashboard-filter-label text-xs font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.dashboard.granularity') }}
+            </span>
+            <div class="w-28">
+              <Select
+                v-model="granularity"
+                :options="granularityOptions"
+                :aria-label="t('admin.dashboard.granularity')"
+                @change="loadChartData"
+              />
+            </div>
+            <button type="button" @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary">
+              <Icon name="refresh" size="sm" aria-hidden="true" />
+              {{ t('common.refresh') }}
+            </button>
+          </div>
+        </div>
+
+        <div class="dashboard-metrics dashboard-overview grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- Total API Keys -->
           <div class="card p-4">
             <div class="flex items-center gap-3">
@@ -93,10 +122,6 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Row 2: Token Stats -->
-        <div class="dashboard-metrics grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- Today Tokens -->
           <div class="card p-4">
             <div class="flex items-center gap-3">
@@ -180,7 +205,7 @@
                   {{ t('admin.dashboard.performance') }}
                 </p>
                 <div class="flex items-baseline gap-2">
-                  <p class="dashboard-metric-value dashboard-metric-info text-xl font-bold text-gray-900 dark:text-white">
+                  <p class="dashboard-metric-value text-xl font-bold text-gray-900 dark:text-white">
                     {{ formatTokens(stats.rpm) }}
                   </p>
                   <span class="text-xs text-gray-500 dark:text-gray-400">RPM</span>
@@ -205,7 +230,7 @@
                 <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
                   {{ t('admin.dashboard.avgResponse') }}
                 </p>
-                <p class="dashboard-metric-value dashboard-metric-info text-xl font-bold text-gray-900 dark:text-white">
+                <p class="dashboard-metric-value text-xl font-bold text-gray-900 dark:text-white">
                   {{ formatDuration(stats.average_duration_ms) }}
                 </p>
                 <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -216,8 +241,54 @@
           </div>
         </div>
 
+        <div class="space-y-4">
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <ModelDistributionChart
+              class="dashboard-distribution"
+              :model-stats="modelStats"
+              :enable-ranking-view="true"
+              :ranking-items="rankingItems"
+              :ranking-total-actual-cost="rankingTotalActualCost"
+              :ranking-total-requests="rankingTotalRequests"
+              :ranking-total-tokens="rankingTotalTokens"
+              :loading="chartsLoading"
+              :ranking-loading="rankingLoading"
+              :ranking-error="rankingError"
+              :start-date="startDate"
+              :end-date="endDate"
+              @ranking-click="goToUserUsage"
+            />
+            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          </div>
+
+          <div class="admin-chart-panel card p-4">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.recentUsage') }} (Top 12)</h3>
+              <div class="dashboard-chart-toggle flex gap-1" role="group" :aria-label="t('admin.dashboard.recentUsage')">
+                <button v-for="metric in (['tokens', 'actual_cost'] as const)" :key="metric" type="button"
+                  class="dashboard-metric-toggle rounded px-2 py-1 text-xs" :class="userTrendMetric === metric ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300'"
+                  :aria-pressed="userTrendMetric === metric" @click="setUserTrendMetric(metric)">
+                  {{ t(metric === 'tokens' ? 'admin.dashboard.tokens' : 'admin.dashboard.actualSpending') }}
+                </button>
+              </div>
+            </div>
+            <div class="h-64">
+              <div v-if="userTrendLoading" class="flex h-full items-center justify-center">
+                <LoadingSpinner size="md" />
+              </div>
+              <Line v-else-if="userTrendChartData" :data="userTrendChartData" :options="lineOptions" />
+              <div
+                v-else
+                class="flex h-full items-center justify-center text-sm text-gray-500 dark:text-gray-400"
+              >
+                {{ t('admin.dashboard.noDataAvailable') }}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Quick Actions -->
-        <div class="card p-4">
+        <div>
           <div class="mb-3 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
               {{ t('admin.dashboard.quickActions') }}
@@ -264,84 +335,6 @@
           </div>
         </div>
 
-        <!-- Charts Section -->
-        <div class="space-y-6">
-          <!-- Date Range Filter -->
-          <div class="card p-4">
-            <div class="flex flex-wrap items-center gap-4">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ t('admin.dashboard.timeRange') }}:</span
-                >
-                <DateRangePicker
-                  v-model:start-date="startDate"
-                  v-model:end-date="endDate"
-                  @change="onDateRangeChange"
-                />
-              </div>
-              <button @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary">
-                {{ t('common.refresh') }}
-              </button>
-              <div class="ml-auto flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ t('admin.dashboard.granularity') }}:</span
-                >
-                <div class="w-28">
-                  <Select
-                    v-model="granularity"
-                    :options="granularityOptions"
-                    @change="loadChartData"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Charts Grid -->
-          <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <ModelDistributionChart
-              :model-stats="modelStats"
-              :enable-ranking-view="true"
-              :ranking-items="rankingItems"
-              :ranking-total-actual-cost="rankingTotalActualCost"
-              :ranking-total-requests="rankingTotalRequests"
-              :ranking-total-tokens="rankingTotalTokens"
-              :loading="chartsLoading"
-              :ranking-loading="rankingLoading"
-              :ranking-error="rankingError"
-              :start-date="startDate"
-              :end-date="endDate"
-              @ranking-click="goToUserUsage"
-            />
-            <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
-          </div>
-
-          <!-- User Usage Trend (Full Width) -->
-          <div class="card p-4">
-            <div class="mb-4 flex items-center justify-between gap-3">
-              <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.recentUsage') }} (Top 12)</h3>
-              <div class="flex gap-1" role="group" :aria-label="t('admin.dashboard.recentUsage')">
-                <button v-for="metric in (['tokens', 'actual_cost'] as const)" :key="metric" type="button"
-                  class="dashboard-metric-toggle rounded px-2 py-1 text-xs" :class="userTrendMetric === metric ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300'"
-                  :aria-pressed="userTrendMetric === metric" @click="setUserTrendMetric(metric)">
-                  {{ t(metric === 'tokens' ? 'admin.dashboard.tokens' : 'admin.dashboard.actualSpending') }}
-                </button>
-              </div>
-            </div>
-            <div class="h-64">
-              <div v-if="userTrendLoading" class="flex h-full items-center justify-center">
-                <LoadingSpinner size="md" />
-              </div>
-              <Line v-else-if="userTrendChartData" :data="userTrendChartData" :options="lineOptions" />
-              <div
-                v-else
-                class="flex h-full items-center justify-center text-sm text-gray-500 dark:text-gray-400"
-              >
-                {{ t('admin.dashboard.noDataAvailable') }}
-              </div>
-            </div>
-          </div>
-        </div>
       </template>
     </div>
   </AppLayout>
@@ -776,4 +769,69 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.dashboard-toolbar {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.dashboard-filter-label {
+  color: var(--ws-muted);
+}
+
+.dashboard-overview > .card > .flex > :last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-overview.dashboard-metrics :is(.dashboard-metric-value, .dashboard-metric-secondary) {
+  font-family: var(--ws-font-sans);
+}
+
+.dashboard-chart-toggle {
+  padding: 2px;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-radius-control);
+}
+
+.dashboard-distribution {
+  container: dashboard-distribution / inline-size;
+}
+
+.dashboard-distribution :deep(.distribution-content :is(th, td):not(:first-child)) {
+  padding-inline-start: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+@container dashboard-distribution (max-width: 620px) {
+  .dashboard-distribution :deep(.distribution-content) {
+    flex-direction: column;
+  }
+
+  .dashboard-distribution :deep(.distribution-content > :first-child) {
+    width: 144px;
+    height: 144px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :global(html[data-admin-brand='wsapi'] .dashboard-overview.dashboard-metrics > .card:nth-child(n + 5)) {
+    border-top: 1px solid var(--ws-line);
+  }
+
+  :global(html[data-admin-brand='wsapi'] .dashboard-overview.dashboard-metrics > .card:nth-child(5)) {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 1023px) {
+  :global(html[data-admin-brand='wsapi'] .dashboard-overview > .card:nth-child(odd):not(:first-child)) {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .dashboard-overview .dashboard-metric-icon {
+    display: none;
+  }
+}
 </style>

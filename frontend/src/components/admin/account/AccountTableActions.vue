@@ -1,12 +1,19 @@
 <template>
-  <div class="flex flex-wrap items-center gap-3">
+  <div class="flex flex-wrap items-center gap-2">
     <slot name="before"></slot>
-    <button @click="$emit('refresh')" :disabled="loading" class="btn btn-secondary">
-      <Icon name="refresh" size="md" :class="[loading ? 'animate-spin' : '']" />
+    <button
+      type="button"
+      class="btn btn-secondary btn-icon"
+      :disabled="loading"
+      :aria-label="t('common.refresh')"
+      :title="t('common.refresh')"
+      @click="$emit('refresh')"
+    >
+      <Icon name="refresh" size="sm" :class="{ 'motion-safe:animate-spin': loading }" />
     </button>
     <slot name="after"></slot>
     <slot name="beforeCreate"></slot>
-    <button @click="$emit('create')" class="btn btn-primary">{{ t('admin.accounts.createAccount') }}</button>
+    <button type="button" class="btn btn-primary" @click="$emit('create')">{{ t('admin.accounts.createAccount') }}</button>
     <slot name="afterCreate"></slot>
   </div>
 </template>

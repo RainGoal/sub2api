@@ -22,7 +22,7 @@ html[data-admin-brand='wsapi'] .app-layout-main {
 html[data-admin-brand='wsapi'] .sidebar {
   width: var(--ws-sidebar-width);
   background: var(--ws-bg);
-  border-color: var(--ws-line);
+  border-color: transparent;
   transition-duration: 150ms;
 }
 
@@ -31,7 +31,7 @@ html[data-admin-brand='wsapi'] .sidebar-header {
   flex-shrink: 0;
   gap: 10px;
   padding: 0 16px;
-  border-color: var(--ws-line);
+  border-color: transparent;
 }
 
 html[data-admin-brand='wsapi'] .sidebar-header.sidebar-header-collapsed {
@@ -81,6 +81,10 @@ html[data-admin-brand='wsapi'] .sidebar-link-active:hover {
   color: var(--ws-text);
 }
 
+html[data-admin-brand='wsapi'] .sidebar-link-active > :is(svg, .sidebar-svg-icon) {
+  color: var(--ws-accent-ink);
+}
+
 html[data-admin-brand='wsapi'] .sidebar-link.sidebar-link-collapsed {
   gap: 0;
   padding-inline: 14px;
@@ -110,7 +114,7 @@ html[data-admin-brand='wsapi'] .sidebar-footer {
 
 html[data-admin-brand='wsapi'] .app-header {
   background: var(--ws-bg);
-  border-color: var(--ws-line);
+  border-color: transparent;
   backdrop-filter: none;
 }
 
@@ -165,7 +169,7 @@ html[data-admin-brand='wsapi'] .app-header-balance > svg {
 
 html[data-admin-brand='wsapi'] .app-header-balance > span:first-of-type {
   color: var(--ws-text);
-  font-family: var(--ws-font-mono);
+  font-family: var(--ws-font-sans);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   font-weight: 500;
@@ -189,7 +193,7 @@ html[data-admin-brand='wsapi'] .table-scroll-container {
   border-color: var(--ws-line);
   border-radius: var(--ws-radius-card);
   background: var(--ws-panel);
-  box-shadow: none;
+  box-shadow: var(--ws-panel-shadow);
 }
 
 html[data-admin-brand='wsapi'] .table-scroll-container thead {
@@ -209,7 +213,7 @@ html[data-admin-brand='wsapi'] .table-scroll-container th {
 html[data-admin-brand='wsapi'] .table-scroll-container td {
   height: 40px;
   padding: 6px 12px;
-  border-color: var(--ws-line);
+  border-color: var(--ws-line-soft);
   color: var(--ws-text-soft);
   font-size: 13px;
 }

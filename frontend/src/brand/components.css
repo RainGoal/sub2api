@@ -14,17 +14,17 @@ html:root[data-admin-brand="wsapi"] .btn {
 }
 
 html:root[data-admin-brand="wsapi"] :is(.btn-primary, .confirm-primary, .date-picker-apply, .announcement-primary) {
-  border: 1px solid var(--ws-text);
+  border: 1px solid var(--ws-primary);
   border-radius: var(--ws-radius-control);
-  background: var(--ws-text);
-  color: var(--ws-bg);
+  background: var(--ws-primary);
+  color: var(--ws-primary-text);
   box-shadow: none;
 }
 
 html:root[data-admin-brand="wsapi"] :is(.btn-primary, .confirm-primary, .date-picker-apply, .announcement-primary):hover:not(:disabled) {
-  border-color: var(--ws-text-strong);
-  background: var(--ws-text-strong);
-  color: var(--ws-bg);
+  border-color: var(--ws-primary-hover);
+  background: var(--ws-primary-hover);
+  color: var(--ws-primary-text);
   box-shadow: none;
   transform: none;
 }
@@ -119,16 +119,16 @@ html:root[data-admin-brand="wsapi"] :is(.card, .card-glass, .glass-card, .stat-c
   border: 1px solid var(--ws-line);
   border-radius: var(--ws-radius-card);
   background: var(--ws-panel);
-  box-shadow: none;
+  box-shadow: var(--ws-panel-shadow);
   backdrop-filter: none;
 }
 html:root[data-admin-brand="wsapi"] .card-hover:hover { border-color: var(--ws-line-strong); box-shadow: none; transform: none; }
-html:root[data-admin-brand="wsapi"] :is(.card-header, .card-footer) { padding: 12px 16px; border-color: var(--ws-line); }
+html:root[data-admin-brand="wsapi"] :is(.card-header, .card-footer) { padding: 12px 16px; border-color: var(--ws-line-soft); }
 html:root[data-admin-brand="wsapi"] .card-body { padding: 16px; }
 html:root[data-admin-brand="wsapi"] .stat-card { padding: 16px; gap: 10px; }
 html:root[data-admin-brand="wsapi"] .stat-icon { width: 20px; height: 20px; border-radius: 0; background: none; color: var(--ws-muted); }
 html:root[data-admin-brand="wsapi"] .stat-icon > svg { width: 18px; height: 18px; }
-html:root[data-admin-brand="wsapi"] .stat-value { font: 500 26px/1.2 var(--ws-font-mono); font-variant-numeric: tabular-nums; }
+html:root[data-admin-brand="wsapi"] .stat-value { font: 500 26px/1.2 var(--ws-font-sans); font-variant-numeric: tabular-nums; }
 html:root[data-admin-brand="wsapi"] .stat-label { color: var(--ws-muted); font-size: 12px; font-weight: 500; }
 
 html:root[data-admin-brand="wsapi"] :is(.table-container, .data-table-card) {
@@ -155,7 +155,7 @@ html:root[data-admin-brand="wsapi"] .data-table-row { background: var(--ws-panel
 html:root[data-admin-brand="wsapi"] :is(.table td, .data-table-row > td) {
   height: 40px;
   padding: 6px 12px;
-  border-color: var(--ws-line);
+  border-color: var(--ws-line-soft);
   color: var(--ws-text);
   font-size: 13px;
   line-height: 20px;
@@ -191,7 +191,8 @@ html:root[data-admin-brand="wsapi"] .pagination-pages > button {
   border-radius: var(--ws-radius-control);
   background: transparent;
   color: var(--ws-text-soft);
-  font: 400 12px/20px var(--ws-font-mono);
+  font: 400 12px/20px var(--ws-font-sans);
+  font-variant-numeric: tabular-nums;
 }
 html:root[data-admin-brand="wsapi"] .pagination-pages > button:hover:not(:disabled) { background: var(--ws-hover); }
 html:root[data-admin-brand="wsapi"] .pagination-pages > button[aria-current="page"] { border-color: var(--ws-line-strong); background: var(--ws-selected); color: var(--ws-text); }
@@ -295,7 +296,7 @@ html:root[data-admin-brand="wsapi"] .announcement-panel .markdown-body li::marke
 html:root[data-admin-brand="wsapi"] .announcement-panel .markdown-body blockquote { border-color: var(--ws-line-strong); background: var(--ws-hover); }
 html:root[data-admin-brand="wsapi"] .announcement-panel .markdown-body blockquote::before { display: none; }
 html:root[data-admin-brand="wsapi"] .tabs { padding: 2px; border-radius: var(--ws-radius-control); background: var(--ws-selected); }
-html:root[data-admin-brand="wsapi"] .tab { min-height: 30px; padding: 5px 12px; border-radius: 4px; color: var(--ws-muted); font-size: 13px; }
+html:root[data-admin-brand="wsapi"] .tab { min-height: 30px; padding: 5px 12px; border-radius: var(--ws-radius-small); color: var(--ws-muted); font-size: 13px; }
 html:root[data-admin-brand="wsapi"] .tab-active { background: var(--ws-panel); color: var(--ws-text); box-shadow: inset 0 0 0 1px var(--ws-line-strong); }
 
 @media (max-width: 639px) {

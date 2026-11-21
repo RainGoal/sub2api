@@ -240,7 +240,7 @@ onBeforeUnmount(() => { loadSequence++; clearTimeout(previewTimer); window.remov
             <button class="btn btn-primary" :disabled="busy || imageBusy || dirty || !current?.revision || current.revision === current.published_revision" :title="dirty ? t('docsAdmin.saveBeforePublish') : undefined" @click="action = 'publish'">{{ t('docsAdmin.publish') }}</button>
           </div>
         </header>
-        <details class="rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800" open>
+        <details class="card" open>
           <summary class="cursor-pointer px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{{ t('docsAdmin.settings') }}</summary>
           <div class="grid gap-4 border-t border-gray-200 p-4 md:grid-cols-2 dark:border-dark-700">
             <div><label for="doc-page-title" class="input-label">{{ t('docsAdmin.titleLabel') }}</label><input id="doc-page-title" v-model="form.title" class="input" maxlength="200" :disabled="busy" /></div>
@@ -249,8 +249,8 @@ onBeforeUnmount(() => { loadSequence++; clearTimeout(previewTimer); window.remov
             <div><label for="doc-page-summary" class="input-label">{{ t('docsAdmin.summary') }}</label><textarea id="doc-page-summary" v-model="form.summary" class="input" rows="2" maxlength="1000" :disabled="busy"></textarea></div>
           </div>
         </details>
-        <div class="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 p-3 dark:border-dark-700">
+        <div class="card overflow-hidden">
+          <div class="card-header flex flex-wrap items-center justify-between gap-3">
             <div class="flex gap-1" role="group" :aria-label="t('docsAdmin.editor')"><button v-for="item in (['edit', 'split', 'preview'] as const)" :key="item" class="docs-mode" :class="{ active: mode === item, 'hidden lg:inline-flex': item === 'split' }" :aria-pressed="mode === item" @click="mode = item">{{ t(item === 'edit' ? 'docsAdmin.editor' : item === 'split' ? 'docsAdmin.split' : 'docsAdmin.preview') }}</button></div>
             <div class="flex gap-2"><button class="btn btn-secondary text-xs" :disabled="busy || imageBusy" @click="importInput?.click()">{{ t('docsAdmin.import') }}</button><button class="btn btn-secondary text-xs" @click="exportFile">{{ t('docsAdmin.export') }}</button></div>
           </div>
@@ -264,7 +264,7 @@ onBeforeUnmount(() => { loadSequence++; clearTimeout(previewTimer); window.remov
               <p v-else class="p-8 text-sm text-gray-500 dark:text-dark-400">{{ t('docsAdmin.previewEmpty') }}</p>
             </section>
           </div>
-          <footer class="flex flex-wrap justify-between gap-2 border-t border-gray-200 px-4 py-3 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-400"><span :class="{ 'text-red-500': contentBytes > DOC_MAX_CONTENT_BYTES }">{{ t('docsAdmin.documentSize', { size: (contentBytes / 1024 / 1024).toFixed(2) }) }}</span><span v-if="current?.published_at">{{ t('docsAdmin.publishedAt', { time: formatDateTime(current.published_at) }) }}</span></footer>
+          <footer class="card-footer flex flex-wrap justify-between gap-2 text-xs text-gray-500 dark:text-dark-400"><span :class="{ 'text-red-500': contentBytes > DOC_MAX_CONTENT_BYTES }">{{ t('docsAdmin.documentSize', { size: (contentBytes / 1024 / 1024).toFixed(2) }) }}</span><span v-if="current?.published_at">{{ t('docsAdmin.publishedAt', { time: formatDateTime(current.published_at) }) }}</span></footer>
         </div>
         <p class="text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('docsAdmin.fallback') }}</p>
       </template>

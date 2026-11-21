@@ -1,15 +1,15 @@
 import { adminThemeRevision } from './theme'
 
 const chartTokens = {
-  text: ['--ws-text-soft', '#d1d0c9'],
-  muted: ['--ws-muted', '#a8a79f'],
-  grid: ['--ws-line', '#3a3935'],
-  panel: ['--ws-panel', '#252523'],
-  border: ['--ws-line-strong', '#53514a'],
-  title: ['--ws-text', '#f0efeb'],
-  accent: ['--ws-chart-1', '#ee6a43'],
-  secondary: ['--ws-chart-2', '#f0efeb'],
-  neutral: ['--ws-chart-3', '#918d85'],
+  text: ['--ws-text-soft', '#b0b0b0'],
+  muted: ['--ws-muted', '#a3a3a3'],
+  grid: ['--ws-line', '#2b2b2b'],
+  panel: ['--ws-panel', '#1b1b1b'],
+  border: ['--ws-line-strong', '#3b3b3b'],
+  title: ['--ws-text', '#ededed'],
+  accent: ['--ws-chart-1', '#f06a42'],
+  secondary: ['--ws-chart-2', '#f0f0f0'],
+  neutral: ['--ws-chart-3', '#8a8a8a'],
   positive: ['--ws-success', '#4ade80'],
   warning: ['--ws-warning', '#f0b84d'],
   negative: ['--ws-danger', '#ff7b72'],
@@ -35,8 +35,8 @@ export function adminChartColor(token: ChartToken, fallback: string): string {
 export function adminChartPalette(original: readonly string[]): string[] {
   if (!hasAdminBrand()) return [...original]
   const colors = [
-    adminChartColor('accent', original[0] || '#ee6a43'),
-    adminChartColor('secondary', original[1] || '#f0efeb'),
+    adminChartColor('accent', original[0] || chartTokens.accent[1]),
+    adminChartColor('secondary', original[1] || chartTokens.secondary[1]),
     ...(document.documentElement.classList.contains('dark')
       ? ['#86b7c7', '#c7a7d7', '#a9be82', '#d8b77d', '#cf8fa4', '#8cb4a2', '#a3a7d6', '#cba38c', '#a3bac7', '#b9b4a7']
       : ['#28758c', '#81549d', '#55752c', '#916510', '#a24b6a', '#39765a', '#5e64a3', '#996643', '#52768a', '#797064'])
@@ -53,11 +53,11 @@ export function adminChartFill(color: string, fallback: string): string {
 export function adminChartTooltip() {
   if (!hasAdminBrand()) return {}
   return {
-    backgroundColor: adminChartColor('panel', '#252523'),
-    titleColor: adminChartColor('title', '#f0efeb'),
-    bodyColor: adminChartColor('text', '#d1d0c9'),
-    footerColor: adminChartColor('muted', '#a8a79f'),
-    borderColor: adminChartColor('border', '#53514a'),
+    backgroundColor: adminChartColor('panel', chartTokens.panel[1]),
+    titleColor: adminChartColor('title', chartTokens.title[1]),
+    bodyColor: adminChartColor('text', chartTokens.text[1]),
+    footerColor: adminChartColor('muted', chartTokens.muted[1]),
+    borderColor: adminChartColor('border', chartTokens.border[1]),
     borderWidth: 1,
     cornerRadius: 6
   }

@@ -8,6 +8,7 @@ html[data-admin-brand='wsapi'] .dashboard-metrics {
   border: 1px solid var(--ws-line);
   border-radius: var(--ws-radius-card);
   background: var(--ws-panel);
+  box-shadow: var(--ws-panel-shadow);
 }
 
 html[data-admin-brand='wsapi'] .dashboard-metrics > .card {
@@ -20,7 +21,7 @@ html[data-admin-brand='wsapi'] .dashboard-metrics > .card {
 }
 
 html[data-admin-brand='wsapi'] .dashboard-metrics > .card + .card {
-  border-left: 1px solid var(--ws-line);
+  border-left: 1px solid var(--ws-line-soft);
 }
 
 html[data-admin-brand='wsapi'] .dashboard-metrics > .card > .flex {
@@ -40,7 +41,7 @@ html[data-admin-brand='wsapi'] :is(.dashboard-metric-icon, .admin-stat-icon) > s
 html[data-admin-brand='wsapi'] .dashboard-metrics .dashboard-metric-value {
   margin: 8px 0 6px;
   color: var(--ws-text);
-  font-family: var(--ws-font-mono);
+  font-family: var(--ws-font-sans);
   font-size: 24px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -69,7 +70,6 @@ html[data-admin-brand='wsapi'] .dashboard-metrics .dashboard-metric-info {
 
 html[data-admin-brand='wsapi'] .dashboard-metrics .dashboard-metric-secondary {
   color: var(--ws-text-soft);
-  font-family: var(--ws-font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -115,7 +115,7 @@ html[data-admin-brand='wsapi'] .admin-chart-panel {
   border: 1px solid var(--ws-line);
   border-radius: var(--ws-radius-card);
   background: var(--ws-panel);
-  box-shadow: none;
+  box-shadow: var(--ws-panel-shadow);
 }
 
 html[data-admin-brand='wsapi'] .admin-chart-panel h3 {
@@ -127,13 +127,13 @@ html[data-admin-brand='wsapi'] .admin-chart-panel h3 > svg {
 }
 
 html:root[data-admin-brand='wsapi'] .settings-tabs-shell {
-  top: 64px;
+  top: var(--ws-header-height);
   margin-inline: 0;
   padding: 4px;
   border-color: var(--ws-line);
   border-radius: var(--ws-radius-card);
   background: var(--ws-panel);
-  box-shadow: none;
+  box-shadow: var(--ws-panel-shadow);
   backdrop-filter: none;
 }
 
@@ -186,7 +186,7 @@ html:root[data-admin-brand='wsapi'] :is(.personal-balance-symbol > svg, .persona
 
 html:root[data-admin-brand='wsapi'] .personal-balance-value {
   color: var(--ws-text);
-  font-family: var(--ws-font-mono);
+  font-family: var(--ws-font-sans);
   font-variant-numeric: tabular-nums;
 }
 
@@ -295,6 +295,6 @@ html:root[data-admin-brand='wsapi'] .prompt-audit-savebar {
   }
 
   html[data-admin-brand='wsapi'] .dashboard-metrics > .card:nth-child(n + 3) {
-    border-top: 1px solid var(--ws-line);
+    border-top: 1px solid var(--ws-line-soft);
   }
 }
