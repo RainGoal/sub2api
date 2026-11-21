@@ -321,6 +321,16 @@ describe('RequestAuditPayloads', () => {
     expect(wrapper.get('[data-test="manifest-trailers"]').text()).toBe('admin.requestAudit.manifestUnavailable')
   })
 
+  it('shows existing complete headers without exposing the deferred size marker', async () => {
+    const wrapper = createView({ ...record, terminal_manifest: {
+      headers: { complete: true, expected_chunks: 1, expected_bytes: -1, reason: 'deferred_encoding' },
+    } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="content-headers"]').text()).toContain('hello')
+    expect(wrapper.find('[data-test="partial-headers"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="manifest-headers"]').text()).not.toContain('deferred_encoding')
+  })
+
   it('does not format binary slices and explains their Base64 encoding', async () => {
     mocks.payload.mockResolvedValue(response('AAECAw==', { encoding: 'base64' }))
     const wrapper = createView()

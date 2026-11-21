@@ -443,6 +443,8 @@ func (m *Manager) ReadPayload(ctx context.Context, id, part string, offset, limi
 	if !found {
 		return PayloadResult{}, failure(404, "AUDIT_NOT_FOUND", "Request audit record not found")
 	}
+	// Earlier writers could leave the deferred header length in finalized records.
+	manifest = resolveDeferredHeaderManifest(part, manifest, count)
 	partial := !ended || !manifest.Complete || !matchesManifest(manifest, count) || record.CaptureReason == "chunk_conflict"
 	if partial && !allowPartial {
 		return PayloadResult{}, failure(409, "AUDIT_PAYLOAD_INCOMPLETE", "payload is incomplete")

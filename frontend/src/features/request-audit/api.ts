@@ -1,4 +1,5 @@
 import { apiClient } from '@/api/client'
+import { upstreamPayloadFile } from './payloadText'
 import type {
   CreateRequestAuditBan,
   RequestAuditAttempt,
@@ -24,7 +25,7 @@ const deviceBans = '/admin/device-bans'
 const segment = (id: string) => encodeURIComponent(id)
 const attempts = (id: string) => `${audits}/${segment(id)}/attempts`
 
-async function downloadPayload(path: string, part: string, allowPartial: boolean): Promise<Blob> {
+async function downloadPayload(path: string, part: string, allowPartial: boolean) {
   const { data, headers } = await apiClient.get<ArrayBuffer>(path, {
     params: { part, mode: 'raw', allow_partial: allowPartial },
     responseType: 'arraybuffer',
@@ -42,7 +43,7 @@ async function downloadPayload(path: string, part: string, allowPartial: boolean
   if (declared == null || declared === '' || !Number.isSafeInteger(expected) || expected < 0 || data.byteLength !== expected) {
     throw { reason: 'AUDIT_DOWNLOAD_INCOMPLETE', message: 'Payload download did not match its declared length' }
   }
-  return new Blob([data], { type: 'application/octet-stream' })
+  return { bytes: data, partial: headers['x-audit-partial'] === 'true' }
 }
 
 export const requestAuditAPI = {
@@ -61,7 +62,8 @@ export const requestAuditAPI = {
     return data
   },
   async download(id: string, part: 'headers' | 'body' | 'trailers', allowPartial = false): Promise<Blob> {
-    return downloadPayload(`${audits}/${segment(id)}/payload`, part, allowPartial)
+    const { bytes } = await downloadPayload(`${audits}/${segment(id)}/payload`, part, allowPartial)
+    return new Blob([bytes], { type: 'application/octet-stream' })
   },
   async listAttempts(id: string): Promise<{ items: RequestAuditAttempt[] }> {
     const { data } = await apiClient.get<{ items: RequestAuditAttempt[] }>(attempts(id))
@@ -73,8 +75,9 @@ export const requestAuditAPI = {
     })
     return data
   },
-  async downloadAttempt(id: string, attempt: number, part: RequestAuditAttemptPart): Promise<Blob> {
-    return downloadPayload(`${attempts(id)}/${attempt}/payload`, part, true)
+  async downloadAttempt(id: string, attempt: number, part: RequestAuditAttemptPart) {
+    const { bytes, partial } = await downloadPayload(`${attempts(id)}/${attempt}/payload`, part, true)
+    return upstreamPayloadFile(bytes, partial)
   },
   async getConfig(): Promise<RequestAuditConfig> {
     const { data } = await apiClient.get<RequestAuditConfig>(`${audits}/config`)

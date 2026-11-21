@@ -59,6 +59,47 @@ func TestReadPayloadRejectsMissingTailDespiteCompleteMetadata(t *testing.T) {
 	require.Equal(t, "AUDIT_PAYLOAD_INCOMPLETE", auditErr.Code)
 }
 
+func TestReadPayloadResolvesDeferredClientHeaders(t *testing.T) {
+	raw := []byte(`{"headers":{"X-Test":["complete"]}}`)
+	for _, tc := range []struct {
+		name   string
+		seq    any
+		bytes  any
+		reason string
+		ok     bool
+	}{
+		{name: "stored snapshot", seq: 0, bytes: len(raw), ok: true},
+		{name: "missing snapshot"},
+		{name: "wrong sequence", seq: 1, bytes: len(raw)},
+		{name: "oversized snapshot", seq: 0, bytes: maxAuditHeaderBytes + 1},
+		{name: "conflicting snapshot", seq: 0, bytes: len(raw), reason: "chunk_conflict"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, mock := mockManager(t)
+			id := uuid.NewString()
+			expectRecord(mock, id, "complete", tc.reason, map[string]PartManifest{
+				PartHeaders: {ExpectedChunks: 1, ExpectedBytes: -1, Complete: true, Reason: "deferred_encoding"},
+			})
+			mock.ExpectQuery(`SELECT c.seq,c.byte_count`).WithArgs(id, PartHeaders).
+				WillReturnRows(sqlmock.NewRows([]string{"seq", "byte_count"}).AddRow(tc.seq, tc.bytes))
+			if tc.ok {
+				mock.ExpectQuery(`WITH positions AS`).WithArgs(id, PartHeaders, 1, int64(0), int64(len(raw))).
+					WillReturnRows(sqlmock.NewRows([]string{"payload", "codec", "byte_count", "start_offset"}).AddRow(raw, codecRaw, len(raw), 0))
+			}
+			result, err := m.ReadPayload(context.Background(), id, PartHeaders, 0, 100, false)
+			if tc.ok {
+				require.NoError(t, err)
+				require.Equal(t, raw, result.Bytes)
+				require.False(t, result.Partial)
+				return
+			}
+			var auditErr *Error
+			require.ErrorAs(t, err, &auditErr)
+			require.Equal(t, "AUDIT_PAYLOAD_INCOMPLETE", auditErr.Code)
+		})
+	}
+}
+
 func TestReadPayloadPartialReturnsOnlyPrefixBeforeMissingChunk(t *testing.T) {
 	m, mock := mockManager(t)
 	id := uuid.NewString()
@@ -119,6 +160,29 @@ func TestReconcilePreservesConflictAcrossLaterFinish(t *testing.T) {
 	mock.ExpectQuery(`SELECT terminal_manifest,capture_state,capture_reason`).WithArgs(id).WillReturnRows(sqlmock.NewRows([]string{"terminal_manifest", "capture_state", "capture_reason"}).AddRow(jsonBytes(manifests), "partial", "chunk_conflict"))
 	mock.ExpectQuery(`SELECT part,COUNT`).WillReturnRows(sqlmock.NewRows([]string{"part", "count", "bytes", "min", "max"}))
 	mock.ExpectExec(`UPDATE request_audits SET capture_state`).WithArgs(id, "partial", "chunk_conflict", string(jsonBytes(manifests)), int64(0), int64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, reconcileRecord(context.Background(), tx, id))
+	mock.ExpectRollback()
+	require.NoError(t, tx.Rollback())
+}
+
+func TestReconcilePersistsDeferredClientHeaderLength(t *testing.T) {
+	m, mock := mockManager(t)
+	id := uuid.NewString()
+	manifests := map[string]PartManifest{
+		PartHeaders:  {ExpectedChunks: 1, ExpectedBytes: -1, Complete: true, Reason: "deferred_encoding"},
+		PartBody:     {Complete: true},
+		PartTrailers: {Complete: true},
+	}
+	mock.ExpectBegin()
+	tx, err := m.db.Begin()
+	require.NoError(t, err)
+	mock.ExpectQuery(`SELECT terminal_manifest,capture_state,capture_reason`).WithArgs(id).
+		WillReturnRows(sqlmock.NewRows([]string{"terminal_manifest", "capture_state", "capture_reason"}).AddRow(jsonBytes(manifests), "capturing", nil))
+	mock.ExpectQuery(`SELECT part,COUNT`).WithArgs(id).
+		WillReturnRows(sqlmock.NewRows([]string{"part", "count", "bytes", "min", "max"}).AddRow(PartHeaders, 1, 123, 0, 0))
+	manifests[PartHeaders] = PartManifest{ExpectedChunks: 1, ExpectedBytes: 123, Complete: true}
+	mock.ExpectExec(`UPDATE request_audits SET capture_state`).WithArgs(id, "complete", "", string(jsonBytes(manifests)), int64(0), int64(0)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, reconcileRecord(context.Background(), tx, id))
 	mock.ExpectRollback()
 	require.NoError(t, tx.Rollback())

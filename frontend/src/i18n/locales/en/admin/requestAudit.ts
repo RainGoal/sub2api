@@ -85,6 +85,7 @@ export default {
       "hide": "Hide",
       "showPayload": "Show raw data",
       "copy": "Copy this segment",
+      "download": "Download content",
       "empty": "No upstream attempts were recorded.",
       "number": "Attempt {number}",
       "account": "Account #{id}",

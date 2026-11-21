@@ -6,6 +6,7 @@ import (
 )
 
 const maxAuditHeaderBytes = 16 * 1024
+const deferredHeaderEncoding = "deferred_encoding"
 
 func materializeHeaderSnapshot(event *auditEvent) error {
 	switch event.kind {

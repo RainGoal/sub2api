@@ -207,12 +207,12 @@ describe('RequestAuditView', () => {
   })
 
   it('loads upstream payloads lazily and displays captured text without rewriting values', async () => {
-    const raw = '{"headers":[{"name":"Authorization","value":"Bearer  sample"}, {"name":"X-Trace","value":"  leading"}]}'
+    const raw = '{"Authorization":"Bearer  sample", "X-Trace":"  leading", "X-Trace":"a,b"}'
     mocks.listAttempts.mockResolvedValue({ items: [{
       attempt_no: 1, method: 'POST', host: 'models.example.com', path: '/v1/messages', account_id: 8,
       received_at: '2026-10-14T00:00:01Z', parts: { request_headers: { complete: true, expected_bytes: raw.length } },
     }] })
-    mocks.attemptPayload.mockResolvedValue({ content: raw, encoding: 'utf8', offset: 0, returned_bytes: raw.length, part_bytes: raw.length, has_more: false })
+    mocks.attemptPayload.mockResolvedValue({ content: raw, encoding: 'utf8', offset: 0, returned_bytes: raw.length, part_bytes: raw.length, has_more: false, partial: false })
     const wrapper = createView()
     await flushPromises()
     await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
@@ -225,6 +225,10 @@ describe('RequestAuditView', () => {
     await wrapper.get('[data-test="show-attempt-request_headers"]').trigger('click')
     await flushPromises()
     expect(mocks.attemptPayload).toHaveBeenCalledWith(record.id, 1, 'request_headers', 0, 65536)
+    expect(wrapper.get('[data-test="audit-attempt-content"]').text()).toBe([
+      '{', '  "Authorization": "Bearer  sample",', '  "X-Trace": "  leading",', '  "X-Trace": "a,b"', '}',
+    ].join('\n'))
+    await wrapper.get('[data-test="format-attempt-payload"]').setValue(false)
     expect(wrapper.get('[data-test="audit-attempt-content"]').text()).toBe(raw)
     wrapper.unmount()
   })

@@ -83,6 +83,16 @@ func matchesManifest(manifest PartManifest, count partCounts) bool {
 		(count.chunks == 0 || count.minSeq == 0 && count.maxSeq == count.chunks-1)
 }
 
+func resolveDeferredHeaderManifest(part string, manifest PartManifest, count partCounts) PartManifest {
+	if part == PartHeaders && manifest.Reason == deferredHeaderEncoding && manifest.ExpectedBytes == -1 &&
+		manifest.ExpectedChunks == 1 && count.chunks == 1 && count.minSeq == 0 && count.maxSeq == 0 &&
+		count.bytes > 0 && count.bytes <= maxAuditHeaderBytes {
+		manifest.ExpectedBytes = count.bytes
+		manifest.Reason = ""
+	}
+	return manifest
+}
+
 func reconcileUpdatedRecord(ctx context.Context, tx *sql.Tx, id string, result sql.Result) error {
 	updated, err := result.RowsAffected()
 	if err != nil || updated == 0 {
@@ -136,14 +146,12 @@ func reconcileRecord(ctx context.Context, tx *sql.Tx, id string) error {
 			complete = false
 			continue
 		}
-		if manifest.Reason == "deferred_encoding" && manifest.ExpectedBytes < 0 {
-			manifest.ExpectedBytes = counts[part].bytes
-			manifest.Reason = ""
-		}
-		if !matchesManifest(manifest, counts[part]) {
+		count := counts[part]
+		manifest = resolveDeferredHeaderManifest(part, manifest, count)
+		if !matchesManifest(manifest, count) {
 			manifest.Complete, manifest.Reason = false, "missing_chunks"
-			manifests[part] = manifest
 		}
+		manifests[part] = manifest
 		if !manifest.Complete {
 			state, reason, complete = "partial", manifest.Reason, false
 		}

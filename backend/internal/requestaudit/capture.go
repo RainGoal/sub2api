@@ -227,7 +227,7 @@ func (c *Capture) EndPart(part string, complete bool, reason string) {
 	}
 	if c.deferredHeaders && part == PartHeaders {
 		manifest.ExpectedBytes = -1
-		manifest.Reason = "deferred_encoding"
+		manifest.Reason = deferredHeaderEncoding
 	}
 	c.manifests[part] = manifest
 	c.manager.enqueue(auditEvent{kind: "part_end", id: c.id, part: part, manifest: &manifest})

@@ -43,14 +43,20 @@
                   <p v-if="payload.partial" class="text-xs text-amber-600 dark:text-amber-400">{{ t('admin.requestAudit.partialHint') }}</p>
                   <p v-if="payload.encoding === 'base64'" class="text-xs text-gray-500">{{ t('admin.requestAudit.binaryHint') }}</p>
                   <p v-if="!payload.returned_bytes" class="text-xs text-gray-500">{{ t('admin.requestAudit.payloads.empty') }}</p>
-                  <pre v-else tabindex="0" class="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-5 dark:border-dark-700 dark:bg-dark-850" data-test="audit-attempt-content">{{ payload.content }}</pre>
+                  <template v-else>
+                    <label v-if="pretty !== null" class="flex w-fit items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+                      <input v-model="formatted" type="checkbox" class="rounded accent-primary-500" data-test="format-attempt-payload" />
+                      {{ t('admin.requestAudit.payloads.pretty') }}
+                    </label>
+                    <pre tabindex="0" :aria-label="t(`admin.requestAudit.attempts.parts.${part}`)" class="request-audit-payload-content max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-5 text-gray-900 dark:border-dark-700 dark:bg-dark-900 dark:text-dark-100" data-test="audit-attempt-content">{{ formatted && pretty !== null ? pretty : payload.content }}</pre>
+                  </template>
                   <div class="flex flex-wrap items-center justify-between gap-2">
                     <span class="text-xs tabular-nums text-gray-500">{{ t('admin.requestAudit.payloads.range', { from: payload.offset, to: payload.offset + payload.returned_bytes, total: payload.part_bytes }) }}</span>
                     <div class="flex flex-wrap gap-2">
                       <button v-if="payload.offset > 0" type="button" class="btn btn-secondary btn-sm" :disabled="downloading" @click="loadPart(attempt.attempt_no, part, Math.max(0, offset - pageSize))">{{ t('admin.requestAudit.payloads.previous') }}</button>
                       <button v-if="payload.has_more && payload.returned_bytes" type="button" class="btn btn-secondary btn-sm" :disabled="downloading" @click="loadPart(attempt.attempt_no, part, offset + payload.returned_bytes)">{{ t('admin.requestAudit.payloads.next') }}</button>
                       <button v-if="payload.encoding === 'utf8' && payload.content" type="button" class="btn btn-secondary btn-sm" @click="copyToClipboard(payload.content)">{{ t('admin.requestAudit.attempts.copy') }}</button>
-                      <button type="button" class="btn btn-secondary btn-sm" :disabled="downloading" @click="download(attempt.attempt_no, part)">{{ t(downloading ? 'admin.requestAudit.downloading' : 'admin.requestAudit.download') }}</button>
+                      <button type="button" class="btn btn-secondary btn-sm" data-test="download-attempt-payload" :disabled="downloading" @click="download(attempt.attempt_no, part)">{{ t(downloading ? 'admin.requestAudit.downloading' : 'admin.requestAudit.attempts.download') }}</button>
                     </div>
                   </div>
                 </template>
@@ -64,12 +70,13 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useClipboard } from '@/composables/useClipboard'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import api from './api'
 import { queuePayloadRead } from './payloadReads'
+import { formatPayloadJson } from './payloadText'
 import { REQUEST_AUDIT_ATTEMPT_PARTS } from './types'
 import type { RequestAuditAttempt, RequestAuditAttemptPart, RequestAuditPayload } from './types'
 
@@ -84,6 +91,12 @@ const items = ref<RequestAuditAttempt[]>([])
 const activeAttempt = ref<number | null>(null)
 const activePart = ref<RequestAuditAttemptPart | null>(null)
 const payload = ref<RequestAuditPayload | null>(null)
+const formatted = ref(true)
+const pretty = computed(() => {
+  const value = payload.value
+  if (!value || value.encoding !== 'utf8' || value.offset !== 0 || value.has_more || value.partial !== false) return null
+  return formatPayloadJson(value.content)
+})
 const reading = ref(false)
 const downloading = ref(false)
 const offset = ref(0)
@@ -97,6 +110,7 @@ function resetPart() {
   generation++
   activePart.value = null
   payload.value = null
+  formatted.value = true
   readError.value = ''
   reading.value = downloading.value = false
 }
@@ -158,12 +172,12 @@ function download(attempt: number, part: RequestAuditAttemptPart) {
   queuePayloadRead(async () => {
     if (disposed || generation !== current) return
     try {
-      const blob = await api.downloadAttempt(props.recordId, attempt, part)
+      const { blob, extension, partial } = await api.downloadAttempt(props.recordId, attempt, part)
       if (disposed || generation !== current) return
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `request-${props.recordId}-upstream-${attempt}-${part}.bin`
+      link.download = `request-${props.recordId}-upstream-${attempt}-${part}${partial ? '-partial' : ''}.${extension}`
       document.body.append(link); link.click(); link.remove()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (reason) {

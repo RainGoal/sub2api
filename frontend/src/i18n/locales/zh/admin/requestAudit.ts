@@ -85,6 +85,7 @@ export default {
       "hide": "收起",
       "showPayload": "查看原文",
       "copy": "复制当前段",
+      "download": "下载内容",
       "empty": "没有上游转发记录。",
       "number": "第 {number} 次",
       "account": "账号 #{id}",

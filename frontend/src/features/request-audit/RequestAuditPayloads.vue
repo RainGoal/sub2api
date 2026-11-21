@@ -44,6 +44,7 @@ const stateLabel = (state: string) => ['complete', 'capturing', 'in_progress', '
 const partState = (part: Part) => panels[part].payload?.partial === false ? 'complete' : panels[part].payload?.partial === true ? 'partial' : 'unknown'
 const canAllowPartial = (part: Part) => props.record.capture_state !== 'complete' || props.record.terminal_manifest?.[part]?.complete === false || panels[part].allowPartial || panels[part].payload?.partial || ['AUDIT_PAYLOAD_INCOMPLETE', 'AUDIT_PAYLOAD_NOT_READY'].includes(panels[part].errorCode || '')
 const notSelected = (part: Part) => props.record.terminal_manifest?.[part]?.reason === 'not_selected'
+const deferredHeaders = (part: Part) => part === 'headers' && props.record.terminal_manifest?.headers?.reason === 'deferred_encoding'
 
 function resetBodyContent() {
   bodyContentVersion++
@@ -204,10 +205,10 @@ onBeforeUnmount(() => { disposed = true; generation++ })
           <p v-if="record.terminal_manifest?.[part]" class="flex flex-wrap gap-x-2">
             <span>{{ t('admin.requestAudit.payloads.manifest') }} <span :class="record.terminal_manifest[part]?.complete ? 'text-emerald-300' : 'text-amber-300'">{{ stateLabel(record.terminal_manifest[part]?.complete ? 'complete' : 'partial') }}</span></span>
             <span class="font-mono tabular-nums">{{ t('admin.requestAudit.chunks', { count: number(record.terminal_manifest[part]!.expected_chunks) }) }}</span>
-            <span class="font-mono tabular-nums">{{ t('admin.requestAudit.payloads.manifestBytes', { count: number(record.terminal_manifest[part]!.expected_bytes) }) }}</span>
+            <span v-if="!deferredHeaders(part)" class="font-mono tabular-nums">{{ t('admin.requestAudit.payloads.manifestBytes', { count: number(record.terminal_manifest[part]!.expected_bytes) }) }}</span>
           </p>
           <p v-else>{{ t('admin.requestAudit.manifestUnavailable') }}</p>
-          <p v-if="record.terminal_manifest?.[part]?.reason" class="break-all text-amber-300">{{ record.terminal_manifest[part]?.reason }}</p>
+          <p v-if="record.terminal_manifest?.[part]?.reason && !deferredHeaders(part)" class="break-all text-amber-300">{{ record.terminal_manifest[part]?.reason }}</p>
         </div>
         <p v-if="panels[part].payload?.partial" class="text-xs leading-5 text-amber-300">{{ t('admin.requestAudit.partialHint') }}</p>
         <p v-if="panels[part].payload?.redacted" class="text-xs leading-5 text-slate-400">{{ t('admin.requestAudit.redactedHint') }}</p>

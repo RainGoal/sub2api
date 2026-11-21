@@ -182,6 +182,7 @@ func TestRequestAuditPayloadRangeAndIncompleteStatus(t *testing.T) {
 	require.Equal(t, "2345", w.Body.String())
 	require.Equal(t, "bytes 2-5/10", w.Header().Get("Content-Range"))
 	require.Equal(t, "true", w.Header().Get("X-Audit-Partial"))
+	require.Contains(t, w.Header().Values("Access-Control-Expose-Headers"), "X-Audit-Partial")
 	require.Equal(t, "4", w.Header().Get("Content-Length"))
 }
 

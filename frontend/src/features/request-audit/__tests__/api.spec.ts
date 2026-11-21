@@ -4,6 +4,16 @@ const client = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: client }))
 import api from '../api'
 
+function readBlob(blob: Blob, format: 'text' | 'arraybuffer') {
+  return new Promise<string | ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result!)
+    reader.onerror = () => reject(reader.error)
+    if (format === 'text') reader.readAsText(blob)
+    else reader.readAsArrayBuffer(blob)
+  })
+}
+
 describe('Request audit API', () => {
   beforeEach(() => Object.values(client).forEach(mock => mock.mockReset()))
 
@@ -74,6 +84,34 @@ describe('Request audit API', () => {
     await expect(api.download('id', 'body')).rejects.toMatchObject({ reason: 'AUDIT_DOWNLOAD_INCOMPLETE' })
     client.get.mockResolvedValue({ data: new TextEncoder().encode('whole').buffer, headers: { 'content-length': '5' } })
     expect((await api.download('id', 'body')).size).toBe(5)
+  })
+
+  it('indents upstream JSON downloads without changing numeric tokens, keys or string escapes', async () => {
+    const raw = String.raw`{"id":9007199254740993,"id":1e+20,"text":" \u0061,{}[]\" ","items":[[],{},true],"__proto__":null}`
+    const data = new TextEncoder().encode(raw).buffer
+    client.get.mockResolvedValue({ data, headers: { 'content-length': String(data.byteLength) } })
+    const file = await api.downloadAttempt('audit/id', 2, 'response_body')
+    expect(client.get).toHaveBeenCalledWith('/admin/request-audits/audit%2Fid/attempts/2/payload', expect.objectContaining({
+      params: { part: 'response_body', mode: 'raw', allow_partial: true },
+    }))
+    expect(file).toMatchObject({ extension: 'json', partial: false })
+    expect(await readBlob(file.blob, 'text')).toBe([
+      '{', '  "id": 9007199254740993,', '  "id": 1e+20,', String.raw`  "text": " \u0061,{}[]\" ",`,
+      '  "items": [', '    [],', '    {},', '    true', '  ],', '  "__proto__": null', '}', '',
+    ].join('\n'))
+  })
+
+  it.each([
+    { data: new TextEncoder().encode('data: {"text":"你好"}\n\n'), partial: false, extension: 'txt' },
+    { data: new TextEncoder().encode('{"id":1}'), partial: true, extension: 'txt' },
+    { data: Uint8Array.of(0xff, 0x01), partial: false, extension: 'bin' },
+    { data: Uint8Array.of(0, 0), partial: false, extension: 'bin' },
+  ])('preserves the bytes of upstream $extension downloads (partial=$partial)', async ({ data, partial, extension }) => {
+    client.get.mockResolvedValue({ data: data.buffer, headers: { 'content-length': String(data.byteLength), 'x-audit-partial': partial ? 'true' : undefined } })
+    const file = await api.downloadAttempt('id', 1, 'response_body')
+    expect(file).toMatchObject({ partial, extension })
+    const downloaded = await readBlob(file.blob, 'arraybuffer') as ArrayBuffer
+    expect(Array.from(new Uint8Array(downloaded))).toEqual(Array.from(data))
   })
 
   it('decodes binary error responses before shared API error handling', async () => {

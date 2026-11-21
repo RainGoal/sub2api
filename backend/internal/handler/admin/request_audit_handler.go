@@ -571,6 +571,7 @@ func rawRequestAuditPayload(c *gin.Context, filename string, read requestAuditPa
 	c.Header("X-Audit-Capture-State", first.CaptureState)
 	if first.Partial {
 		c.Header("X-Audit-Partial", "true")
+		c.Writer.Header().Add("Access-Control-Expose-Headers", "X-Audit-Partial")
 	}
 	if ranged {
 		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end-1, total))
