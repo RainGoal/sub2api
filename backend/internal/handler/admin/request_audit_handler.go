@@ -29,6 +29,8 @@ type RequestAuditAdminStore interface {
 	List(context.Context, requestaudit.ListFilter) (requestaudit.ListResult, error)
 	Get(context.Context, string) (*requestaudit.Record, error)
 	ReadPayload(context.Context, string, string, int64, int64, bool) (requestaudit.PayloadResult, error)
+	ListAttempts(context.Context, string) ([]requestaudit.AttemptRecord, error)
+	ReadAttemptPayload(context.Context, string, int, string, int64, int64, bool) (requestaudit.PayloadResult, error)
 	ListBans(context.Context, requestaudit.BanFilter) (requestaudit.BanList, error)
 	GetBan(context.Context, string) (*requestaudit.SessionBan, error)
 	CreateBan(context.Context, requestaudit.CreateBanInput) (*requestaudit.SessionBan, error)
@@ -210,10 +212,11 @@ func (h *RequestAuditHandler) UpdateConfig(c *gin.Context) {
 		Enabled           *bool  `json:"enabled" binding:"required"`
 		SessionBanEnabled *bool  `json:"session_ban_enabled" binding:"required"`
 		DeviceBanEnabled  *bool  `json:"device_ban_enabled"`
-		RetentionDays     int    `json:"retention_days" binding:"min=1,max=30"`
+		RetentionDays     *int   `json:"retention_days" binding:"omitempty,min=1,max=30"`
+		RetentionMinutes  *int   `json:"retention_minutes" binding:"omitempty,min=1,max=43200"`
 		ExpectedVersion   *int64 `json:"expected_version" binding:"required"`
 	}
-	if c.ShouldBindJSON(&input) != nil || input.ExpectedVersion == nil || *input.ExpectedVersion < 0 {
+	if c.ShouldBindJSON(&input) != nil || input.ExpectedVersion == nil || *input.ExpectedVersion < 0 || (input.RetentionDays == nil && input.RetentionMinutes == nil) {
 		requestAuditInvalid(c, "Invalid audit configuration")
 		return
 	}
@@ -232,7 +235,14 @@ func (h *RequestAuditHandler) UpdateConfig(c *gin.Context) {
 		input.DeviceBanEnabled = &current.DeviceBanEnabled
 	}
 	subject, _ := middleware.GetAuthSubjectFromContext(c)
-	result, err := h.store.UpdateConfig(c.Request.Context(), requestaudit.ConfigUpdate{Enabled: *input.Enabled, SessionBanEnabled: *input.SessionBanEnabled, DeviceBanEnabled: *input.DeviceBanEnabled, RetentionDays: input.RetentionDays, ExpectedVersion: *input.ExpectedVersion, UpdatedBy: subject.UserID})
+	update := requestaudit.ConfigUpdate{Enabled: *input.Enabled, SessionBanEnabled: *input.SessionBanEnabled, DeviceBanEnabled: *input.DeviceBanEnabled, ExpectedVersion: *input.ExpectedVersion, UpdatedBy: subject.UserID}
+	if input.RetentionDays != nil {
+		update.RetentionDays = *input.RetentionDays
+	}
+	if input.RetentionMinutes != nil {
+		update.RetentionMinutes = *input.RetentionMinutes
+	}
+	result, err := h.store.UpdateConfig(c.Request.Context(), update)
 	if err != nil {
 		requestAuditError(c, err)
 		return
@@ -334,6 +344,8 @@ func (h *RequestAuditHandler) RevokeBan(c *gin.Context) {
 
 const requestAuditReadChunk = int64(256 * 1024)
 
+type requestAuditPayloadReader func(context.Context, int64, int64, bool) (requestaudit.PayloadResult, error)
+
 func (h *RequestAuditHandler) Payload(c *gin.Context) {
 	if !h.authorize(c) {
 		return
@@ -347,6 +359,13 @@ func (h *RequestAuditHandler) Payload(c *gin.Context) {
 		requestAuditInvalid(c, "Invalid payload part")
 		return
 	}
+	read := func(ctx context.Context, offset, limit int64, partial bool) (requestaudit.PayloadResult, error) {
+		return h.store.ReadPayload(ctx, id, part, offset, limit, partial)
+	}
+	h.servePayload(c, id, part, fmt.Sprintf("request-%s-%s.bin", id, part), read, part != "body")
+}
+
+func (h *RequestAuditHandler) servePayload(c *gin.Context, id, part, filename string, read requestAuditPayloadReader, maskHeaders bool) {
 	mode := c.DefaultQuery("mode", "preview")
 	if mode != "preview" && mode != "raw" {
 		requestAuditInvalid(c, "Invalid payload mode")
@@ -374,7 +393,7 @@ func (h *RequestAuditHandler) Payload(c *gin.Context) {
 	}
 	middleware.SetAuditExtra(c, map[string]any{"audit_id": id, "part": part, "offset": offset, "result": mode})
 	if mode == "raw" {
-		h.rawPayload(c, id, part, offset, allowPartial)
+		rawRequestAuditPayload(c, filename, read, offset, allowPartial)
 		return
 	}
 	limit, err := strconv.ParseInt(c.DefaultQuery("limit", "65536"), 10, 64)
@@ -389,16 +408,16 @@ func (h *RequestAuditHandler) Payload(c *gin.Context) {
 	}
 	// Masking must happen before pagination; a partial JSON envelope cannot be safely redacted.
 	readOffset, readLimit := offset, limit
-	if part != "body" && !reveal {
+	if maskHeaders && !reveal {
 		readOffset, readLimit = 0, requestAuditReadChunk
 	}
-	result, err := h.store.ReadPayload(c.Request.Context(), id, part, readOffset, readLimit, allowPartial)
+	result, err := read(c.Request.Context(), readOffset, readLimit, allowPartial)
 	if err != nil {
 		requestAuditError(c, err)
 		return
 	}
 	data, redacted := result.Bytes, false
-	if part != "body" && !reveal {
+	if maskHeaders && !reveal {
 		if result.HasMore || !json.Valid(data) {
 			response.ErrorWithDetails(c, http.StatusConflict, "Header preview requires explicit sensitive reveal for this payload", "AUDIT_HEADER_PREVIEW_UNAVAILABLE", nil)
 			return
@@ -501,8 +520,8 @@ func redactRequestAuditURI(raw string) string {
 	return uri.String()
 }
 
-func (h *RequestAuditHandler) rawPayload(c *gin.Context, id, part string, offset int64, allowPartial bool) {
-	first, err := h.store.ReadPayload(c.Request.Context(), id, part, 0, 1, allowPartial)
+func rawRequestAuditPayload(c *gin.Context, filename string, read requestAuditPayloadReader, offset int64, allowPartial bool) {
+	first, err := read(c.Request.Context(), 0, 1, allowPartial)
 	if err != nil {
 		requestAuditError(c, err)
 		return
@@ -518,7 +537,7 @@ func (h *RequestAuditHandler) rawPayload(c *gin.Context, id, part string, offset
 	// Validate the first actual block before committing HTTP headers.
 	var chunk requestaudit.PayloadResult
 	if length > 0 {
-		chunk, err = h.store.ReadPayload(c.Request.Context(), id, part, start, min(length, requestAuditReadChunk), allowPartial)
+		chunk, err = read(c.Request.Context(), start, min(length, requestAuditReadChunk), allowPartial)
 		if err != nil {
 			requestAuditError(c, err)
 			return
@@ -546,7 +565,7 @@ func (h *RequestAuditHandler) rawPayload(c *gin.Context, id, part string, offset
 		}
 	}()
 	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"request-%s-%s.bin\"", id, part))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	c.Header("Content-Length", strconv.FormatInt(length, 10))
 	c.Header("Accept-Ranges", "bytes")
 	c.Header("X-Audit-Capture-State", first.CaptureState)
@@ -571,7 +590,7 @@ func (h *RequestAuditHandler) rawPayload(c *gin.Context, id, part string, offset
 		}
 		position += int64(written)
 		if position < end {
-			chunk, err = h.store.ReadPayload(c.Request.Context(), id, part, position, min(end-position, requestAuditReadChunk), allowPartial)
+			chunk, err = read(c.Request.Context(), position, min(end-position, requestAuditReadChunk), allowPartial)
 			if err != nil {
 				middleware.SetAuditExtra(c, map[string]any{"result": "stream_failed"})
 				panic(http.ErrAbortHandler)

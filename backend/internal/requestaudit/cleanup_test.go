@@ -21,14 +21,14 @@ func TestCleanupSelectsDeletingBeforeIndexedExpiredBranch(t *testing.T) {
 			m, mock := mockManager(t)
 			id := uuid.NewString()
 			mock.ExpectBegin()
-			expectRetention(mock)
+			expectRetentionMinutes(mock, 30)
 			mock.ExpectQuery(`SELECT pg_try_advisory_xact_lock`).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
 			lookup := mock.ExpectQuery(regexp.QuoteMeta(cleanupDeletingSQL))
 			if deleting {
 				lookup.WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
 			} else {
 				lookup.WillReturnError(sql.ErrNoRows)
-				mock.ExpectQuery(regexp.QuoteMeta(cleanupExpiredSQL)).WithArgs(3).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
+				mock.ExpectQuery(regexp.QuoteMeta(cleanupExpiredSQL)).WithArgs(30).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
 			}
 			mock.ExpectExec(`UPDATE request_audits SET cleanup_state='deleting'`).WithArgs(id).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec(`DELETE FROM request_audit_payload_chunks`).WithArgs(id).WillReturnResult(sqlmock.NewResult(0, 128))

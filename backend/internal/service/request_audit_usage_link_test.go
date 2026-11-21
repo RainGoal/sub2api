@@ -15,6 +15,7 @@ func TestWriteUsageLogKeepsFinalIDWhenAuditLinkCannotBeQueued(t *testing.T) {
 	require.NoError(t, err)
 	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(requestaudit.ConfigKey).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(`{"enabled":true,"retention_days":3,"version":1}`))
+	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(requestaudit.GroupPoliciesKey).WillReturnRows(sqlmock.NewRows([]string{"value"}))
 	manager := requestaudit.NewManager(db)
 	require.NoError(t, manager.Start(context.Background()))
 	t.Cleanup(func() { require.NoError(t, manager.Stop(context.Background())) })

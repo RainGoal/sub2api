@@ -1,23 +1,3 @@
-<script lang="ts">
-// Share the read budget across dialog instances, including requests still finishing after close.
-const pendingPayloadReads: Array<() => Promise<void>> = []
-let activePayloadReads = 0
-
-function queuePayloadRead(task: () => Promise<void>) {
-  pendingPayloadReads.push(task)
-  drainPayloadReads()
-}
-
-function drainPayloadReads() {
-  while (activePayloadReads < 2 && pendingPayloadReads.length) {
-    const task = pendingPayloadReads.shift()!
-    activePayloadReads++
-    const finish = () => { activePayloadReads--; drainPayloadReads() }
-    void task().then(finish, finish)
-  }
-}
-</script>
-
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -25,6 +5,7 @@ import { extractApiErrorCode, extractI18nErrorMessage } from '@/utils/apiError'
 import api from './api'
 import RequestAuditBodyContent from './RequestAuditBodyContent.vue'
 import { BODY_CONTENT_MAX_BYTES } from './bodyContent'
+import { queuePayloadRead } from './payloadReads'
 import type { RequestAuditPayload, RequestAuditRecord } from './types'
 
 const props = defineProps<{ record: RequestAuditRecord }>()
@@ -62,6 +43,7 @@ const stateLabel = (state: string) => ['complete', 'capturing', 'in_progress', '
 // capture_state describes the whole record; partial is the requested part's integrity.
 const partState = (part: Part) => panels[part].payload?.partial === false ? 'complete' : panels[part].payload?.partial === true ? 'partial' : 'unknown'
 const canAllowPartial = (part: Part) => props.record.capture_state !== 'complete' || props.record.terminal_manifest?.[part]?.complete === false || panels[part].allowPartial || panels[part].payload?.partial || ['AUDIT_PAYLOAD_INCOMPLETE', 'AUDIT_PAYLOAD_NOT_READY'].includes(panels[part].errorCode || '')
+const notSelected = (part: Part) => props.record.terminal_manifest?.[part]?.reason === 'not_selected'
 
 function resetBodyContent() {
   bodyContentVersion++
@@ -163,7 +145,10 @@ function downloadPart(part: Part) {
 watch(() => props.record.id, () => {
   generation++
   bodyMode.value = 'content'
-  for (const part of parts) { panels[part] = newState(); loadPart(part) }
+  for (const part of parts) {
+    panels[part] = newState()
+    if (!notSelected(part)) loadPart(part)
+  }
 }, { immediate: true })
 onBeforeUnmount(() => { disposed = true; generation++ })
 </script>
@@ -179,12 +164,13 @@ onBeforeUnmount(() => { disposed = true; generation++ })
             <span class="font-mono text-[11px] text-slate-400">{{ part === 'body' && bodyMode === 'content' && bodyContent.content !== null ? 'utf8' : panels[part].payload?.encoding }}</span>
           </template>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
+        <div v-if="!notSelected(part)" class="flex flex-wrap items-center gap-2">
           <button type="button" :data-test="`refresh-${part}`" class="btn btn-secondary btn-sm" :disabled="panels[part].loading || panels[part].downloading" @click="loadPart(part)">{{ t('admin.requestAudit.refresh') }}</button>
           <button type="button" :data-test="`download-${part}`" class="btn btn-secondary btn-sm" :disabled="panels[part].loading || panels[part].downloading" @click="downloadPart(part)">{{ panels[part].downloading ? t('admin.requestAudit.downloading') : t('admin.requestAudit.download') }}</button>
         </div>
       </header>
-      <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-700/50 px-4 py-2.5 text-xs text-slate-300">
+      <p v-if="notSelected(part)" class="px-4 py-3 text-xs text-slate-400">{{ t('admin.requestAudit.notSelected') }}</p>
+      <div v-else class="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-slate-700/50 px-4 py-2.5 text-xs text-slate-300">
         <div v-if="part === 'body'" class="inline-flex gap-1 rounded border border-slate-700 p-0.5" :aria-label="t('admin.requestAudit.bodyContent.view')">
           <button v-for="mode in ['content', 'raw'] as const" :key="mode" type="button" :data-test="`body-mode-${mode}`" :aria-pressed="bodyMode === mode" class="rounded px-2.5 py-1 transition-colors" :class="bodyMode === mode ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-100'" @click="setBodyMode(mode)">{{ t(`admin.requestAudit.bodyContent.${mode}`) }}</button>
         </div>
@@ -192,7 +178,7 @@ onBeforeUnmount(() => { disposed = true; generation++ })
         <label v-if="canAllowPartial(part)" class="flex items-center gap-2 text-amber-300"><input v-model="panels[part].allowPartial" type="checkbox" :data-test="`partial-${part}`" class="rounded border-slate-600 accent-amber-500" @change="loadPart(part)" />{{ t('admin.requestAudit.allowPartial') }}</label>
         <label v-if="pretty[part] !== null && (part !== 'body' || bodyMode === 'raw')" class="flex items-center gap-2" :title="t('admin.requestAudit.formatJson')"><input v-model="panels[part].formatted" type="checkbox" :data-test="`format-${part}`" class="rounded border-slate-600 accent-primary-500" />{{ t('admin.requestAudit.payloads.pretty') }}</label>
       </div>
-      <div class="request-audit-payload-content bg-[#070c15]">
+      <div v-if="!notSelected(part)" class="request-audit-payload-content bg-[#070c15]">
         <p v-if="panels[part].loading" role="status" class="px-4 py-10 text-center text-xs text-slate-400">{{ t('common.loading') }}</p>
         <div v-else-if="panels[part].error" role="alert" class="space-y-3 px-4 py-5">
           <p class="break-words text-sm text-red-300">{{ panels[part].error }}</p>
@@ -213,7 +199,7 @@ onBeforeUnmount(() => { disposed = true; generation++ })
           <pre v-else :data-test="`content-${part}`" :aria-label="t(`admin.requestAudit.parts.${part}`)" tabindex="0" class="min-h-24 overflow-auto whitespace-pre-wrap break-all px-4 py-4 font-mono text-xs leading-6 text-slate-200 selection:bg-primary-500/30 focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary-500" :class="part === 'body' ? 'max-h-80' : 'max-h-56'">{{ panels[part].formatted && pretty[part] !== null ? pretty[part] : panels[part].payload?.content }}</pre>
         </template>
       </div>
-      <footer class="space-y-2 border-t border-slate-700/60 px-4 py-3">
+      <footer v-if="!notSelected(part)" class="space-y-2 border-t border-slate-700/60 px-4 py-3">
         <div :data-test="`manifest-${part}`" class="space-y-1 text-xs leading-5 text-slate-400" :title="t('admin.requestAudit.manifestHint')">
           <p v-if="record.terminal_manifest?.[part]" class="flex flex-wrap gap-x-2">
             <span>{{ t('admin.requestAudit.payloads.manifest') }} <span :class="record.terminal_manifest[part]?.complete ? 'text-emerald-300' : 'text-amber-300'">{{ stateLabel(record.terminal_manifest[part]?.complete ? 'complete' : 'partial') }}</span></span>

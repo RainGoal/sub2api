@@ -66,8 +66,8 @@ func RequestAuditBegin(manager *requestaudit.Manager) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		headers := requestAuditInboundHeaders(c, manager.Enabled())
 		if manager == nil {
+			requestAuditInboundHeaders(c, false)
 			c.Next()
 			return
 		}
@@ -75,8 +75,8 @@ func RequestAuditBegin(manager *requestaudit.Manager) gin.HandlerFunc {
 			Kind: "http_request", ReceivedAt: time.Now(), Method: c.Request.Method,
 			RoutePattern: c.FullPath(), Protocol: c.Request.Proto, Host: c.Request.Host,
 			RequestURI: c.Request.RequestURI, ContentLength: c.Request.ContentLength,
-			TransferEncoding: append([]string(nil), c.Request.TransferEncoding...),
-			Headers:          headers, HeaderSource: "inbound",
+			TransferEncoding: c.Request.TransferEncoding,
+			HeaderSource:     "inbound",
 		}
 		if strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") {
 			meta.Kind = "websocket_handshake"
@@ -84,18 +84,16 @@ func RequestAuditBegin(manager *requestaudit.Manager) gin.HandlerFunc {
 		if id, ok := c.Request.Context().Value(ctxkey.ClientRequestID).(string); ok {
 			meta.ClientRequestID = id
 		}
-		ingress := requestaudit.BeginIngress(manager, meta)
+		ingress, pendingGroup := requestaudit.BeginIngressWithHeaders(manager, meta, func() http.Header {
+			return requestAuditInboundHeaders(c, true)
+		})
+		if !pendingGroup {
+			requestAuditInboundHeaders(c, false)
+		}
 		state := &requestAuditState{ingress: ingress, started: time.Now()}
 		ctx := context.WithValue(c.Request.Context(), requestAuditStateKey{}, state)
 		c.Request = c.Request.WithContext(requestaudit.WithIngress(ctx, ingress))
-		if ingress != nil && ingress.Capture() != nil {
-			request := c.Request
-			if request.Body == nil || request.Body == http.NoBody {
-				ingress.Capture().EndPart(requestaudit.PartBody, true, "")
-			} else {
-				request.Body = ingress.Capture().WrapBodyWithTrailers(request.Body, func() http.Header { return request.Trailer })
-			}
-		}
+		wrapRequestAuditBody(c.Request, ingress.Capture())
 		defer func() {
 			recovered := recover()
 			if ingress != nil {
@@ -120,6 +118,17 @@ func RequestAuditBegin(manager *requestaudit.Manager) gin.HandlerFunc {
 		}()
 		c.Next()
 	}
+}
+
+func wrapRequestAuditBody(req *http.Request, capture *requestaudit.Capture) {
+	if capture == nil {
+		return
+	}
+	if req.Body == nil || req.Body == http.NoBody {
+		capture.EndPart(requestaudit.PartBody, true, "")
+		return
+	}
+	req.Body = capture.WrapBodyWithTrailers(req.Body, func() http.Header { return req.Trailer })
 }
 
 func requestAuditStateFromContext(ctx context.Context) *requestAuditState {
@@ -151,6 +160,17 @@ func RequestAuditAfterAuth(protocol string, normalizedBodyLimit ...int64) gin.Ha
 		if !ok || apiKey == nil {
 			c.Next()
 			return
+		}
+		var groupID int64
+		if apiKey.GroupID != nil {
+			groupID = *apiKey.GroupID
+		}
+		capture, captureBody := state.ingress.ActivateGroupCapture(groupID, func() http.Header {
+			return requestAuditInboundHeaders(c, true)
+		})
+		requestAuditInboundHeaders(c, false)
+		if captureBody {
+			wrapRequestAuditBody(c.Request, capture)
 		}
 		bindRequestAuditIdentity(c, state, apiKey)
 		if requestAuditCheckHTTPBan(c, state, protocol) {

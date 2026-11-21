@@ -135,6 +135,34 @@ func TestBeginRejectsFullBudgetWithoutLeakingEnvelopeReservation(t *testing.T) {
 	}
 }
 
+func TestPolicyHeaderEncodingIsDeferredToTheWriter(t *testing.T) {
+	manager := captureTestManager()
+	policy := &GroupPolicy{GroupID: 4, InboundHeaders: true}
+	capture := manager.BeginWithPolicy(RequestMeta{
+		Method:  http.MethodPost,
+		Host:    "audit.test",
+		Headers: http.Header{"X-Multi": {"one", "two"}},
+	}, policy)
+	require.NotNil(t, capture)
+	events := takeEvents(manager)
+	require.Len(t, events, 3)
+	require.Equal(t, "header_snapshot", events[1].kind)
+	var snapshot auditEvent
+	for _, event := range events {
+		if event.kind == "header_snapshot" {
+			snapshot = event
+		}
+	}
+	require.NotNil(t, snapshot.headerMeta)
+	require.NoError(t, materializeHeaderSnapshot(&snapshot))
+	require.Contains(t, string(snapshot.raw), `"X-Multi":["one","two"]`)
+	capture.Finish()
+	manager.releaseEvents(events)
+	manager.releaseEvents(takeEvents(manager))
+	require.Zero(t, manager.queueBytes.Load())
+	require.Zero(t, manager.queueEvents.Load())
+}
+
 func TestTrailersBudgetFailureMarksIncompleteWithoutLeaking(t *testing.T) {
 	m := captureTestManager(WithBufferBytes(1024 * 1024))
 	c := m.Begin(RequestMeta{})

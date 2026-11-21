@@ -16,7 +16,7 @@
 
       <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.capture') }}</span><p class="mt-1 font-semibold" :class="config?.enabled ? 'text-emerald-500' : 'text-gray-500'">{{ config ? t(`admin.requestAudit.${config.enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</p></div>
-        <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.retention') }}</span><p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ config ? t('admin.requestAudit.days', { count: config.retention_days }) : '—' }}</p></div>
+        <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.retention') }}</span><p class="mt-1 font-semibold text-gray-900 dark:text-white">{{ config ? formatRetention(retentionMinutes(config)) : '—' }}</p></div>
         <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.banEnforcement') }}</span><p class="mt-1 font-semibold" :class="config?.session_ban_enabled ? 'text-amber-500' : 'text-gray-500'">{{ config ? t(`admin.requestAudit.${config.session_ban_enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</p></div>
         <div class="card px-4 py-3"><span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.requestAudit.deviceBanEnforcement') }}</span><p class="mt-1 font-semibold" :class="config?.device_ban_enabled ? 'text-amber-500' : 'text-gray-500'">{{ config ? t(`admin.requestAudit.${config.device_ban_enabled ? 'enabled' : 'disabled'}`) : t('admin.requestAudit.unknown') }}</p></div>
       </div>
@@ -124,7 +124,15 @@
           <p v-if="loading.config" role="status" class="text-sm text-gray-500">{{ t('common.loading') }}</p>
           <fieldset v-if="draft" :disabled="loading.save || loading.config" class="space-y-5">
             <label class="flex items-center justify-between gap-4"><span class="text-sm">{{ t('admin.requestAudit.capture') }}</span><input v-model="draft.enabled" type="checkbox" role="switch" :aria-label="t('admin.requestAudit.capture')" class="h-4 w-4" /></label>
-            <label class="block space-y-2 text-sm">{{ t('admin.requestAudit.retention') }}<input v-model.number="draft.retention_days" type="number" min="1" max="30" required class="input block w-36" /></label>
+            <div class="space-y-2">
+              <label for="request-audit-retention" class="text-sm">{{ t('admin.requestAudit.retention') }}</label>
+              <div class="flex max-w-xs gap-2">
+                <input id="request-audit-retention" v-model.number="retentionValue" data-test="retention-value" type="number" min="1" :max="43200 / retentionUnits[retentionUnit]" required class="input min-w-0 flex-1" />
+                <select v-model="retentionUnit" data-test="retention-unit" class="input w-28" :aria-label="t('admin.requestAudit.retentionUnit')">
+                  <option v-for="unit in retentionUnitChoices" :key="unit" :value="unit">{{ t(`admin.requestAudit.retentionUnits.${unit}`) }}</option>
+                </select>
+              </div>
+            </div>
             <p class="text-xs text-gray-500">{{ t('admin.requestAudit.retentionHint') }}</p>
             <label class="flex items-center justify-between gap-4"><span class="text-sm">{{ t('admin.requestAudit.banEnforcement') }}</span><input v-model="draft.session_ban_enabled" type="checkbox" role="switch" :aria-label="t('admin.requestAudit.banEnforcement')" class="h-4 w-4" /></label>
             <label class="flex items-center justify-between gap-4"><span class="text-sm">{{ t('admin.requestAudit.deviceBanEnforcement') }}</span><input v-model="draft.device_ban_enabled" data-test="device-ban-toggle" type="checkbox" role="switch" :aria-label="t('admin.requestAudit.deviceBanEnforcement')" class="h-4 w-4" /></label>
@@ -136,6 +144,7 @@
           <button v-else type="button" class="btn btn-secondary" :disabled="loading.config" @click="loadConfig">{{ t('admin.requestAudit.retry') }}</button>
         </form>
         <div class="card p-5"><div class="flex items-center justify-between gap-3"><h2 class="font-semibold">{{ t('admin.requestAudit.runtime') }}</h2><button class="btn btn-secondary btn-sm" :disabled="loading.status" @click="loadStatus">{{ t('admin.requestAudit.refresh') }}</button></div><p class="my-3 text-xs leading-6 text-gray-500">{{ t('admin.requestAudit.instanceHint') }}</p><p v-if="errors.status" role="alert" class="mb-3 text-sm text-red-500">{{ errors.status }}</p><p v-if="loading.status" role="status" class="mb-3 text-sm text-gray-500">{{ t('common.loading') }}</p><RequestAuditRuntime v-if="status" :status="status" /></div>
+        <RequestAuditGroupPolicies class="lg:col-span-2" :upstream-capture-available="status?.upstream_capture_available" />
       </section>
     </div>
 
@@ -149,6 +158,7 @@
         <div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary btn-sm" data-test="same-device" :disabled="!hasDevice(detail)" @click="showDeviceRequests">{{ t('admin.requestAudit.sameDevice') }}</button><button class="btn btn-danger btn-sm" data-test="open-device-ban" :disabled="!hasDevice(detail) || loading.detail || !!detailDeviceBans.length" @click="openBan('device')">{{ t('admin.requestAudit.banDevice') }}</button><span v-if="!hasDevice(detail)" class="text-xs text-gray-500">{{ t('admin.requestAudit.deviceBanUnavailable') }}</span></div>
         <div v-if="detailDeviceBans.length" class="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-500/30 p-3 text-sm text-amber-500"><span>{{ t('admin.requestAudit.deviceAlreadyBanned') }}: {{ detailDeviceBans[0]?.public_reason }}</span><button class="btn btn-secondary btn-sm" data-test="revoke-detail-device-ban" :disabled="loading.revoke" @click="revokeTarget = detailDeviceBans[0] || null">{{ t('admin.requestAudit.revoke') }}</button></div>
         <RequestAuditPayloads :key="detail.id" :record="detail" />
+        <RequestAuditAttempts :key="detail.id" :record-id="detail.id" />
       </div>
     </BaseDialog>
 
@@ -182,6 +192,8 @@ import RequestAuditRuntime from './RequestAuditRuntime.vue'
 import RequestAuditMetadata from './RequestAuditMetadata.vue'
 import RequestAuditPlatform from './RequestAuditPlatform.vue'
 import RequestAuditPayloads from './RequestAuditPayloads.vue'
+import RequestAuditAttempts from './RequestAuditAttempts.vue'
+import RequestAuditGroupPolicies from './RequestAuditGroupPolicies.vue'
 import RequestAuditUserFilter from './RequestAuditUserFilter.vue'
 import RequestAuditGroupFilter from './RequestAuditGroupFilter.vue'
 import { useAppStore } from '@/stores/app'
@@ -215,6 +227,12 @@ const records = ref<RequestAuditPage>({ items: [], next_cursor: '', has_more: fa
 const bans = ref<{ items: AuditBan[], next_cursor: string, has_more: boolean }>({ items: [], next_cursor: '', has_more: false })
 const config = ref<RequestAuditConfig | null>(null)
 const draft = ref<RequestAuditConfig | null>(null)
+const retentionUnits = { minutes: 1, hours: 60, days: 1440 } as const
+const retentionUnitChoices = ['minutes', 'hours', 'days'] as const
+type RetentionUnit = typeof retentionUnitChoices[number]
+const retentionUnit = ref<RetentionUnit>('days')
+const retentionValue = ref<number | string>(3)
+const draftMinutes = computed(() => typeof retentionValue.value === 'number' ? retentionValue.value * retentionUnits[retentionUnit.value] : 0)
 const status = ref<RequestAuditStatus | null>(null)
 const cursor = ref('')
 const cursorHistory = ref<string[]>([])
@@ -237,7 +255,7 @@ const healthState = computed(() => {
   if (status.value.dropped_requests || status.value.dropped_events || status.value.write_failures || status.value.ban_check_failures || status.value.cleanup_failures || (status.value.writer_backoff_until && Date.parse(status.value.writer_backoff_until) > Date.now())) return 'degraded'
   return status.value.config.enabled ? 'healthy' : 'disabled'
 })
-const configDirty = computed(() => config.value && draft.value && (config.value.enabled !== draft.value.enabled || config.value.retention_days !== draft.value.retention_days || config.value.session_ban_enabled !== draft.value.session_ban_enabled || config.value.device_ban_enabled !== draft.value.device_ban_enabled))
+const configDirty = computed(() => config.value && draft.value && (config.value.enabled !== draft.value.enabled || retentionMinutes(config.value) !== draftMinutes.value || config.value.session_ban_enabled !== draft.value.session_ban_enabled || config.value.device_ban_enabled !== draft.value.device_ban_enabled))
 const errorText = (error: unknown) => extractI18nErrorMessage(error, t, 'admin.requestAudit.errors', t('admin.requestAudit.failed'))
 const stateLabel = (state: string) => states.includes(state) ? t(`admin.requestAudit.states.${state}`) : state
 const kindLabel = (kind: RequestAuditRecord['kind']) => kinds.includes(kind) ? t(`admin.requestAudit.kinds.${kind}`) : kind
@@ -246,6 +264,19 @@ const keyName = (record: RequestAuditRecord) => record.api_key_name || (record.a
 const groupName = (record: RequestAuditRecord) => record.group_name || (record.group_id ? t('admin.requestAudit.groupFallback', { id: record.group_id }) : t('admin.requestAudit.unidentifiedGroup'))
 const formatDate = (value: string) => new Date(value).toLocaleString(locale.value)
 const formatBytes = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / 1048576).toFixed(1)} MiB`
+const retentionMinutes = (value: RequestAuditConfig) => value.retention_minutes ?? value.retention_days * retentionUnits.days
+const unitFor = (minutes: number): RetentionUnit => minutes % retentionUnits.days === 0 ? 'days' : minutes % retentionUnits.hours === 0 ? 'hours' : 'minutes'
+function formatRetention(minutes: number) {
+  const unit = unitFor(minutes)
+  return t(`admin.requestAudit.${unit}`, { count: minutes / retentionUnits[unit] })
+}
+function applyConfig(value: RequestAuditConfig) {
+  const minutes = retentionMinutes(value)
+  config.value = value
+  draft.value = { ...value }
+  retentionUnit.value = unitFor(minutes)
+  retentionValue.value = minutes / retentionUnits[retentionUnit.value]
+}
 const banState = (ban: AuditBan) => ban.revoked_at ? 'revoked' : ban.expires_at && Date.parse(ban.expires_at) <= Date.now() ? 'expired' : 'active'
 const isDeviceBan = (ban: AuditBan): ban is RequestAuditDeviceBan => typeof ban.device_type === 'string'
 const hasDevice = (record: RequestAuditRecord) => !!record.device_id && (record.device_type === 'claude' || record.device_type === 'codex')
@@ -275,7 +306,7 @@ function previousPage() { if (loading.list || !cursorHistory.value.length) retur
 async function loadConfig() {
   if (loading.config || loading.save) return
   loading.config = true; errors.config = ''
-  try { config.value = await api.getConfig(); draft.value = { ...config.value } } catch (error) { errors.config = errorText(error) } finally { loading.config = false }
+  try { applyConfig(await api.getConfig()) } catch (error) { errors.config = errorText(error) } finally { loading.config = false }
 }
 async function loadStatus() {
   if (loading.status) return
@@ -284,15 +315,24 @@ async function loadStatus() {
 }
 function requestSaveConfig() {
   if (!draft.value || loading.save) return
-  if (draft.value.retention_days < (config.value?.retention_days || 0)) { confirmRetention.value = true; return }
+  if (!validRetention()) return
+  if (config.value && draftMinutes.value < retentionMinutes(config.value)) { confirmRetention.value = true; return }
   void saveConfig()
+}
+function validRetention() {
+  if (Number.isInteger(retentionValue.value) && draftMinutes.value >= 1 && draftMinutes.value <= 43200) return true
+  errors.config = t('admin.requestAudit.errors.INVALID_RETENTION_MINUTES')
+  return false
 }
 async function saveConfig() {
   confirmRetention.value = false
-  if (!draft.value || loading.save || loading.config) return
-  if (!Number.isInteger(draft.value.retention_days) || draft.value.retention_days < 1 || draft.value.retention_days > 30) { errors.config = t('admin.requestAudit.errors.INVALID_RETENTION_DAYS'); return }
+  if (!draft.value || loading.save || loading.config || !validRetention()) return
   loading.save = true; errors.config = ''
-  try { config.value = await api.updateConfig(draft.value); draft.value = { ...config.value }; app.showSuccess(t('admin.requestAudit.saved')); void loadStatus() } catch (error) { errors.config = errorText(error) } finally { loading.save = false }
+  try {
+    applyConfig(await api.updateConfig({ ...draft.value, retention_minutes: draftMinutes.value }))
+    app.showSuccess(t('admin.requestAudit.saved'))
+    void loadStatus()
+  } catch (error) { errors.config = errorText(error) } finally { loading.save = false }
 }
 function selectTab(tab: Tab) { activeTab.value = tab; if (tab === 'bans' || tab === 'deviceBans') { bans.value = { items: [], next_cursor: '', has_more: false }; void loadBans() } if (tab === 'settings') void loadStatus() }
 function refresh() { void loadConfig(); void loadStatus(); if (activeTab.value === 'bans' || activeTab.value === 'deviceBans') void loadBans(); else void loadRecords() }

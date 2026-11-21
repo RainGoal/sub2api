@@ -52,6 +52,50 @@ export default {
     "disabled": "Disabled",
     "unknown": "Unknown",
     "days": "{count} days",
+    "hours": "{count} hour | {count} hours",
+    "minutes": "{count} minute | {count} minutes",
+    "retentionUnit": "Retention unit",
+    "retentionUnits": {
+      "minutes": "Minutes",
+      "hours": "Hours",
+      "days": "Days"
+    },
+    "groupPolicies": {
+      "title": "Group capture policies",
+      "groupOnly": "Capture selected groups only",
+      "empty": "No group rules. Saving will stop capture.",
+      "addGroup": "Select a group",
+      "add": "Add group",
+      "remove": "Remove",
+      "removeGroup": "Remove group {group}",
+      "fieldsRequired": "Select at least one capture field for each group.",
+      "upstreamUnavailable": "A stable TOTP_ENCRYPTION_KEY is not configured. Configure this existing key to capture upstream payloads."
+    },
+    "captureFields": {
+      "inbound_headers": "Inbound request headers",
+      "inbound_body": "Inbound request body",
+      "upstream_request_headers": "Upstream request headers",
+      "upstream_request_body": "Upstream request body",
+      "upstream_response_headers": "Upstream response headers",
+      "upstream_response_body": "Upstream response body"
+    },
+    "attempts": {
+      "title": "Upstream attempts",
+      "show": "Show attempts",
+      "hide": "Hide",
+      "showPayload": "Show raw data",
+      "copy": "Copy this segment",
+      "empty": "No upstream attempts were recorded.",
+      "number": "Attempt {number}",
+      "account": "Account #{id}",
+      "unavailable": "Not captured",
+      "parts": {
+        "request_headers": "Upstream request headers",
+        "request_body": "Upstream request body",
+        "response_headers": "Upstream response headers",
+        "response_body": "Upstream response body"
+      }
+    },
     "tabs": {
       "requests": "Requests",
       "bans": "Session bans",
@@ -198,6 +242,7 @@ export default {
     "messageType": "Message type",
     "chunks": "{count} chunks",
     "manifestUnavailable": "No final manifest",
+    "notSelected": "This part was not selected by the group rule.",
     "manifestHint": "The manifest describes capture results. Stored bytes are checked again on read. Unfinished records, missing chunks, and read failures are not complete payloads.",
     "partialHint": "This is only the stored contiguous prefix, not a complete request.",
     "redactedHint": "Sensitive headers are masked. Downloads contain the full original values.",
@@ -212,7 +257,12 @@ export default {
       "unknown": "Instance health unknown"
     },
     "counterHint": "Counters accumulate since process start and reset on restart. Past failures do not necessarily mean a current outage; check the last write time and monitoring.",
+    "pressure": {
+      "backoff": "The audit writer is backing off.",
+      "queue": "The audit queue is near its byte limit."
+    },
     "metrics": {
+      "capturePressure": "Capture pressure",
       "cleanupFailures": "Cleanup failures",
       "writerBackoff": "Writer backoff until",
       "instance": "Instance",
@@ -233,6 +283,8 @@ export default {
       "403": "Only administrators can access request audits.",
       "INVALID_ARGUMENT": "Some request audit parameters are invalid.",
       "INVALID_RETENTION_DAYS": "Retention must be an integer from 1 to 30 days.",
+      "INVALID_RETENTION_MINUTES": "Enter a whole number within the range of 1 minute to 30 days.",
+      "UPSTREAM_AUDIT_KEY_REQUIRED": "Configure a stable TOTP_ENCRYPTION_KEY before saving upstream capture rules.",
       "CONFIG_VERSION_CONFLICT": "Another administrator updated the configuration. Reload it before saving.",
       "AUDIT_STORAGE_UNAVAILABLE": "Request audit storage is unavailable.",
       "AUDIT_READ_BUSY": "Too many payload reads are active. Try again shortly.",

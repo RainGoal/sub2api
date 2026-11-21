@@ -15,6 +15,52 @@ describe('Request audit API', () => {
     })
   })
 
+  it('sends exact minutes when given a minute value', async () => {
+    client.put.mockResolvedValue({ data: { version: 5 } })
+    await api.updateConfig({ enabled: true, retention_days: 1, retention_minutes: 15, session_ban_enabled: false, device_ban_enabled: false, version: 4 })
+    expect(client.put).toHaveBeenCalledWith('/admin/request-audits/config', {
+      enabled: true, retention_minutes: 15, session_ban_enabled: false, device_ban_enabled: false, expected_version: 4,
+    })
+  })
+
+  it('allows reading the original prefix of a selected upstream attempt part', async () => {
+    client.get.mockResolvedValue({ data: { content: 'prefix' } })
+    await api.attemptPayload('audit/id', 2, 'response_body', 65536)
+    expect(client.get).toHaveBeenCalledWith('/admin/request-audits/audit%2Fid/attempts/2/payload', {
+      params: { part: 'response_body', mode: 'preview', offset: 65536, limit: 65536, allow_partial: true },
+    })
+  })
+
+  it('uses versioned group policy endpoints and includes every capture switch', async () => {
+    const policy = {
+      group_only: true,
+      version: 6,
+      rules: [{
+        group_id: 9,
+        inbound_headers: true,
+        inbound_body: false,
+        upstream_request_headers: false,
+        upstream_request_body: true,
+        upstream_response_headers: false,
+        upstream_response_body: false,
+      }],
+    }
+    client.get.mockResolvedValue({ data: policy })
+    expect(await api.getGroupPolicies()).toEqual(policy)
+    expect(client.get).toHaveBeenCalledWith('/admin/request-audits/group-policies')
+    client.put.mockResolvedValue({ data: { ...policy, version: 7 } })
+    await api.updateGroupPolicies(policy)
+    expect(client.put).toHaveBeenCalledWith('/admin/request-audits/group-policies', {
+      group_only: true, rules: policy.rules, expected_version: 6,
+    })
+  })
+
+  it('lists upstream attempts with a raw part payload route', async () => {
+    client.get.mockResolvedValue({ data: { items: [{ attempt_no: 1 }] } })
+    await api.listAttempts('audit/id')
+    expect(client.get).toHaveBeenCalledWith('/admin/request-audits/audit%2Fid/attempts')
+  })
+
   it('requires explicit sensitive reveal and partial reading flags', async () => {
     client.get.mockResolvedValue({ data: { content: '{}' } })
     await api.payload('audit-id', 'headers')

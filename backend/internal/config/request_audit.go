@@ -5,6 +5,7 @@ import "fmt"
 // RequestAuditConfig bounds optional audit work independently of the gateway.
 // Capture enablement and retention are administrator settings stored in PostgreSQL.
 type RequestAuditConfig struct {
+	BodyCompression      bool  `mapstructure:"body_compression"`
 	BufferBytes          int64 `mapstructure:"buffer_bytes"`
 	MaxEvents            int   `mapstructure:"max_events"`
 	WriteTimeoutMS       int   `mapstructure:"write_timeout_ms"`

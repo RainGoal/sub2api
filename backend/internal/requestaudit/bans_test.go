@@ -65,6 +65,7 @@ func TestStopCancelsInFlightWriteAndReleasesAllEvents(t *testing.T) {
 	m, mock := mockManager(t)
 	m.writeTimeout = 10 * time.Second
 	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(ConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(`{"enabled":true,"retention_days":3,"version":1}`))
+	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(GroupPoliciesKey).WillReturnRows(sqlmock.NewRows([]string{"value"}))
 	mock.ExpectBegin().WillDelayFor(10 * time.Second).WillReturnError(context.DeadlineExceeded)
 	require.NoError(t, m.Start(context.Background()))
 	require.NotNil(t, m.Begin(RequestMeta{}))

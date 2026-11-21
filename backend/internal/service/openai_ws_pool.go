@@ -1,11 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"net/http/httptrace"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/requestaudit"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -81,6 +86,108 @@ type openAIWSAcquireRequest struct {
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
 	ForcePreferredConn bool
+}
+
+type openAIWSDialAudit interface {
+	Enabled(string) bool
+	AddRequestHeader(string, []string)
+	EndRequestHeaders()
+	AbortRequestHeaders()
+	CaptureHeaders(string, http.Header)
+	SetStatus(int)
+	EndPart(string, bool, string)
+	WrapBody(string, io.ReadCloser) io.ReadCloser
+}
+
+type openAIWSDialFunc func(context.Context) (openAIWSClientConn, int, http.Header, error)
+
+func dialOpenAIWSWithAudit(ctx context.Context, attempt openAIWSDialAudit, dial openAIWSDialFunc) (openAIWSClientConn, int, http.Header, error) {
+	if attempt == nil {
+		return dial(ctx)
+	}
+	observer := &openAIWSHandshakeHeaderObserver{attempt: attempt}
+	dialCtx := ctx
+	if attempt.Enabled(requestaudit.UpstreamRequestHeaders) {
+		dialCtx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+			WroteHeaderField: observer.add,
+			WroteHeaders:     observer.finish,
+		})
+	}
+	conn, status, headers, err := dial(dialCtx)
+	observer.finishAfterDial(err == nil)
+	if status == 0 && err == nil {
+		status = http.StatusSwitchingProtocols
+	}
+	if status > 0 {
+		attempt.SetStatus(status)
+	}
+	if attempt.Enabled(requestaudit.UpstreamResponseHeaders) {
+		attempt.CaptureHeaders(requestaudit.UpstreamResponseHeaders, headers)
+	}
+	if attempt.Enabled(requestaudit.UpstreamRequestBody) {
+		attempt.EndPart(requestaudit.UpstreamRequestBody, false, "protocol_upgrade")
+	}
+	if attempt.Enabled(requestaudit.UpstreamResponseBody) {
+		var handshakeErr *openAIWSHandshakeError
+		if errors.As(err, &handshakeErr) && len(handshakeErr.Body) > 0 {
+			body := attempt.WrapBody(requestaudit.UpstreamResponseBody, io.NopCloser(bytes.NewReader(handshakeErr.Body)))
+			_, _ = io.Copy(io.Discard, body)
+			_ = body.Close()
+		} else if err == nil {
+			attempt.EndPart(requestaudit.UpstreamResponseBody, false, "protocol_upgrade")
+		} else {
+			attempt.EndPart(requestaudit.UpstreamResponseBody, true, "no_body")
+		}
+	}
+	return conn, status, headers, err
+}
+
+type openAIWSHandshakeHeaderObserver struct {
+	mu       sync.Mutex
+	attempt  openAIWSDialAudit
+	observed bool
+	finished bool
+}
+
+func (o *openAIWSHandshakeHeaderObserver) add(name string, values []string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.finished {
+		return
+	}
+	o.observed = true
+	o.attempt.AddRequestHeader(name, values)
+}
+
+func (o *openAIWSHandshakeHeaderObserver) finish() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.finished && o.observed {
+		o.finished = true
+		o.attempt.EndRequestHeaders()
+	}
+}
+
+func (o *openAIWSHandshakeHeaderObserver) finishAfterDial(succeeded bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.finished {
+		return
+	}
+	o.finished = true
+	if succeeded {
+		if o.observed {
+			o.attempt.EndRequestHeaders()
+		} else {
+			o.attempt.EndPart(requestaudit.UpstreamRequestHeaders, false, "not_observed")
+		}
+		return
+	}
+	if o.observed {
+		o.attempt.AbortRequestHeaders()
+	} else {
+		o.attempt.EndPart(requestaudit.UpstreamRequestHeaders, false, "not_observed")
+	}
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
@@ -2126,7 +2233,13 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
+	var attempt *requestaudit.UpstreamAttempt
+	if target, parseErr := url.Parse(req.WSURL); parseErr == nil && req.Account != nil {
+		attempt = requestaudit.BeginUpstreamAttempt(ctx, http.MethodGet, target.Host, target.EscapedPath(), req.Account.ID)
+	}
+	conn, status, handshakeHeaders, err := dialOpenAIWSWithAudit(ctx, attempt, func(dialCtx context.Context) (openAIWSClientConn, int, http.Header, error) {
+		return p.clientDialer.Dial(dialCtx, req.WSURL, headers, req.ProxyURL)
+	})
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte

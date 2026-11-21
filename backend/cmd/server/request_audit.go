@@ -29,6 +29,17 @@ func provideRequestAuditRuntime(cfg *config.Config) (*requestAuditRuntime, error
 	}
 
 	options := []requestaudit.Option{requestaudit.WithPolicyDB(policyDB)}
+	if cfg.RequestAudit.BodyCompression {
+		options = append(options, requestaudit.WithBodyCompression())
+	}
+	if cfg.Totp.EncryptionKeyConfigured {
+		option, keyErr := requestaudit.WithDerivedUpstreamEncryptionKey(cfg.Totp.EncryptionKey)
+		if keyErr != nil {
+			slog.Warn("request audit upstream capture unavailable", "error", keyErr)
+		} else {
+			options = append(options, option)
+		}
+	}
 	if cfg.RequestAudit.BufferBytes > 0 {
 		options = append(options, requestaudit.WithBufferBytes(cfg.RequestAudit.BufferBytes))
 	}

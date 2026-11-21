@@ -2296,6 +2296,7 @@ func setDefaults() {
 	viper.SetDefault("database.user_platform_quota_flush_interval_ms", 2000)
 	viper.SetDefault("database.user_platform_quota_flush_batch_size", 1000)
 	viper.SetDefault("request_audit.buffer_bytes", int64(64*1024*1024))
+	viper.SetDefault("request_audit.body_compression", false)
 	viper.SetDefault("request_audit.max_events", 8192)
 	viper.SetDefault("request_audit.write_timeout_ms", 1000)
 	viper.SetDefault("request_audit.db_max_connections", 2)

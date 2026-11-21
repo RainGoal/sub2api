@@ -2,6 +2,7 @@ package requestaudit
 
 import (
 	"context"
+	"crypto/cipher"
 	"database/sql"
 	"errors"
 	"log"
@@ -63,12 +64,15 @@ func WithInstanceID(v string) Option {
 // Manager leaves connection pool sizing and closing to the application.
 type Manager struct {
 	db, policyDB                                                      *sql.DB
+	bodyCodec                                                         *bodyCodec
+	upstreamCrypto                                                    cipher.AEAD
 	bufferBytes                                                       int64
 	maxEvents                                                         int
 	writeTimeout, banLookupTimeout                                    time.Duration
 	instanceID                                                        string
 	mu                                                                sync.RWMutex
 	config                                                            Config
+	groupPolicies                                                     atomic.Pointer[groupPolicySnapshot]
 	configKnown, running                                              bool
 	ctx                                                               context.Context
 	cancel                                                            context.CancelFunc
@@ -90,6 +94,12 @@ type auditEvent struct {
 	completion                         *Completion
 	seq                                int
 	raw                                []byte
+	encoded                            []byte
+	headerMeta                         *RequestMeta
+	headerFields                       []headerField
+	payloadEvent                       bool
+	attempt                            *AttemptRecord
+	attemptNo                          int
 	manifest                           *PartManifest
 	manifests                          map[string]PartManifest
 	observedBodyBytes, storedBodyBytes int64
@@ -129,6 +139,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	loadCtx, cancel := context.WithTimeout(ctx, m.writeTimeout)
 	cfg, configErr := m.loadConfig(loadCtx)
 	cancel()
+	m.refreshGroupPolicies(ctx)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.running {
@@ -186,10 +197,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 }
 
 func (m *Manager) Enabled() bool {
-	if m == nil {
+	if m == nil || !m.mu.TryRLock() {
 		return false
 	}
-	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.running && m.configKnown && m.config.Enabled
 }
@@ -220,7 +230,8 @@ func (m *Manager) Status() Status {
 	cfg, known, running := m.config, m.configKnown, m.running
 	m.mu.RUnlock()
 	return Status{InstanceID: m.instanceID, Running: running, ConfigKnown: known, Config: cfg,
-		QueueBytes: m.queueBytes.Load(), BufferBytes: m.bufferBytes, QueueEvents: int(m.queueEvents.Load()),
+		UpstreamCaptureAvailable: m.UpstreamCaptureAvailable(),
+		QueueBytes:               m.queueBytes.Load(), BufferBytes: m.bufferBytes, QueueEvents: int(m.queueEvents.Load()),
 		AcceptedRequests: m.accepted.Load(), DroppedRequests: m.droppedRequests.Load(),
 		DroppedEvents: m.droppedEvents.Load(), WriteFailures: m.writeFailures.Load(),
 		WrittenEvents: m.writtenEvents.Load(), BanCheckFailures: m.banCheckFailures.Load(),
@@ -249,7 +260,7 @@ func (m *Manager) reserve(n int64, payload bool) bool {
 	if n < 0 || n > limit {
 		return false
 	}
-	for {
+	for range 4 {
 		used := m.queueBytes.Load()
 		if used > limit-n {
 			return false
@@ -258,6 +269,7 @@ func (m *Manager) reserve(n int64, payload bool) bool {
 			return true
 		}
 	}
+	return false
 }
 
 func (m *Manager) enqueue(e auditEvent) bool {
@@ -270,39 +282,56 @@ func (m *Manager) enqueue(e auditEvent) bool {
 	}
 	if !m.reserve(e.queued, len(e.raw) > 0) {
 		m.droppedEvents.Add(1)
-		m.warn("capture buffer exhausted; requests continue without complete audit capture")
 		return false
 	}
 	return m.enqueueReserved(e)
 }
 
 func (m *Manager) enqueueReserved(e auditEvent) bool {
+	return m.enqueueReservedPayload(e, nil)
+}
+
+func (m *Manager) enqueueChunk(e auditEvent, payload []byte) bool {
+	e.queued = eventOverhead + int64(len(payload))
+	if !m.reserve(e.queued, true) {
+		m.droppedEvents.Add(1)
+		return false
+	}
+	return m.enqueueReservedPayload(e, payload)
+}
+
+func (m *Manager) enqueueReservedPayload(e auditEvent, payload []byte) bool {
 	if e.createdAt.IsZero() {
 		e.createdAt = time.Now().UTC()
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.running {
+	if m.mu.TryRLock() {
+		defer m.mu.RUnlock()
+		if !m.running {
+			m.queueBytes.Add(-e.queued)
+			m.droppedEvents.Add(1)
+			return false
+		}
 		limit := int64(m.maxEvents)
-		if len(e.raw) > 0 {
+		if len(e.raw)+len(payload) > 0 || e.payloadEvent {
 			limit -= limit / 8
 		}
-		for {
+		for range 4 {
 			used := m.queueEvents.Load()
 			if used >= limit {
-				m.queueBytes.Add(-e.queued)
-				m.droppedEvents.Add(1)
-				return false
-			}
-			if m.queueEvents.CompareAndSwap(used, used+1) {
 				break
 			}
-		}
-		select {
-		case m.queue <- e:
-			return true
-		default:
-			m.queueEvents.Add(-1)
+			if m.queueEvents.CompareAndSwap(used, used+1) {
+				if len(payload) > 0 {
+					e.raw = append([]byte(nil), payload...)
+				}
+				select {
+				case m.queue <- e:
+					return true
+				default:
+					m.queueEvents.Add(-1)
+				}
+				break
+			}
 		}
 	}
 	m.queueBytes.Add(-e.queued)
@@ -360,6 +389,23 @@ func (m *Manager) flush(writeCtx context.Context, batch []auditEvent) {
 	if time.Now().UnixNano() < m.circuitUntil.Load() || writeCtx.Err() != nil {
 		m.droppedEvents.Add(int64(len(live)))
 		return
+	}
+	for i := range live {
+		e := &live[i]
+		if e.kind == "header_snapshot" || e.kind == "attempt_header_snapshot" {
+			if err := materializeHeaderSnapshot(e); err != nil {
+				e.kind = "discarded"
+				e.payloadEvent = false
+				m.droppedEvents.Add(1)
+				continue
+			}
+		}
+		if e.kind == "chunk" && e.part == PartBody || e.kind == "attempt_chunk" && isBodyPart(e.part) {
+			if codec, encoded := m.bodyCodec.encode(e.raw); codec == codecZstd && m.reserve(int64(len(encoded)), false) {
+				e.encoded = encoded
+				defer m.queueBytes.Add(-int64(len(encoded)))
+			}
+		}
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		ctx, cancel := context.WithTimeout(writeCtx, m.writeTimeout)
@@ -429,7 +475,7 @@ func (m *Manager) drain(ctx context.Context, queue <-chan auditEvent) {
 
 func (m *Manager) maintenanceLoop(ctx context.Context) {
 	defer m.wg.Done()
-	refresh, cleanup := time.NewTicker(30*time.Second), time.NewTicker(5*time.Minute)
+	refresh, cleanup := time.NewTicker(30*time.Second), time.NewTicker(time.Minute)
 	defer refresh.Stop()
 	defer cleanup.Stop()
 	for {
@@ -449,6 +495,7 @@ func (m *Manager) maintenanceLoop(ctx context.Context) {
 			} else {
 				m.warn("configuration refresh failed; retaining the last known setting")
 			}
+			m.refreshGroupPolicies(ctx)
 		case <-cleanup.C:
 			m.cleanupOnce(ctx)
 		}

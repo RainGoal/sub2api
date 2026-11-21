@@ -35,7 +35,7 @@ CREATE TABLE users(id bigint PRIMARY KEY,username text,email text,deleted_at tim
 CREATE TABLE api_keys(id bigint PRIMARY KEY,user_id bigint,name text,deleted_at timestamptz);
 CREATE TABLE groups(id bigint PRIMARY KEY,platform text,name text,deleted_at timestamptz)`)
 	require.NoError(t, err)
-	for _, name := range []string{"243_request_audit.sql", "244_request_audit_cleanup_index.sql", "245_request_audit_global_session_index.sql", "246_request_audit_filter_indexes.sql", "247_request_audit_device_bans.sql"} {
+	for _, name := range []string{"243_request_audit.sql", "244_request_audit_cleanup_index.sql", "245_request_audit_global_session_index.sql", "246_request_audit_filter_indexes.sql", "247_request_audit_device_bans.sql", "255_request_audit_body_storage.sql"} {
 		migration, readErr := migrations.FS.ReadFile(name)
 		require.NoError(t, readErr)
 		for range 2 {
@@ -43,7 +43,9 @@ CREATE TABLE groups(id bigint PRIMARY KEY,platform text,name text,deleted_at tim
 			require.NoError(t, err, "migration must safely rerun")
 		}
 	}
-	m := NewManager(db)
+	encryption, err := WithDerivedUpstreamEncryptionKey(strings.Repeat("ab", 32))
+	require.NoError(t, err)
+	m := NewManager(db, encryption)
 	m.running, m.configKnown, m.config.Enabled = true, true, true
 	m.queue = make(chan auditEvent, m.maxEvents)
 	create := func(body []byte) string {
@@ -244,6 +246,60 @@ INSERT INTO groups VALUES(301,'composite','Engineering',NULL)`)
 
 	t.Run("device policy spans keys and survives source retention", func(t *testing.T) {
 		testDevicePolicyIntegration(t, ctx, db, m)
+	})
+
+	t.Run("minute retention covers encrypted upstream attempts", func(t *testing.T) {
+		id := create([]byte("upstream source"))
+		original, err := m.GetConfig(ctx)
+		require.NoError(t, err)
+		cfg, err := m.UpdateConfig(ctx, ConfigUpdate{Enabled: true, RetentionMinutes: 1,
+			SessionBanEnabled: original.SessionBanEnabled, DeviceBanEnabled: original.DeviceBanEnabled,
+			ExpectedVersion: original.Version, UpdatedBy: 1})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := m.UpdateConfig(ctx, ConfigUpdate{Enabled: original.Enabled, RetentionMinutes: original.RetentionMinutes,
+				SessionBanEnabled: original.SessionBanEnabled, DeviceBanEnabled: original.DeviceBanEnabled,
+				ExpectedVersion: cfg.Version, UpdatedBy: 1})
+			require.NoError(t, err)
+		})
+		first := []byte(`[{"name":"Authorization",`)
+		second := []byte(`"values":["test-only-value"]}]`)
+		full := append(append([]byte{}, first...), second...)
+		part := UpstreamRequestHeaders
+		require.NoError(t, m.persistBatch(ctx, []auditEvent{
+			{kind: "attempt_begin", id: id, attemptNo: 1, attempt: &AttemptRecord{AttemptNo: 1, ReceivedAt: time.Now(), Method: "POST", Host: "mock.invalid",
+				Path: "/v1/messages", Parts: map[string]PartManifest{part: {Reason: "capturing"}}}},
+			{kind: "attempt_status", id: id, attemptNo: 1, attempt: &AttemptRecord{StatusCode: 200}},
+			{kind: "attempt_chunk", id: id, attemptNo: 1, part: part, seq: 0, raw: first},
+			{kind: "attempt_chunk", id: id, attemptNo: 1, part: part, seq: 1, raw: second},
+			{kind: "attempt_end", id: id, attemptNo: 1, part: part, manifest: &PartManifest{ExpectedChunks: 2, ExpectedBytes: int64(len(full)), Complete: true}},
+		}))
+		var ciphertext []byte
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT payload FROM request_audit_upstream_chunks WHERE audit_id=$1 AND seq=1`, id).Scan(&ciphertext))
+		require.False(t, bytes.Contains(ciphertext, []byte("test-only-value")))
+		attempts, err := m.ListAttempts(ctx, id)
+		require.NoError(t, err)
+		require.Len(t, attempts, 1)
+		require.Equal(t, 200, attempts[0].StatusCode)
+		require.True(t, attempts[0].Parts[part].Complete)
+		offset := int64(len(first) - 2)
+		preview, err := m.ReadAttemptPayload(ctx, id, 1, part, offset, 8, false)
+		require.NoError(t, err)
+		require.Equal(t, full[offset:offset+8], preview.Bytes)
+		require.EqualValues(t, len(full), preview.TotalBytes)
+		_, err = db.ExecContext(ctx, `UPDATE request_audits SET received_at=NOW()-INTERVAL '2 minutes' WHERE id=$1`, id)
+		require.NoError(t, err)
+		_, err = m.ListAttempts(ctx, id)
+		require.Error(t, err)
+		_, err = m.ReadAttemptPayload(ctx, id, 1, part, 0, 16, true)
+		require.Error(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE request_audits SET received_at=NOW()-INTERVAL '400 days' WHERE id=$1`, id)
+		require.NoError(t, err)
+		_, err = m.cleanupBatch(ctx)
+		require.NoError(t, err)
+		var chunks int
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM request_audit_upstream_chunks WHERE audit_id=$1`, id).Scan(&chunks))
+		require.Zero(t, chunks)
 	})
 
 	t.Run("cleanup branches have ordered index paths", func(t *testing.T) {

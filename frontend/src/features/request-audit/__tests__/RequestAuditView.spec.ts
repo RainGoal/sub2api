@@ -5,7 +5,7 @@ import RequestAuditPlatform from '../RequestAuditPlatform.vue'
 import RequestAuditGroupFilter from '../RequestAuditGroupFilter.vue'
 import RequestAuditUserFilter from '../RequestAuditUserFilter.vue'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), listDeviceBans: vi.fn(), getDeviceBan: vi.fn(), createDeviceBan: vi.fn(), revokeDeviceBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(), getGroups: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), payload: vi.fn(), download: vi.fn(), getConfig: vi.fn(), updateConfig: vi.fn(), status: vi.fn(), listBans: vi.fn(), getBan: vi.fn(), createBan: vi.fn(), revokeBan: vi.fn(), listDeviceBans: vi.fn(), getDeviceBan: vi.fn(), createDeviceBan: vi.fn(), revokeDeviceBan: vi.fn(), showSuccess: vi.fn(), showError: vi.fn(), getGroups: vi.fn(), getGroupPolicies: vi.fn(), updateGroupPolicies: vi.fn(), listAttempts: vi.fn(), attemptPayload: vi.fn() }))
 vi.mock('../api', () => ({ default: mocks }))
 vi.mock('@/api/admin/groups', () => ({ default: { getAllIncludingInactive: mocks.getGroups }, getAllIncludingInactive: mocks.getGroups }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => mocks }))
@@ -47,6 +47,7 @@ describe('RequestAuditView', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset())
     mocks.getConfig.mockResolvedValue({ enabled: true, retention_days: 3, session_ban_enabled: false, device_ban_enabled: false, version: 2 })
+    mocks.getGroupPolicies.mockResolvedValue({ group_only: false, rules: [], version: 1 })
     mocks.status.mockResolvedValue({ instance_id: 'instance-one', running: true, config_known: true, config: { enabled: true }, dropped_requests: 0, dropped_events: 0, write_failures: 0, ban_check_failures: 0 })
     mocks.list.mockResolvedValue({ items: [record], has_more: false, next_cursor: '' })
     mocks.get.mockResolvedValue(record)
@@ -171,13 +172,61 @@ describe('RequestAuditView', () => {
     const wrapper = createView()
     await flushPromises()
     await wrapper.get('[data-test="tab-settings"]').trigger('click')
-    await wrapper.get('input[min="1"][max="30"]').setValue('1')
+    expect(wrapper.get<HTMLSelectElement>('[data-test="retention-unit"]').element.value).toBe('days')
+    await wrapper.get('[data-test="retention-unit"]').setValue('minutes')
+    await wrapper.get('[data-test="retention-value"]').setValue('15')
     await wrapper.get('[data-test="save-config"]').trigger('submit')
     expect(mocks.updateConfig).not.toHaveBeenCalled()
-    mocks.updateConfig.mockResolvedValue({ enabled: true, retention_days: 1, session_ban_enabled: false, device_ban_enabled: false, version: 3 })
+    mocks.updateConfig.mockResolvedValue({ enabled: true, retention_days: 1, retention_minutes: 15, session_ban_enabled: false, device_ban_enabled: false, version: 3 })
     await wrapper.get('[data-test="confirm"]').trigger('click')
     await flushPromises()
-    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ retention_days: 1, session_ban_enabled: false, device_ban_enabled: false, version: 2 }))
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ retention_minutes: 15, session_ban_enabled: false, device_ban_enabled: false, version: 2 }))
+    wrapper.unmount()
+  })
+
+  it('submits a group whitelist with independent capture fields', async () => {
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-settings"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="audit-group-only"]').setValue(true)
+    await flushPromises()
+    await wrapper.get('#audit-policy-group').trigger('click')
+    await wrapper.findAll('[role="option"]').find(option => option.text() === 'Claude Pro')!.trigger('click')
+    await wrapper.get('[data-test="audit-policy-add"]').trigger('click')
+    expect(wrapper.get('[data-test="save-audit-policies"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="policy-upstream_request_headers"]').setValue(true)
+    mocks.updateGroupPolicies.mockImplementation(async input => ({ ...input, version: 2 }))
+    await wrapper.get('[data-test="save-audit-policies"]').trigger('submit')
+    await flushPromises()
+    expect(mocks.updateGroupPolicies).toHaveBeenCalledWith({
+      group_only: true, version: 1,
+      rules: [{ group_id: 7, inbound_headers: false, inbound_body: false, upstream_request_headers: true, upstream_request_body: false, upstream_response_headers: false, upstream_response_body: false }],
+    })
+    wrapper.unmount()
+  })
+
+  it('loads upstream payloads lazily and displays captured text without rewriting values', async () => {
+    const raw = '{"headers":[{"name":"Authorization","value":"Bearer  sample"}, {"name":"X-Trace","value":"  leading"}]}'
+    mocks.listAttempts.mockResolvedValue({ items: [{
+      attempt_no: 1, method: 'POST', host: 'models.example.com', path: '/v1/messages', account_id: 8,
+      received_at: '2026-10-14T00:00:01Z', parts: { request_headers: { complete: true, expected_bytes: raw.length } },
+    }] })
+    mocks.attemptPayload.mockResolvedValue({ content: raw, encoding: 'utf8', offset: 0, returned_bytes: raw.length, part_bytes: raw.length, has_more: false })
+    const wrapper = createView()
+    await flushPromises()
+    await wrapper.get('[data-test="detail-audit-one"]').trigger('click')
+    await flushPromises()
+    expect(mocks.listAttempts).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="load-audit-attempts"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="audit-attempt-1"]').trigger('click')
+    expect(mocks.attemptPayload).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="show-attempt-request_headers"]').trigger('click')
+    await flushPromises()
+    expect(mocks.attemptPayload).toHaveBeenCalledWith(record.id, 1, 'request_headers', 0, 65536)
+    expect(wrapper.get('[data-test="audit-attempt-content"]').text()).toBe(raw)
+    wrapper.unmount()
   })
 
   it('never marks an uncertain ban write as successful and offers verification', async () => {

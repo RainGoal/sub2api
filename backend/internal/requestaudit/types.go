@@ -9,14 +9,17 @@ import (
 )
 
 const (
-	PartHeaders      = "headers"
-	PartBody         = "body"
-	PartTrailers     = "trailers"
-	ChunkBytes       = 256 * 1024
-	MaxPayloadRead   = 256 * 1024
-	ConfigKey        = "request_audit_config"
-	DeviceTypeClaude = "claude"
-	DeviceTypeCodex  = "codex"
+	PartHeaders             = "headers"
+	PartBody                = "body"
+	PartTrailers            = "trailers"
+	ChunkBytes              = 256 * 1024
+	MaxPayloadRead          = 256 * 1024
+	ConfigKey               = "request_audit_config"
+	DeviceTypeClaude        = "claude"
+	DeviceTypeCodex         = "codex"
+	minutesPerDay           = 24 * 60
+	maxRetentionDays        = 30
+	defaultRetentionMinutes = 3 * minutesPerDay
 )
 
 type Error struct {
@@ -34,6 +37,7 @@ func failure(status int, code, message string) error {
 type Config struct {
 	Enabled           bool      `json:"enabled"`
 	RetentionDays     int       `json:"retention_days"`
+	RetentionMinutes  int       `json:"retention_minutes"`
 	SessionBanEnabled bool      `json:"session_ban_enabled"`
 	DeviceBanEnabled  bool      `json:"device_ban_enabled"`
 	Version           int64     `json:"version"`
@@ -41,11 +45,14 @@ type Config struct {
 	UpdatedBy         int64     `json:"updated_by"`
 }
 
-func DefaultConfig() Config { return Config{RetentionDays: 3, Version: 1} }
+func DefaultConfig() Config {
+	return Config{RetentionDays: 3, RetentionMinutes: defaultRetentionMinutes, Version: 1}
+}
 
 type ConfigUpdate struct {
 	Enabled           bool  `json:"enabled"`
 	RetentionDays     int   `json:"retention_days"`
+	RetentionMinutes  int   `json:"retention_minutes"`
 	SessionBanEnabled bool  `json:"session_ban_enabled"`
 	DeviceBanEnabled  bool  `json:"device_ban_enabled"`
 	ExpectedVersion   int64 `json:"expected_version"`
@@ -233,22 +240,23 @@ type DeviceBanList struct {
 }
 
 type Status struct {
-	InstanceID         string     `json:"instance_id"`
-	Running            bool       `json:"running"`
-	ConfigKnown        bool       `json:"config_known"`
-	Config             Config     `json:"config"`
-	QueueBytes         int64      `json:"queue_bytes"`
-	BufferBytes        int64      `json:"buffer_bytes"`
-	QueueEvents        int        `json:"queue_events"`
-	AcceptedRequests   int64      `json:"accepted_requests"`
-	DroppedRequests    int64      `json:"dropped_requests"`
-	DroppedEvents      int64      `json:"dropped_events"`
-	WriteFailures      int64      `json:"write_failures"`
-	WrittenEvents      int64      `json:"written_events"`
-	BanCheckFailures   int64      `json:"ban_check_failures"`
-	LastWriteAt        *time.Time `json:"last_write_at,omitempty"`
-	LastCleanupAt      *time.Time `json:"last_cleanup_at,omitempty"`
-	CleanupDeleted     int64      `json:"cleanup_deleted"`
-	CleanupFailures    int64      `json:"cleanup_failures"`
-	WriterBackoffUntil *time.Time `json:"writer_backoff_until,omitempty"`
+	UpstreamCaptureAvailable bool       `json:"upstream_capture_available"`
+	InstanceID               string     `json:"instance_id"`
+	Running                  bool       `json:"running"`
+	ConfigKnown              bool       `json:"config_known"`
+	Config                   Config     `json:"config"`
+	QueueBytes               int64      `json:"queue_bytes"`
+	BufferBytes              int64      `json:"buffer_bytes"`
+	QueueEvents              int        `json:"queue_events"`
+	AcceptedRequests         int64      `json:"accepted_requests"`
+	DroppedRequests          int64      `json:"dropped_requests"`
+	DroppedEvents            int64      `json:"dropped_events"`
+	WriteFailures            int64      `json:"write_failures"`
+	WrittenEvents            int64      `json:"written_events"`
+	BanCheckFailures         int64      `json:"ban_check_failures"`
+	LastWriteAt              *time.Time `json:"last_write_at,omitempty"`
+	LastCleanupAt            *time.Time `json:"last_cleanup_at,omitempty"`
+	CleanupDeleted           int64      `json:"cleanup_deleted"`
+	CleanupFailures          int64      `json:"cleanup_failures"`
+	WriterBackoffUntil       *time.Time `json:"writer_backoff_until,omitempty"`
 }

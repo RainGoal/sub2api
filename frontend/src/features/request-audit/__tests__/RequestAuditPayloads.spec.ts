@@ -81,6 +81,22 @@ describe('RequestAuditPayloads', () => {
     expect(wrapper.get('[data-test="payload-panel-headers"]').text()).toContain('admin.requestAudit.redactedHint')
   })
 
+  it('does not request or display inbound parts excluded by the group rule', async () => {
+    const value = {
+      ...record,
+      terminal_manifest: {
+        headers: { expected_chunks: 0, expected_bytes: 0, complete: true, reason: 'not_selected' },
+        body: { expected_chunks: 0, expected_bytes: 0, complete: true, reason: 'not_selected' },
+        trailers: { expected_chunks: 0, expected_bytes: 0, complete: true, reason: 'not_selected' },
+      },
+    }
+    const wrapper = createView(value)
+    await flushPromises()
+    expect(mocks.payload).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.requestAudit.notSelected')
+    expect(wrapper.text()).not.toContain('admin.requestAudit.payloads.empty')
+  })
+
   it('formats complete JSON by default and renders embedded markup only as text', async () => {
     const content = '{"html":"<script>alert(1)</script>","value":1}'
     mocks.payload.mockResolvedValue(response(content))

@@ -68,8 +68,8 @@ func TestPersistSanitizesSummariesAtDatabaseBoundary(t *testing.T) {
 	raw := []byte{0, 0xff, 1}
 	mock.ExpectBegin()
 	expectRetention(mock)
-	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WithArgs(id, int64(1), int64(2), int64(3), "", "header", "resolved", "", "", "", "", "", 3).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO request_audit_payload_chunks`).WithArgs(id, PartBody, 0, raw, len(raw), 3).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WithArgs(id, int64(1), int64(2), int64(3), "", "header", "resolved", "", "", "", "", "", defaultRetentionMinutes).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO request_audit_payload_chunks`).WithArgs(id, PartBody, 0, raw, len(raw), defaultRetentionMinutes, codecRaw).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WithArgs(id, PartBody, len(raw)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	err := m.persistBatch(context.Background(), []auditEvent{

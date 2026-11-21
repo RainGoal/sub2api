@@ -1,6 +1,8 @@
 import { apiClient } from '@/api/client'
 import type {
   CreateRequestAuditBan,
+  RequestAuditAttempt,
+  RequestAuditAttemptPart,
   RequestAuditBan,
   RequestAuditBanFilters,
   RequestAuditBanPage,
@@ -9,6 +11,7 @@ import type {
   RequestAuditDeviceBanFilters,
   RequestAuditDeviceBanPage,
   RequestAuditFilters,
+  RequestAuditGroupPolicies,
   RequestAuditPage,
   RequestAuditPayload,
   RequestAuditRecord,
@@ -19,6 +22,28 @@ const audits = '/admin/request-audits'
 const bans = '/admin/session-bans'
 const deviceBans = '/admin/device-bans'
 const segment = (id: string) => encodeURIComponent(id)
+const attempts = (id: string) => `${audits}/${segment(id)}/attempts`
+
+async function downloadPayload(path: string, part: string, allowPartial: boolean): Promise<Blob> {
+  const { data, headers } = await apiClient.get<ArrayBuffer>(path, {
+    params: { part, mode: 'raw', allow_partial: allowPartial },
+    responseType: 'arraybuffer',
+    // Decode error envelopes before the shared authentication/error interceptor runs.
+    transformResponse: [(data: ArrayBuffer, _headers, status) => {
+      if (status && status >= 400) {
+        try { return JSON.parse(new TextDecoder().decode(data)) } catch { return data }
+      }
+      return data
+    }],
+    timeout: 120000,
+  })
+  const declared = headers['content-length']
+  const expected = Number(declared)
+  if (declared == null || declared === '' || !Number.isSafeInteger(expected) || expected < 0 || data.byteLength !== expected) {
+    throw { reason: 'AUDIT_DOWNLOAD_INCOMPLETE', message: 'Payload download did not match its declared length' }
+  }
+  return new Blob([data], { type: 'application/octet-stream' })
+}
 
 export const requestAuditAPI = {
   async list(filters: RequestAuditFilters = {}): Promise<RequestAuditPage> {
@@ -36,24 +61,20 @@ export const requestAuditAPI = {
     return data
   },
   async download(id: string, part: 'headers' | 'body' | 'trailers', allowPartial = false): Promise<Blob> {
-    const { data, headers } = await apiClient.get<ArrayBuffer>(`${audits}/${segment(id)}/payload`, {
-      params: { part, mode: 'raw', allow_partial: allowPartial },
-      responseType: 'arraybuffer',
-      // Decode error envelopes before the shared authentication/error interceptor runs.
-      transformResponse: [(data: ArrayBuffer, _headers, status) => {
-        if (status && status >= 400) {
-          try { return JSON.parse(new TextDecoder().decode(data)) } catch { return data }
-        }
-        return data
-      }],
-      timeout: 120000,
+    return downloadPayload(`${audits}/${segment(id)}/payload`, part, allowPartial)
+  },
+  async listAttempts(id: string): Promise<{ items: RequestAuditAttempt[] }> {
+    const { data } = await apiClient.get<{ items: RequestAuditAttempt[] }>(attempts(id))
+    return data
+  },
+  async attemptPayload(id: string, attempt: number, part: RequestAuditAttemptPart, offset = 0, limit = 65536): Promise<RequestAuditPayload> {
+    const { data } = await apiClient.get<RequestAuditPayload>(`${attempts(id)}/${attempt}/payload`, {
+      params: { part, mode: 'preview', offset, limit, allow_partial: true },
     })
-    const declared = headers['content-length']
-    const expected = Number(declared)
-    if (declared == null || declared === '' || !Number.isSafeInteger(expected) || expected < 0 || data.byteLength !== expected) {
-      throw { reason: 'AUDIT_DOWNLOAD_INCOMPLETE', message: 'Payload download did not match its declared length' }
-    }
-    return new Blob([data], { type: 'application/octet-stream' })
+    return data
+  },
+  async downloadAttempt(id: string, attempt: number, part: RequestAuditAttemptPart): Promise<Blob> {
+    return downloadPayload(`${attempts(id)}/${attempt}/payload`, part, true)
   },
   async getConfig(): Promise<RequestAuditConfig> {
     const { data } = await apiClient.get<RequestAuditConfig>(`${audits}/config`)
@@ -62,10 +83,20 @@ export const requestAuditAPI = {
   async updateConfig(config: RequestAuditConfig): Promise<RequestAuditConfig> {
     const { data } = await apiClient.put<RequestAuditConfig>(`${audits}/config`, {
       enabled: config.enabled,
-      retention_days: config.retention_days,
+      ...(config.retention_minutes === undefined ? { retention_days: config.retention_days } : { retention_minutes: config.retention_minutes }),
       session_ban_enabled: config.session_ban_enabled,
       device_ban_enabled: config.device_ban_enabled,
       expected_version: config.version,
+    })
+    return data
+  },
+  async getGroupPolicies(): Promise<RequestAuditGroupPolicies> {
+    const { data } = await apiClient.get<RequestAuditGroupPolicies>(`${audits}/group-policies`)
+    return data
+  },
+  async updateGroupPolicies(policies: RequestAuditGroupPolicies): Promise<RequestAuditGroupPolicies> {
+    const { data } = await apiClient.put<RequestAuditGroupPolicies>(`${audits}/group-policies`, {
+      group_only: policies.group_only, rules: policies.rules, expected_version: policies.version,
     })
     return data
   },

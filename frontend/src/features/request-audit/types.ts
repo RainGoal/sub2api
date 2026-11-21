@@ -73,6 +73,7 @@ export interface RequestAuditFilters {
 export interface RequestAuditConfig {
   enabled: boolean
   retention_days: number
+  retention_minutes?: number
   session_ban_enabled: boolean
   device_ban_enabled: boolean
   version: number
@@ -80,10 +81,39 @@ export interface RequestAuditConfig {
   updated_by?: number
 }
 
+export const REQUEST_AUDIT_CAPTURE_FIELDS = [
+  'inbound_headers', 'inbound_body',
+  'upstream_request_headers', 'upstream_request_body',
+  'upstream_response_headers', 'upstream_response_body',
+] as const
+export type RequestAuditCaptureField = typeof REQUEST_AUDIT_CAPTURE_FIELDS[number]
+export type RequestAuditGroupRule = { group_id: number } & Record<RequestAuditCaptureField, boolean>
+
+export interface RequestAuditGroupPolicies {
+  group_only: boolean
+  rules: RequestAuditGroupRule[]
+  version: number
+}
+
+export const REQUEST_AUDIT_ATTEMPT_PARTS = ['request_headers', 'request_body', 'response_headers', 'response_body'] as const
+export type RequestAuditAttemptPart = typeof REQUEST_AUDIT_ATTEMPT_PARTS[number]
+
+export interface RequestAuditAttempt {
+  attempt_no: number
+  method: string
+  host: string
+  path: string
+  account_id?: number
+  status_code?: number
+  received_at: string
+  parts?: Partial<Record<RequestAuditAttemptPart, RequestAuditManifest>>
+}
+
 export interface RequestAuditStatus {
   instance_id: string
   running: boolean
   config_known: boolean
+  upstream_capture_available?: boolean
   config: RequestAuditConfig
   accepted_requests: number
   dropped_requests: number

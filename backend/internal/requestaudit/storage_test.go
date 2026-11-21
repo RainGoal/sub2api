@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -41,8 +40,12 @@ func expectRecord(mock sqlmock.Sqlmock, id, state, reason string, manifests map[
 }
 
 func expectRetention(mock sqlmock.Sqlmock) {
+	expectRetentionMinutes(mock, defaultRetentionMinutes)
+}
+
+func expectRetentionMinutes(mock sqlmock.Sqlmock, minutes int) {
 	mock.ExpectExec(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock_shared(hashtext($1))`)).WithArgs(ConfigKey).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + retentionDaysSQL)).WillReturnRows(sqlmock.NewRows([]string{"days"}).AddRow(3))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + retentionMinutesSQL)).WillReturnRows(sqlmock.NewRows([]string{"minutes"}).AddRow(minutes))
 }
 
 func TestReadPayloadRejectsMissingTailDespiteCompleteMetadata(t *testing.T) {
@@ -61,7 +64,7 @@ func TestReadPayloadPartialReturnsOnlyPrefixBeforeMissingChunk(t *testing.T) {
 	id := uuid.NewString()
 	expectRecord(mock, id, "partial", "missing_chunks", map[string]PartManifest{PartBody: {ExpectedChunks: 3, ExpectedBytes: 9}})
 	mock.ExpectQuery(`SELECT c.seq,c.byte_count`).WithArgs(id, PartBody).WillReturnRows(sqlmock.NewRows([]string{"seq", "byte_count"}).AddRow(0, 3).AddRow(2, 3))
-	mock.ExpectQuery(`WITH positions AS`).WithArgs(id, PartBody, 1, int64(1), int64(3)).WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow([]byte("bc")))
+	mock.ExpectQuery(`WITH positions AS`).WithArgs(id, PartBody, 1, int64(1), int64(3)).WillReturnRows(sqlmock.NewRows([]string{"payload", "codec", "byte_count", "start_offset"}).AddRow([]byte("bc"), codecRaw, 3, 0))
 	result, err := m.ReadPayload(context.Background(), id, PartBody, 1, 100, true)
 	require.NoError(t, err)
 	require.Equal(t, []byte("bc"), result.Bytes)
@@ -98,8 +101,8 @@ func TestPersistDroppedParentDoesNotPoisonOtherRequests(t *testing.T) {
 	id, otherID := uuid.NewString(), uuid.NewString()
 	mock.ExpectBegin()
 	expectRetention(mock)
-	mock.ExpectExec(`INSERT INTO request_audit_payload_chunks`).WithArgs(id, PartBody, 0, []byte("lost"), 4, 3).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(`SELECT payload=\$4`).WithArgs(id, PartBody, 0, []byte("lost")).WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(`INSERT INTO request_audit_payload_chunks`).WithArgs(id, PartBody, 0, []byte("lost"), 4, defaultRetentionMinutes, codecRaw).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`SELECT c.payload,c.codec,c.byte_count`).WithArgs(id, PartBody, 0, defaultRetentionMinutes).WillReturnError(sql.ErrNoRows)
 	mock.ExpectExec(`INSERT INTO request_audits`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	err := m.persistBatch(context.Background(), []auditEvent{{kind: "chunk", id: id, part: PartBody, raw: []byte("lost")}, {kind: "begin", id: otherID, meta: &RequestMeta{ID: otherID, ReceivedAt: time.Now()}}})
@@ -135,11 +138,11 @@ func TestFlushFailureReleasesBudgetAndBacksOff(t *testing.T) {
 }
 
 func TestConfigValidationAndCursor(t *testing.T) {
-	for _, days := range []int{0, -1, 31} {
-		require.Error(t, validateConfig(Config{RetentionDays: days}))
+	for _, minutes := range []int{0, -1, 43201} {
+		require.Error(t, validateRetentionMinutes(minutes))
 	}
-	for _, days := range []int{1, 3, 30} {
-		require.NoError(t, validateConfig(Config{RetentionDays: days}))
+	for _, minutes := range []int{1, 30, 43200} {
+		require.NoError(t, validateRetentionMinutes(minutes))
 	}
 	now, id := time.Now().UTC(), uuid.NewString()
 	gotTime, gotID, err := decodeCursor(encodeCursor(now, id))
@@ -149,10 +152,63 @@ func TestConfigValidationAndCursor(t *testing.T) {
 	_, _, err = decodeCursor(encodeCursor(now, "not-a-uuid"))
 	require.Error(t, err)
 	m, mock := mockManager(t)
-	raw, err := json.Marshal(Config{RetentionDays: 3})
-	require.NoError(t, err)
-	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(ConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(raw)))
+	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(ConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(`{"retention_days":3}`))
 	cfg, err := m.loadConfig(context.Background())
 	require.NoError(t, err)
 	require.EqualValues(t, 1, cfg.Version)
+	require.Equal(t, defaultRetentionMinutes, cfg.RetentionMinutes)
+}
+
+func TestMinuteRetentionWinsOverLegacyDays(t *testing.T) {
+	cfg, err := decodeConfig(`{"retention_days":3,"retention_minutes":30,"version":2}`)
+	require.NoError(t, err)
+	require.Equal(t, 30, cfg.RetentionMinutes)
+	require.Equal(t, 1, cfg.RetentionDays)
+	_, err = decodeConfig(`{"retention_days":3,"retention_minutes":0}`)
+	require.Error(t, err)
+}
+
+func TestUpdateMinuteRetentionCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		days    int
+		minutes int
+		want    int
+	}{
+		{name: "legacy settings write", days: 1, want: 30},
+		{name: "explicit legacy window change", days: 2, want: 2880},
+		{name: "precise minutes", minutes: 60, want: 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, mock := mockManager(t)
+			mock.ExpectBegin()
+			mock.ExpectExec(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtext($1))`)).WithArgs(ConfigKey).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(ConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).
+				AddRow(`{"version":2,"retention_days":1,"retention_minutes":30}`))
+			mock.ExpectExec(`INSERT INTO settings`).WithArgs(ConfigKey, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectCommit()
+			cfg, err := m.UpdateConfig(context.Background(), ConfigUpdate{
+				RetentionDays: tc.days, RetentionMinutes: tc.minutes, ExpectedVersion: 2,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, cfg.RetentionMinutes)
+			require.Equal(t, retentionDays(tc.want), cfg.RetentionDays)
+			require.EqualValues(t, 3, cfg.Version)
+		})
+	}
+}
+
+func TestExpiredTerminalEventsSkipReconciliation(t *testing.T) {
+	m, mock := mockManager(t)
+	mock.ExpectBegin()
+	expectRetentionMinutes(mock, 1)
+	mock.ExpectExec(`UPDATE request_audits SET terminal_manifest`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`UPDATE request_audits SET updated_at`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	id := uuid.NewString()
+	err := m.persistBatch(context.Background(), []auditEvent{
+		{kind: "part_end", id: id, part: PartBody, manifest: &PartManifest{}},
+		{kind: "finish", id: id, completion: &Completion{}},
+	})
+	require.NoError(t, err)
 }

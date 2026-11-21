@@ -34,6 +34,7 @@ func newRequestAuditDevicePolicyConfig(t *testing.T, cfg requestaudit.Config) (*
 	require.NoError(t, err)
 	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(requestaudit.ConfigKey).
 		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(value)))
+	mock.ExpectQuery(`SELECT value FROM settings`).WithArgs(requestaudit.GroupPoliciesKey).WillReturnRows(sqlmock.NewRows([]string{"value"}))
 	manager := requestaudit.NewManager(db)
 	require.NoError(t, manager.Start(context.Background()))
 	t.Cleanup(func() {

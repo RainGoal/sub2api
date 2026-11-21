@@ -1,6 +1,7 @@
 package requestaudit
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,8 +10,8 @@ import (
 
 // Every read evaluates the committed retention setting in the same statement.
 // Invalid settings fail closed instead of exposing data with a cached window.
-const retentionDaysSQL = `COALESCE((SELECT (value::jsonb->>'retention_days')::int FROM settings WHERE key='request_audit_config'),3)`
-const visibleRecordSQL = `cleanup_state='active' AND ` + retentionDaysSQL + ` BETWEEN 1 AND 30 AND received_at >= NOW() - (` + retentionDaysSQL + ` * INTERVAL '1 day')`
+const retentionMinutesSQL = `COALESCE((SELECT COALESCE((value::jsonb->>'retention_minutes')::int,(value::jsonb->>'retention_days')::int*1440) FROM settings WHERE key='request_audit_config'),4320)`
+const visibleRecordSQL = `cleanup_state='active' AND ` + retentionMinutesSQL + ` BETWEEN 1 AND 43200 AND received_at >= NOW() - (` + retentionMinutesSQL + ` * INTERVAL '1 minute')`
 
 func validPart(part string) bool {
 	return part == PartHeaders || part == PartBody || part == PartTrailers
@@ -22,21 +23,21 @@ func lockRetention(ctx context.Context, tx *sql.Tx) (int, error) {
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext($1))`, ConfigKey); err != nil {
 		return 0, err
 	}
-	var days int
-	if err := tx.QueryRowContext(ctx, `SELECT `+retentionDaysSQL).Scan(&days); err != nil {
+	var minutes int
+	if err := tx.QueryRowContext(ctx, `SELECT `+retentionMinutesSQL).Scan(&minutes); err != nil {
 		return 0, err
 	}
-	if err := validateConfig(Config{RetentionDays: days}); err != nil {
+	if err := validateRetentionMinutes(minutes); err != nil {
 		return 0, err
 	}
-	return days, nil
+	return minutes, nil
 }
 
 func persistChunk(ctx context.Context, tx *sql.Tx, e auditEvent, retention int) error {
-	result, err := tx.ExecContext(ctx, `INSERT INTO request_audit_payload_chunks(audit_id,part,seq,payload,byte_count)
-SELECT id,$2,$3,$4,$5 FROM (SELECT id FROM request_audits WHERE id=$1 AND cleanup_state='active'
-AND received_at >= NOW() - ($6::int * INTERVAL '1 day') FOR SHARE) parent
-ON CONFLICT(audit_id,part,seq) DO NOTHING`, e.id, e.part, e.seq, e.raw, len(e.raw), retention)
+	result, err := tx.ExecContext(ctx, `INSERT INTO request_audit_payload_chunks(audit_id,part,seq,payload,byte_count,codec)
+SELECT id,$2,$3,$4,$5,$7 FROM (SELECT id FROM request_audits WHERE id=$1 AND cleanup_state='active'
+AND received_at >= NOW() - ($6::int * INTERVAL '1 minute') FOR SHARE) parent
+ON CONFLICT(audit_id,part,seq) DO NOTHING`, e.id, e.part, e.seq, eventPayload(e), len(e.raw), retention, eventCodec(e))
 	if err != nil {
 		return err
 	}
@@ -48,14 +49,22 @@ ON CONFLICT(audit_id,part,seq) DO NOTHING`, e.id, e.part, e.seq, e.raw, len(e.ra
 		_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),stored_body_bytes=stored_body_bytes+CASE WHEN $2='body' THEN $3 ELSE 0 END WHERE id=$1`, e.id, e.part, len(e.raw))
 		return err
 	}
-	var same bool
-	err = tx.QueryRowContext(ctx, `SELECT payload=$4 FROM request_audit_payload_chunks WHERE audit_id=$1 AND part=$2 AND seq=$3`, e.id, e.part, e.seq, e.raw).Scan(&same)
+	var data []byte
+	var codec, size int
+	err = tx.QueryRowContext(ctx, `SELECT c.payload,c.codec,c.byte_count FROM request_audit_payload_chunks c
+JOIN request_audits r ON r.id=c.audit_id WHERE c.audit_id=$1 AND c.part=$2 AND c.seq=$3
+AND r.cleanup_state='active' AND r.received_at >= NOW() - ($4::int * INTERVAL '1 minute') FOR SHARE OF r`,
+		e.id, e.part, e.seq, retention).Scan(&data, &codec, &size)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A dropped begin or expired parent must not poison unrelated records.
 		return nil
 	}
-	if err != nil || same {
+	if err != nil {
 		return err
+	}
+	data, err = decodeBlock(codec, size, data)
+	if err == nil && bytes.Equal(data, e.raw) {
+		return nil
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE request_audits SET capture_state='partial',capture_reason='chunk_conflict' WHERE id=$1`, e.id)
 	return err
@@ -72,6 +81,14 @@ func matchesManifest(manifest PartManifest, count partCounts) bool {
 	return manifest.ExpectedChunks >= 0 && manifest.ExpectedBytes >= 0 &&
 		manifest.ExpectedChunks == count.chunks && manifest.ExpectedBytes == count.bytes &&
 		(count.chunks == 0 || count.minSeq == 0 && count.maxSeq == count.chunks-1)
+}
+
+func reconcileUpdatedRecord(ctx context.Context, tx *sql.Tx, id string, result sql.Result) error {
+	updated, err := result.RowsAffected()
+	if err != nil || updated == 0 {
+		return err
+	}
+	return reconcileRecord(ctx, tx, id)
 }
 
 // A producer end marker alone never proves persistence. This runs in the same
@@ -118,6 +135,10 @@ func reconcileRecord(ctx context.Context, tx *sql.Tx, id string) error {
 		if !ok {
 			complete = false
 			continue
+		}
+		if manifest.Reason == "deferred_encoding" && manifest.ExpectedBytes < 0 {
+			manifest.ExpectedBytes = counts[part].bytes
+			manifest.Reason = ""
 		}
 		if !matchesManifest(manifest, counts[part]) {
 			manifest.Complete, manifest.Reason = false, "missing_chunks"

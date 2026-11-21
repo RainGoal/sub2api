@@ -42,7 +42,7 @@ func (m *Manager) persistBatch(ctx context.Context, events []auditEvent) error {
 			_, err = tx.ExecContext(ctx, `INSERT INTO request_audits
 (id,received_at,updated_at,kind,instance_id,method,route_pattern,protocol,client_request_id,connection_id,message_seq,message_type,capture_state,capture_reason,last_event_at,cleanup_state)
 SELECT $1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'capturing',NULL,$2,'active'
-WHERE $2::timestamptz >= NOW() - ($12::int * INTERVAL '1 day')
+WHERE $2::timestamptz >= NOW() - ($12::int * INTERVAL '1 minute')
 ON CONFLICT(id) DO NOTHING`,
 				e.id, e.meta.ReceivedAt, e.meta.Kind, safeSummaryText(m.instanceID), e.meta.Method, e.meta.RoutePattern, e.meta.Protocol,
 				nullString(e.meta.ClientRequestID), nullString(e.meta.ConnectionID), e.meta.MessageSeq, nullString(e.meta.MessageType), retention)
@@ -50,29 +50,33 @@ ON CONFLICT(id) DO NOTHING`,
 			if e.identity == nil {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),device_type=COALESCE(NULLIF($9,''),device_type),device_id=COALESCE(NULLIF($10,''),device_id),device_source=COALESCE(NULLIF($11,''),device_source),device_resolution=COALESCE(NULLIF($12,''),device_resolution) WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($13::int * INTERVAL '1 day')`, e.id, e.identity.UserID, e.identity.APIKeyID, e.identity.GroupID, e.identity.SessionID, e.identity.SessionSource, e.identity.SessionResolution, e.identity.Model, e.identity.DeviceType, e.identity.DeviceID, e.identity.DeviceSource, e.identity.DeviceResolution, retention)
+			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),device_type=COALESCE(NULLIF($9,''),device_type),device_id=COALESCE(NULLIF($10,''),device_id),device_source=COALESCE(NULLIF($11,''),device_source),device_resolution=COALESCE(NULLIF($12,''),device_resolution) WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($13::int * INTERVAL '1 minute')`, e.id, e.identity.UserID, e.identity.APIKeyID, e.identity.GroupID, e.identity.SessionID, e.identity.SessionSource, e.identity.SessionResolution, e.identity.Model, e.identity.DeviceType, e.identity.DeviceID, e.identity.DeviceSource, e.identity.DeviceResolution, retention)
 		case "chunk":
 			err = persistChunk(ctx, tx, e, retention)
 		case "usage_link":
 			err = persistUsageLink(ctx, tx, e, retention)
+		case "attempt_begin", "attempt_status", "attempt_chunk", "attempt_end":
+			err = m.persistAttemptEvent(ctx, tx, e, retention)
 		case "part_end":
 			if e.manifest != nil {
-				_, err = tx.ExecContext(ctx, `UPDATE request_audits SET terminal_manifest=jsonb_set(terminal_manifest,ARRAY[$2::text],$3::jsonb),updated_at=NOW(),last_event_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($4::int * INTERVAL '1 day')`, e.id, e.part, string(jsonBytes(e.manifest)), retention)
+				var result sql.Result
+				result, err = tx.ExecContext(ctx, `UPDATE request_audits SET terminal_manifest=jsonb_set(terminal_manifest,ARRAY[$2::text],$3::jsonb),updated_at=NOW(),last_event_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($4::int * INTERVAL '1 minute')`, e.id, e.part, string(jsonBytes(e.manifest)), retention)
 				if err == nil {
-					err = reconcileRecord(ctx, tx, e.id)
+					err = reconcileUpdatedRecord(ctx, tx, e.id, result)
 				}
 			}
 		case "finish":
 			if e.completion == nil {
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),http_status=$9,duration_ms=$10,outcome=$11,upstream_summary=$12,terminal_manifest=$13::jsonb,observed_body_bytes=$14,device_type=COALESCE(NULLIF($15,''),device_type),device_id=COALESCE(NULLIF($16,''),device_id),device_source=COALESCE(NULLIF($17,''),device_source),device_resolution=COALESCE(NULLIF($18,''),device_resolution),finished_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($19::int * INTERVAL '1 day')`,
+			var result sql.Result
+			result, err = tx.ExecContext(ctx, `UPDATE request_audits SET updated_at=NOW(),last_event_at=NOW(),user_id=COALESCE(NULLIF($2,0),user_id),api_key_id=COALESCE(NULLIF($3,0),api_key_id),group_id=COALESCE(NULLIF($4,0),group_id),session_id=COALESCE(NULLIF($5,''),session_id),session_source=COALESCE(NULLIF($6,''),session_source),session_resolution=COALESCE(NULLIF($7,''),session_resolution),model=COALESCE(NULLIF($8,''),model),http_status=$9,duration_ms=$10,outcome=$11,upstream_summary=$12,terminal_manifest=$13::jsonb,observed_body_bytes=$14,device_type=COALESCE(NULLIF($15,''),device_type),device_id=COALESCE(NULLIF($16,''),device_id),device_source=COALESCE(NULLIF($17,''),device_source),device_resolution=COALESCE(NULLIF($18,''),device_resolution),finished_at=NOW() WHERE id=$1 AND cleanup_state='active' AND received_at >= NOW() - ($19::int * INTERVAL '1 minute')`,
 				e.id, identityValue(e.identity, func(i Identity) int64 { return i.UserID }), identityValue(e.identity, func(i Identity) int64 { return i.APIKeyID }), identityValue(e.identity, func(i Identity) int64 { return i.GroupID }),
 				identityValue(e.identity, func(i Identity) string { return i.SessionID }), identityValue(e.identity, func(i Identity) string { return i.SessionSource }), identityValue(e.identity, func(i Identity) string { return i.SessionResolution }), identityValue(e.identity, func(i Identity) string { return i.Model }),
 				e.completion.HTTPStatus, e.completion.DurationMS, nullString(e.completion.Outcome), nullString(e.completion.UpstreamSummary), string(jsonBytes(e.manifests)), e.observedBodyBytes,
 				identityValue(e.identity, func(i Identity) string { return i.DeviceType }), identityValue(e.identity, func(i Identity) string { return i.DeviceID }), identityValue(e.identity, func(i Identity) string { return i.DeviceSource }), identityValue(e.identity, func(i Identity) string { return i.DeviceResolution }), retention)
 			if err == nil {
-				err = reconcileRecord(ctx, tx, e.id)
+				err = reconcileUpdatedRecord(ctx, tx, e.id, result)
 			}
 		}
 		if err != nil {
@@ -107,23 +111,51 @@ func (m *Manager) loadConfig(ctx context.Context) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+	cfg, err = decodeConfig(raw)
+	return cfg, err
+}
+
+func decodeConfig(raw string) (Config, error) {
+	// Distinguish a legacy settings row without a minute value from an invalid explicit value.
+	stored := struct {
+		Config
+		RetentionMinutes *int `json:"retention_minutes"`
+	}{Config: DefaultConfig()}
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
 		return DefaultConfig(), err
 	}
+	cfg := stored.Config
+	if stored.RetentionMinutes != nil {
+		cfg.RetentionMinutes = *stored.RetentionMinutes
+	} else {
+		if cfg.RetentionDays < 1 || cfg.RetentionDays > maxRetentionDays {
+			return DefaultConfig(), invalidRetentionDays()
+		}
+		cfg.RetentionMinutes = cfg.RetentionDays * minutesPerDay
+	}
+	if err := validateRetentionMinutes(cfg.RetentionMinutes); err != nil {
+		return DefaultConfig(), err
+	}
+	cfg.RetentionDays = retentionDays(cfg.RetentionMinutes)
 	if cfg.Version < 1 {
 		cfg.Version = 1
-	}
-	if err := validateConfig(cfg); err != nil {
-		return DefaultConfig(), err
 	}
 	return cfg, nil
 }
 
-func validateConfig(cfg Config) error {
-	if cfg.RetentionDays < 1 || cfg.RetentionDays > 30 {
-		return failure(400, "INVALID_RETENTION_DAYS", "retention_days must be between 1 and 30")
+func invalidRetentionDays() error {
+	return failure(400, "INVALID_RETENTION_DAYS", "retention_days must be between 1 and 30")
+}
+
+func validateRetentionMinutes(minutes int) error {
+	if minutes < 1 || minutes > maxRetentionDays*minutesPerDay {
+		return failure(400, "INVALID_RETENTION_MINUTES", "retention_minutes must be between 1 and 43200")
 	}
 	return nil
+}
+
+func retentionDays(minutes int) int {
+	return (minutes + minutesPerDay - 1) / minutesPerDay
 }
 
 func (m *Manager) GetConfig(ctx context.Context) (Config, error) {
@@ -137,8 +169,13 @@ func (m *Manager) GetConfig(ctx context.Context) (Config, error) {
 }
 
 func (m *Manager) UpdateConfig(ctx context.Context, input ConfigUpdate) (Config, error) {
-	if input.RetentionDays < 1 || input.RetentionDays > 30 {
-		return Config{}, failure(400, "INVALID_RETENTION_DAYS", "retention_days must be between 1 and 30")
+	if input.RetentionDays < 0 || input.RetentionDays > maxRetentionDays || (input.RetentionDays == 0 && input.RetentionMinutes == 0) {
+		return Config{}, invalidRetentionDays()
+	}
+	if input.RetentionMinutes != 0 {
+		if err := validateRetentionMinutes(input.RetentionMinutes); err != nil {
+			return Config{}, err
+		}
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -158,17 +195,22 @@ func (m *Manager) UpdateConfig(ctx context.Context, input ConfigUpdate) (Config,
 		return Config{}, err
 	}
 	if err == nil {
-		if err = json.Unmarshal([]byte(raw), &current); err != nil {
+		if current, err = decodeConfig(raw); err != nil {
 			return Config{}, err
 		}
-	}
-	if current.Version < 1 {
-		current.Version = 1
 	}
 	if input.ExpectedVersion != current.Version {
 		return Config{}, failure(409, "CONFIG_VERSION_CONFLICT", "configuration was updated by another administrator")
 	}
-	next := Config{Enabled: input.Enabled, RetentionDays: input.RetentionDays, SessionBanEnabled: input.SessionBanEnabled, DeviceBanEnabled: input.DeviceBanEnabled, Version: current.Version + 1, UpdatedAt: time.Now().UTC(), UpdatedBy: input.UpdatedBy}
+	minutes := input.RetentionMinutes
+	if minutes == 0 {
+		// A legacy client may send the rounded day value while editing another setting.
+		minutes = current.RetentionMinutes
+		if input.RetentionDays != current.RetentionDays {
+			minutes = input.RetentionDays * minutesPerDay
+		}
+	}
+	next := Config{Enabled: input.Enabled, RetentionDays: retentionDays(minutes), RetentionMinutes: minutes, SessionBanEnabled: input.SessionBanEnabled, DeviceBanEnabled: input.DeviceBanEnabled, Version: current.Version + 1, UpdatedAt: time.Now().UTC(), UpdatedBy: input.UpdatedBy}
 	b, _ := json.Marshal(next)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`, ConfigKey, string(b)); err != nil {
 		return Config{}, err
@@ -439,7 +481,7 @@ func (m *Manager) cleanupOnce(ctx context.Context) {
 }
 
 const cleanupDeletingSQL = `SELECT id FROM request_audits WHERE cleanup_state='deleting' ORDER BY received_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`
-const cleanupExpiredSQL = `SELECT id FROM request_audits WHERE cleanup_state='active' AND received_at < NOW() - ($1::int * INTERVAL '1 day') ORDER BY received_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`
+const cleanupExpiredSQL = `SELECT id FROM request_audits WHERE cleanup_state='active' AND received_at < NOW() - ($1::int * INTERVAL '1 minute') ORDER BY received_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`
 
 func (m *Manager) cleanupBatch(ctx context.Context) (bool, error) {
 	tx, err := m.db.BeginTx(ctx, nil)

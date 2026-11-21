@@ -84,7 +84,7 @@ func persistUsageLink(ctx context.Context, tx *sql.Tx, e auditEvent, retention i
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO request_audit_usage_links(usage_request_id,api_key_id,audit_id)
 SELECT $2,$3,id FROM (SELECT id FROM request_audits WHERE id=$1 AND api_key_id=$3 AND cleanup_state='active'
-AND received_at >= NOW() - ($4::int * INTERVAL '1 day') FOR SHARE) parent
+AND received_at >= NOW() - ($4::int * INTERVAL '1 minute') FOR SHARE) parent
 ON CONFLICT(usage_request_id,api_key_id,audit_id) DO NOTHING`, e.id, e.usageRequestID, e.usageAPIKeyID, retention)
 	return err
 }

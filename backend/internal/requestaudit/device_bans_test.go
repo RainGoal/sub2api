@@ -240,7 +240,7 @@ func TestPersistBindRetainsExactDeviceSummary(t *testing.T) {
 	mock.ExpectBegin()
 	expectRetention(mock)
 	mock.ExpectExec(`UPDATE request_audits SET updated_at=.*device_type=COALESCE.*device_id=COALESCE.*device_source=COALESCE.*device_resolution=COALESCE`).
-		WithArgs(id, int64(1), int64(2), int64(3), "", "", "", "model", "codex", "Original-Device", "header", "resolved", 3).WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs(id, int64(1), int64(2), int64(3), "", "", "", "model", "codex", "Original-Device", "header", "resolved", defaultRetentionMinutes).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	require.NoError(t, m.persistBatch(context.Background(), []auditEvent{{kind: "bind", id: id, identity: &Identity{UserID: 1, APIKeyID: 2, GroupID: 3, Model: "model", DeviceType: "codex", DeviceID: "Original-Device", DeviceSource: "header", DeviceResolution: "resolved"}}}))
 }

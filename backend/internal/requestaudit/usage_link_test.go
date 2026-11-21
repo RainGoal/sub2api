@@ -96,7 +96,7 @@ func TestPersistUsageLinksIsIdempotentAndIgnoresMissingParents(t *testing.T) {
 	mock.ExpectBegin()
 	expectRetention(mock)
 	for _, affected := range []int64{1, 0, 0} {
-		mock.ExpectExec(`INSERT INTO request_audit_usage_links`).WithArgs(id, "resp_final", int64(12), 3).
+		mock.ExpectExec(`INSERT INTO request_audit_usage_links`).WithArgs(id, "resp_final", int64(12), defaultRetentionMinutes).
 			WillReturnResult(sqlmock.NewResult(0, affected))
 	}
 	mock.ExpectCommit()

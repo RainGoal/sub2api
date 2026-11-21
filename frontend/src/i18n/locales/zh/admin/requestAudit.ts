@@ -52,6 +52,50 @@ export default {
     "disabled": "已停用",
     "unknown": "未知",
     "days": "{count} 天",
+    "hours": "{count} 小时",
+    "minutes": "{count} 分钟",
+    "retentionUnit": "保留期单位",
+    "retentionUnits": {
+      "minutes": "分钟",
+      "hours": "小时",
+      "days": "天"
+    },
+    "groupPolicies": {
+      "title": "分组采集规则",
+      "groupOnly": "仅采集指定分组",
+      "empty": "没有分组规则，保存后将停止采集。",
+      "addGroup": "选择分组",
+      "add": "添加分组",
+      "remove": "移除",
+      "removeGroup": "移除分组 {group}",
+      "fieldsRequired": "每个分组至少勾选一个采集项。",
+      "upstreamUnavailable": "当前没有稳定的 TOTP_ENCRYPTION_KEY，配置该现有密钥后才能采集上游原文。"
+    },
+    "captureFields": {
+      "inbound_headers": "入站请求头",
+      "inbound_body": "入站请求体",
+      "upstream_request_headers": "上游请求头",
+      "upstream_request_body": "上游请求体",
+      "upstream_response_headers": "上游响应头",
+      "upstream_response_body": "上游响应体"
+    },
+    "attempts": {
+      "title": "上游转发",
+      "show": "查看转发",
+      "hide": "收起",
+      "showPayload": "查看原文",
+      "copy": "复制当前段",
+      "empty": "没有上游转发记录。",
+      "number": "第 {number} 次",
+      "account": "账号 #{id}",
+      "unavailable": "未采集",
+      "parts": {
+        "request_headers": "上游请求头",
+        "request_body": "上游请求体",
+        "response_headers": "上游响应头",
+        "response_body": "上游响应体"
+      }
+    },
     "tabs": {
       "requests": "请求记录",
       "bans": "会话封禁",
@@ -198,6 +242,7 @@ export default {
     "messageType": "消息类型",
     "chunks": "{count} 块",
     "manifestUnavailable": "未收到结束清单",
+    "notSelected": "分组规则未选择此项。",
     "manifestHint": "清单描述采集结果；实际可读字节会在读取时再次核验。未结束、缺块或读取失败的内容不能视为完整。",
     "partialHint": "当前仅为已保存的连续前缀，不能视为完整请求。",
     "redactedHint": "敏感 header 已遮盖；下载会包含完整原始值。",
@@ -212,7 +257,12 @@ export default {
       "unknown": "当前实例健康状态未知"
     },
     "counterHint": "计数自当前进程启动累积，重启后归零。历史失败不等于当前仍在故障；请结合最近写入时间与监控判断。",
+    "pressure": {
+      "backoff": "审计写入正在退避。",
+      "queue": "审计队列接近字节上限。"
+    },
     "metrics": {
+      "capturePressure": "采集压力",
       "cleanupFailures": "清理失败",
       "writerBackoff": "写入退避截止",
       "instance": "实例",
@@ -233,6 +283,8 @@ export default {
       "403": "仅管理员可访问请求审计。",
       "INVALID_ARGUMENT": "请求审计参数无效。",
       "INVALID_RETENTION_DAYS": "保留天数必须是 1～30 之间的整数。",
+      "INVALID_RETENTION_MINUTES": "保留期必须是 1 分钟至 30 天之间的整数。",
+      "UPSTREAM_AUDIT_KEY_REQUIRED": "请先配置稳定的 TOTP_ENCRYPTION_KEY，再保存上游采集规则。",
       "CONFIG_VERSION_CONFLICT": "配置已由其他管理员更新，请重新读取后再保存。",
       "AUDIT_STORAGE_UNAVAILABLE": "请求审计存储不可用。",
       "AUDIT_READ_BUSY": "当前原文读取并发已满，请稍后重试。",

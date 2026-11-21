@@ -219,7 +219,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
+	client = httpClientWithGrokAccessDeniedFallback(client, accountID)
 	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
@@ -280,7 +280,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
+	client = httpClientWithGrokAccessDeniedFallback(client, accountID)
 	resp, err := doUpstreamRequest(client, req, s.upstreamDrainTimeout())
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -391,7 +391,7 @@ type grokAccessDeniedFallbackTransport struct {
 	base http.RoundTripper
 }
 
-func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
+func httpClientWithGrokAccessDeniedFallback(client *http.Client, accountID int64) *http.Client {
 	if client == nil {
 		return nil
 	}
@@ -400,7 +400,7 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	clone.Transport = &grokAccessDeniedFallbackTransport{base: base}
+	clone.Transport = &grokAccessDeniedFallbackTransport{base: &requestAuditTransport{base: base, accountID: accountID}}
 	return &clone
 }
 

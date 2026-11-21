@@ -60,7 +60,7 @@ var auditExtraAllowedKeys = map[string]struct{}{
 	"http_status": {}, "latency_ms": {}, "token_applied": {}, "retryable": {},
 	"event_id": {}, "requested_count": {}, "deleted_events": {}, "deleted_jobs": {},
 	"matched_count": {}, "snapshot_max_id": {}, "filter_hash": {}, "confirm": {},
-	"audit_id": {}, "ban_id": {}, "part": {}, "offset": {}, "returned_bytes": {}, "reveal_sensitive": {},
+	"audit_id": {}, "ban_id": {}, "attempt": {}, "part": {}, "offset": {}, "returned_bytes": {}, "reveal_sensitive": {},
 }
 
 // SetAuditExtra adds allowlisted, scalar details to the current audit entry.
@@ -112,16 +112,18 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
-	"GET /api/v1/admin/accounts/data":              "admin.accounts.export",
-	"GET /api/v1/admin/proxies/data":               "admin.proxies.export",
-	"GET /api/v1/admin/redeem-codes/export":        "admin.redeem_codes.export",
-	"GET /api/v1/admin/backups/:id/download-url":   "admin.backups.download",
-	"GET /api/v1/admin/settings/admin-api-key":     "admin.admin_api_key.read",
-	"GET /api/v1/admin/users/:id/api-keys":         "admin.users.api_keys.read",
-	"GET /api/v1/admin/groups/:id/api-keys":        "admin.groups.api_keys.read",
-	"GET /api/v1/admin/backups/s3-config":          "admin.backups.s3_config.read",
-	"GET /api/v1/admin/data-management/s3/config":  "admin.data_management.s3_config.read",
-	"GET /api/v1/admin/request-audits/:id/payload": "admin.request_audit.payload.read",
+	"GET /api/v1/admin/accounts/data":                                "admin.accounts.export",
+	"GET /api/v1/admin/proxies/data":                                 "admin.proxies.export",
+	"GET /api/v1/admin/redeem-codes/export":                          "admin.redeem_codes.export",
+	"GET /api/v1/admin/backups/:id/download-url":                     "admin.backups.download",
+	"GET /api/v1/admin/settings/admin-api-key":                       "admin.admin_api_key.read",
+	"GET /api/v1/admin/users/:id/api-keys":                           "admin.users.api_keys.read",
+	"GET /api/v1/admin/groups/:id/api-keys":                          "admin.groups.api_keys.read",
+	"GET /api/v1/admin/backups/s3-config":                            "admin.backups.s3_config.read",
+	"GET /api/v1/admin/data-management/s3/config":                    "admin.data_management.s3_config.read",
+	"GET /api/v1/admin/request-audits/:id/payload":                   "admin.request_audit.payload.read",
+	"GET /api/v1/admin/request-audits/:id/attempts":                  "admin.request_audit.attempts.read",
+	"GET /api/v1/admin/request-audits/:id/attempts/:attempt/payload": "admin.request_audit.attempt_payload.read",
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
@@ -147,6 +149,7 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/prompt-audit/events/delete-preview":   "admin.prompt_audit.events.delete_preview",
 	"POST /api/v1/admin/prompt-audit/events/delete-by-filter": "admin.prompt_audit.events.filter_delete",
 	"PUT /api/v1/admin/request-audits/config":                 "admin.request_audit.config.update",
+	"PUT /api/v1/admin/request-audits/group-policies":         "admin.request_audit.group_policies.update",
 	"POST /api/v1/admin/session-bans":                         "admin.session_ban.create",
 	"POST /api/v1/admin/session-bans/:id/revoke":              "admin.session_ban.revoke",
 	"POST /api/v1/admin/device-bans":                          "admin.device_ban.create",

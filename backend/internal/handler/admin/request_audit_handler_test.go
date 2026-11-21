@@ -65,6 +65,7 @@ func TestRequestAuditEndpointsRequireAdministrator(t *testing.T) {
 	for name, handle := range map[string]gin.HandlerFunc{
 		"list": h.List, "get": h.Get, "config": h.GetConfig, "update": h.UpdateConfig,
 		"status": h.Status, "payload": h.Payload, "bans": h.ListBans,
+		"attempts": h.ListAttempts, "attempt_payload": h.AttemptPayload,
 		"ban": h.GetBan, "create": h.CreateBan, "revoke": h.RevokeBan,
 		"device_bans": h.ListDeviceBans, "device_ban": h.GetDeviceBan,
 		"create_device_ban": h.CreateDeviceBan, "revoke_device_ban": h.RevokeDeviceBan,
@@ -83,12 +84,19 @@ func TestRequestAuditConfigValidationAndActor(t *testing.T) {
 	var updates []requestaudit.ConfigUpdate
 	h := &RequestAuditHandler{store: requestAuditStoreStub{update: func(input requestaudit.ConfigUpdate) (requestaudit.Config, error) {
 		updates = append(updates, input)
-		return requestaudit.Config{RetentionDays: input.RetentionDays, DeviceBanEnabled: input.DeviceBanEnabled, Version: 2}, nil
+		minutes := input.RetentionMinutes
+		if minutes == 0 {
+			minutes = input.RetentionDays * 1440
+		}
+		return requestaudit.Config{RetentionDays: (minutes + 1439) / 1440, RetentionMinutes: minutes, DeviceBanEnabled: input.DeviceBanEnabled, Version: 2}, nil
 	}}}
 	router := requestAuditTestRouter("admin", h.UpdateConfig)
 	for _, body := range []string{
 		`{}`, `{"enabled":false,"session_ban_enabled":false,"retention_days":0,"expected_version":1}`,
 		`{"enabled":true,"session_ban_enabled":false,"retention_days":31,"expected_version":1}`,
+		`{"enabled":true,"session_ban_enabled":false,"retention_minutes":0,"expected_version":1}`,
+		`{"enabled":true,"session_ban_enabled":false,"retention_minutes":43201,"expected_version":1}`,
+		`{"enabled":true,"session_ban_enabled":false,"expected_version":1}`,
 		`{"enabled":true,"session_ban_enabled":false,"retention_days":3}`,
 	} {
 		require.Equal(t, 400, requestAuditTestRequest(router, "PUT", "", body).Code)
@@ -100,7 +108,12 @@ func TestRequestAuditConfigValidationAndActor(t *testing.T) {
 	require.Equal(t, int64(77), updates[0].UpdatedBy)
 	require.False(t, updates[0].Enabled)
 	require.True(t, updates[0].DeviceBanEnabled)
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"enabled":false,"retention_days":3,"session_ban_enabled":false,"device_ban_enabled":true,"version":2,"updated_at":"0001-01-01T00:00:00Z","updated_by":0}}`, w.Body.String())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"enabled":false,"retention_days":3,"retention_minutes":4320,"session_ban_enabled":false,"device_ban_enabled":true,"version":2,"updated_at":"0001-01-01T00:00:00Z","updated_by":0}}`, w.Body.String())
+	w = requestAuditTestRequest(router, "PUT", "", `{"enabled":false,"session_ban_enabled":false,"device_ban_enabled":true,"retention_minutes":1,"expected_version":2}`)
+	require.Equal(t, 200, w.Code)
+	require.Equal(t, 1, updates[1].RetentionMinutes)
+	require.EqualValues(t, 2, updates[1].ExpectedVersion)
+	require.Contains(t, w.Body.String(), `"retention_minutes":1`)
 }
 
 func TestRequestAuditBanActorAndUncertainResult(t *testing.T) {

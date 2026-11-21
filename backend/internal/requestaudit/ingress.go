@@ -23,17 +23,39 @@ type Ingress struct {
 	seq           int64
 	snapshotBytes int64
 	snapshotReady bool
+	groupScoped   bool
+	groupPolicies *groupPolicySnapshot
 	finished      bool
 }
 
 func BeginIngress(manager *Manager, meta RequestMeta) *Ingress {
+	ingress, _ := BeginIngressWithHeaders(manager, meta, nil)
+	return ingress
+}
+
+// BeginIngressWithHeaders reports whether the original headers may be needed after authentication.
+func BeginIngressWithHeaders(manager *Manager, meta RequestMeta, inboundHeaders func() http.Header) (*Ingress, bool) {
 	if manager == nil {
-		return nil
+		return nil, false
 	}
 	if meta.ID == "" {
 		meta.ID = uuid.NewString()
 	}
-	i := &Ingress{manager: manager, capture: manager.Begin(meta), meta: RequestMeta{ID: meta.ID}}
+	i := &Ingress{manager: manager, meta: RequestMeta{ID: meta.ID}}
+	if !manager.Enabled() {
+		return i, false
+	}
+	if policies := manager.groupPolicies.Load(); policies != nil && policies.groupOnly {
+		// Keep only the request metadata until authentication selects a rule.
+		meta.Headers = nil
+		i.groupScoped = true
+		i.meta, i.groupPolicies = meta, policies
+		return i, true
+	}
+	if inboundHeaders != nil {
+		meta.Headers = inboundHeaders()
+	}
+	i.capture = manager.Begin(meta)
 	if i.capture != nil && (meta.Kind == "websocket_handshake" || strings.EqualFold(meta.Headers.Get("Upgrade"), "websocket")) {
 		size := snapshotSize(meta)
 		if manager.reserve(size, true) {
@@ -45,7 +67,37 @@ func BeginIngress(manager *Manager, meta RequestMeta) *Ingress {
 			manager.warn("WebSocket handshake snapshot budget exhausted; message capture unavailable for this connection")
 		}
 	}
-	return i
+	return i, false
+}
+
+// ActivateGroupCapture runs once after the original API key is authenticated.
+func (i *Ingress) ActivateGroupCapture(groupID int64, inboundHeaders func() http.Header) (*Capture, bool) {
+	if i == nil {
+		return nil, false
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	policies := i.groupPolicies
+	if policies == nil || i.id.APIKeyID != 0 || i.finished {
+		return nil, false
+	}
+	i.groupPolicies = nil
+	meta := i.meta
+	i.meta = RequestMeta{ID: meta.ID}
+	if meta.Kind == "websocket_handshake" {
+		i.meta.Method, i.meta.RoutePattern = meta.Method, meta.RoutePattern
+		i.meta.ClientRequestID = meta.ClientRequestID
+		i.snapshotReady = true
+	}
+	policy := policies.rules[groupID]
+	if policy == nil || !i.manager.Enabled() {
+		return nil, false
+	}
+	if policy.InboundHeaders && inboundHeaders != nil {
+		meta.Headers = inboundHeaders()
+	}
+	i.capture = i.manager.BeginWithPolicy(meta, policy)
+	return i.capture, policy.InboundBody
 }
 
 func snapshotSize(meta RequestMeta) int64 {
@@ -81,13 +133,15 @@ func (i *Ingress) Capture() *Capture {
 	if i == nil {
 		return nil
 	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	return i.capture
 }
 
 // DeviceTrackingEnabled avoids parsing unused device metadata when both capture
 // and device policy are disabled. Existing bound identities remain unchanged.
 func (i *Ingress) DeviceTrackingEnabled() bool {
-	return i != nil && (i.capture != nil || i.manager != nil && i.manager.DeviceBanEnabled())
+	return i != nil && (i.Capture() != nil || i.manager != nil && i.manager.DeviceBanEnabled())
 }
 
 func (i *Ingress) Identity() Identity {
@@ -203,6 +257,21 @@ func (i *Ingress) RecordMessage(messageType string, payload []byte) {
 		i.mu.Unlock()
 		return
 	}
+	var policy *GroupPolicy
+	if policies := i.manager.groupPolicies.Load(); policies != nil && policies.groupOnly {
+		selected := policies.rules[i.id.GroupID]
+		if selected == nil {
+			i.mu.Unlock()
+			return
+		}
+		framePolicy := *selected
+		framePolicy.InboundHeaders = false
+		policy = &framePolicy
+	} else if i.groupScoped {
+		// Group-scoped handshakes do not retain the legacy raw headers snapshot.
+		i.mu.Unlock()
+		return
+	}
 	i.seq++
 	seq := i.seq
 	id := i.id
@@ -216,14 +285,16 @@ func (i *Ingress) RecordMessage(messageType string, payload []byte) {
 	meta.MessageSeq = seq
 	meta.MessageType = messageType
 	meta.ContentLength = int64(len(payload))
-	capture := i.manager.Begin(meta)
+	capture := i.manager.BeginWithPolicy(meta, policy)
 	i.mu.Unlock()
 	if capture == nil {
 		return
 	}
 	capture.Bind(id)
-	capture.Append("body", payload)
-	capture.EndPart("body", true, "")
+	if policy == nil || policy.InboundBody {
+		capture.Append(PartBody, payload)
+		capture.EndPart(PartBody, true, "")
+	}
 	capture.Complete(Completion{Outcome: "received"})
 	capture.Finish()
 }
@@ -243,11 +314,13 @@ func (i *Ingress) Finish(status int, started time.Time, outcome string, trailers
 		i.snapshotBytes = 0
 	}
 	i.meta = RequestMeta{}
+	i.groupPolicies = nil
+	capture := i.capture
 	i.mu.Unlock()
-	if i.capture == nil {
+	if capture == nil {
 		return
 	}
-	i.capture.Trailers(trailers)
-	i.capture.Complete(Completion{HTTPStatus: status, DurationMS: time.Since(started).Milliseconds(), Outcome: outcome})
-	i.capture.Finish()
+	capture.Trailers(trailers)
+	capture.Complete(Completion{HTTPStatus: status, DurationMS: time.Since(started).Milliseconds(), Outcome: outcome})
+	capture.Finish()
 }
