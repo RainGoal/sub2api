@@ -249,12 +249,16 @@ INSERT INTO groups VALUES(301,'composite','Engineering',NULL)`)
 	})
 
 	t.Run("minute retention covers encrypted upstream attempts", func(t *testing.T) {
-		id := create([]byte("upstream source"))
 		original, err := m.GetConfig(ctx)
 		require.NoError(t, err)
-		cfg, err := m.UpdateConfig(ctx, ConfigUpdate{Enabled: true, RetentionMinutes: 1,
+		enabled, err := m.UpdateConfig(ctx, ConfigUpdate{Enabled: true, RetentionMinutes: original.RetentionMinutes,
 			SessionBanEnabled: original.SessionBanEnabled, DeviceBanEnabled: original.DeviceBanEnabled,
 			ExpectedVersion: original.Version, UpdatedBy: 1})
+		require.NoError(t, err)
+		id := create([]byte("upstream source"))
+		cfg, err := m.UpdateConfig(ctx, ConfigUpdate{Enabled: true, RetentionMinutes: 1,
+			SessionBanEnabled: original.SessionBanEnabled, DeviceBanEnabled: original.DeviceBanEnabled,
+			ExpectedVersion: enabled.Version, UpdatedBy: 1})
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			_, err := m.UpdateConfig(ctx, ConfigUpdate{Enabled: original.Enabled, RetentionMinutes: original.RetentionMinutes,
