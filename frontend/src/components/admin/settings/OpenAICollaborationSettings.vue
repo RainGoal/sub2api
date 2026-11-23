@@ -23,6 +23,7 @@ const groupsError = ref('')
 const saved = ref<OpenAICollaborationSettings | null>(null)
 const draft = ref<OpenAICollaborationSettings>({
   enabled: false, plaintext_enabled: false, legacy_cipher_recovery_enabled: false,
+  batch_legacy_cipher_recovery_enabled: false,
   blank_stream_failover_enabled: false,
   blank_prelude_wait_seconds: defaultBlankPreludeWaitSeconds,
   group_ids: [], api_key_ids: []
@@ -43,12 +44,14 @@ function normalizeConfig(value: unknown): OpenAICollaborationSettings | null {
   const config = value as OpenAICollaborationSettings
   if (typeof config.enabled !== 'boolean' || typeof config.plaintext_enabled !== 'boolean' ||
     typeof config.legacy_cipher_recovery_enabled !== 'boolean' ||
+    (config.batch_legacy_cipher_recovery_enabled !== undefined && typeof config.batch_legacy_cipher_recovery_enabled !== 'boolean') ||
     (config.blank_stream_failover_enabled !== undefined && typeof config.blank_stream_failover_enabled !== 'boolean') ||
     ![config.group_ids, config.api_key_ids].every(ids => Array.isArray(ids) &&
       ids.every(id => Number.isSafeInteger(id) && id > 0))) return null
   const wait = config.blank_prelude_wait_seconds === undefined ? defaultBlankPreludeWaitSeconds : config.blank_prelude_wait_seconds
   if (!Number.isInteger(wait) || wait < minBlankPreludeWaitSeconds || wait > maxBlankPreludeWaitSeconds) return null
-  return { ...config, blank_stream_failover_enabled: config.blank_stream_failover_enabled ?? false,
+  return { ...config, batch_legacy_cipher_recovery_enabled: config.batch_legacy_cipher_recovery_enabled ?? false,
+    blank_stream_failover_enabled: config.blank_stream_failover_enabled ?? false,
     blank_prelude_wait_seconds: wait, group_ids: [...config.group_ids], api_key_ids: [...config.api_key_ids] }
 }
 function copy(config: OpenAICollaborationSettings): OpenAICollaborationSettings {
@@ -120,7 +123,12 @@ async function save(stop = false): Promise<void> {
   try {
     const result = await adminAPI.settings.updateSettings({ openai_collaboration_settings: config })
     const normalized = normalizeConfig(result?.openai_collaboration_settings)
+    const batchRecovery = result?.openai_collaboration_settings?.batch_legacy_cipher_recovery_enabled
+    const expectedBatchRecovery = config.batch_legacy_cipher_recovery_enabled
+    const batchRecoveryConfirmed = batchRecovery === expectedBatchRecovery ||
+      (batchRecovery === undefined && !expectedBatchRecovery && !saved.value.batch_legacy_cipher_recovery_enabled)
     if (!normalized || normalized.blank_prelude_wait_seconds !== config.blank_prelude_wait_seconds ||
+      !batchRecoveryConfirmed ||
       result?.openai_collaboration_settings?.blank_stream_failover_enabled !== config.blank_stream_failover_enabled) {
       loaded.value = false
       error.value = t(prefix + 'unconfirmed')
@@ -177,12 +185,21 @@ watch(() => props.active, active => {
               </div>
               <Toggle v-model="draft.plaintext_enabled" data-test="collaboration-plaintext" aria-labelledby="collaboration-plaintext-label" :disabled="busy" />
             </div>
-            <div class="flex items-start justify-between gap-4 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
-              <div>
-                <label id="collaboration-recovery-label" class="font-medium text-gray-900 dark:text-white">{{ t(prefix + 'recovery') }}</label>
-                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'recoveryHint') }}</p>
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <label id="collaboration-recovery-label" class="font-medium text-gray-900 dark:text-white">{{ t(prefix + 'recovery') }}</label>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'recoveryHint') }}</p>
+                </div>
+                <Toggle v-model="draft.legacy_cipher_recovery_enabled" data-test="collaboration-recovery" aria-labelledby="collaboration-recovery-label" :disabled="busy" />
               </div>
-              <Toggle v-model="draft.legacy_cipher_recovery_enabled" data-test="collaboration-recovery" aria-labelledby="collaboration-recovery-label" :disabled="busy" />
+              <div class="mt-4 flex items-start justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-700">
+                <div>
+                  <label id="collaboration-batch-recovery-label" class="font-medium text-gray-900 dark:text-white">{{ t(prefix + 'batchRecovery') }}</label>
+                  <p id="collaboration-batch-recovery-hint" class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t(prefix + 'batchRecoveryHint') }}</p>
+                </div>
+                <Toggle v-model="draft.batch_legacy_cipher_recovery_enabled" data-test="collaboration-batch-recovery" aria-labelledby="collaboration-batch-recovery-label" aria-describedby="collaboration-batch-recovery-hint" :disabled="busy" />
+              </div>
             </div>
             <div class="flex items-start justify-between gap-4 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
               <div>

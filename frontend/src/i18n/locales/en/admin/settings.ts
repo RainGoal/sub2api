@@ -25,6 +25,8 @@ export default {
         plaintextHint: 'Preserves the full task content and restores the collaboration tool identities expected by the client.',
         recovery: 'Lossy recovery of legacy agent ciphers',
         recoveryHint: 'After a matching encryption error, allows selected legacy agent cipher blocks to be omitted and retried once.',
+        batchRecovery: 'Batch recovery for legacy agent ciphers',
+        batchRecoveryHint: 'Requires compatibility handling and legacy cipher recovery. After a confirmed agent message cipher error, a single retry can omit multiple opaque cipher blocks while preserving plaintext. Tasks that depend on missing content may need to be reassigned.',
         blankStreamFailover: 'Fail over after blank streams',
         blankStreamFailoverHint: 'Independent of legacy cipher recovery. Buffers whitespace only before the first meaningful output and allows account switching for retryable upstream failures. The blank phase lasts at most 30 seconds, or the existing first-output deadline if earlier. Text, reasoning, tool calls and other output prevent switching to avoid duplicate execution. Successful responses retain their original spaces and line breaks.',
         blankPreludeWaitSeconds: 'Legacy cipher blank stream wait limit (seconds)',

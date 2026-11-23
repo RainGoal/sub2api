@@ -29,7 +29,7 @@ func readCollaborationSettingsResponse(t *testing.T, rec *httptest.ResponseRecor
 func TestSettingsOpenAICollaborationRoundTripAndShutdown(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, nil)
 	want := service.OpenAICollaborationSettings{Enabled: true, PlaintextEnabled: true,
-		LegacyCipherRecoveryEnabled: true, BlankStreamFailoverEnabled: true,
+		LegacyCipherRecoveryEnabled: true, BatchLegacyCipherRecoveryEnabled: true, BlankStreamFailoverEnabled: true,
 		BlankPreludeWaitSeconds: 10, GroupIDs: []int64{7}, APIKeyIDs: []int64{11}}
 	rec := doUpdateSettings(t, h, map[string]any{"openai_collaboration_settings": want}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -43,6 +43,10 @@ func TestSettingsOpenAICollaborationRoundTripAndShutdown(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
 	h.GetSettings(c)
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, want, readCollaborationSettingsResponse(t, rec))
+	want.LegacyCipherRecoveryEnabled = false
+	rec = doUpdateSettings(t, h, map[string]any{"openai_collaboration_settings": want}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, want, readCollaborationSettingsResponse(t, rec))
 	want.Enabled = false
 	rec = doUpdateSettings(t, h, map[string]any{"openai_collaboration_settings": want}, nil)
@@ -75,6 +79,7 @@ func TestSettingsOpenAICollaborationLegacySaveDefaultsBlankPrelude(t *testing.T)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Equal(t, 2, readCollaborationSettingsResponse(t, rec).BlankPreludeWaitSeconds)
 		require.False(t, readCollaborationSettingsResponse(t, rec).BlankStreamFailoverEnabled)
+		require.False(t, readCollaborationSettingsResponse(t, rec).BatchLegacyCipherRecoveryEnabled)
 		require.Equal(t, 2, h.settingService.GetOpenAICollaborationSettingsCached(context.Background()).BlankPreludeWaitSeconds)
 	}
 }
@@ -85,6 +90,7 @@ func TestSettingsOpenAICollaborationRejectsInvalidBeforeWriting(t *testing.T) {
 		map[string]any{"group_ids": []int64{7, 7}},
 		map[string]any{"api_key_ids": []int64{-1}},
 		map[string]any{"enabled": "true"},
+		map[string]any{"batch_legacy_cipher_recovery_enabled": "true"},
 		map[string]any{"blank_stream_failover_enabled": "true"},
 		map[string]any{"blank_prelude_wait_seconds": -1},
 		map[string]any{"blank_prelude_wait_seconds": 1},
@@ -110,5 +116,8 @@ func TestSettingsOpenAICollaborationChangeIsAudited(t *testing.T) {
 	require.Contains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAICollaborationSettings)
 	after = &service.SystemSettings{OpenAICollaborationSettings: before.OpenAICollaborationSettings}
 	after.OpenAICollaborationSettings.BlankStreamFailoverEnabled = true
+	require.Contains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAICollaborationSettings)
+	after = &service.SystemSettings{OpenAICollaborationSettings: before.OpenAICollaborationSettings}
+	after.OpenAICollaborationSettings.BatchLegacyCipherRecoveryEnabled = true
 	require.Contains(t, diffSettings(before, after, nil, nil, UpdateSettingsRequest{}), service.SettingKeyOpenAICollaborationSettings)
 }

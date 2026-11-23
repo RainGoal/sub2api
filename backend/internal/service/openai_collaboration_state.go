@@ -48,6 +48,7 @@ type openAICollaborationAttempt struct {
 	knownOmissions               map[string]bool
 	omissions                    []openAICollaborationOmission
 	recoveryUsed                 bool
+	batchRecoveryUsed            bool
 	completed                    bool
 	businessFailed               bool
 	deliveryFailed               bool
@@ -274,7 +275,8 @@ func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context,
 	if (ctx != nil && ctx.Err() != nil) || !live.Enabled || !live.LegacyCipherRecoveryEnabled {
 		return body, false
 	}
-	recovery, err := recoverOpenAICollaborationEncryptedContentWithPlaintext(body, resp.StatusCode, failure, true, a.knownPlaintext)
+	batch := a.policy.BatchLegacyCipherRecoveryEnabled && live.BatchLegacyCipherRecoveryEnabled && !collaborationHasUnsafeReplayInput(body, true)
+	recovery, err := recoverOpenAICollaborationEncryptedContentWithPolicy(body, resp.StatusCode, failure, true, a.knownPlaintext, batch)
 	if err != nil {
 		a.stopFailover = true
 		return body, false
@@ -288,7 +290,12 @@ func (s *OpenAIGatewayService) recoverCollaborationResponse(ctx context.Context,
 		return body, false
 	}
 	a.recoveryUsed = true
-	a.omissions = append(a.omissions, recovery.Omissions...)
+	a.batchRecoveryUsed = recovery.Selection == openAICollaborationBatchSelection
+	// Additional omissions were not individually rejected by the upstream.
+	// Apply them only to this retry, never to later requests in the session.
+	if !a.batchRecoveryUsed {
+		a.omissions = append(a.omissions, recovery.Omissions...)
+	}
 	_ = resp.Body.Close()
 	accounting, accountingErr := s.recordCollaborationFailedAttemptUsage(ctx, c, account, body, resp, failure)
 	usage, usageKnown := collaborationFailedAttemptUsage(failure)
@@ -379,7 +386,7 @@ func (s *OpenAIGatewayService) collaborationRetryError(ctx context.Context, c *g
 	}
 	if a.policy.LegacyCipherRecoveryEnabled {
 		live := s.collaborationPolicy(ctx, c, account)
-		if !live.Enabled || !live.LegacyCipherRecoveryEnabled {
+		if !live.Enabled || !live.LegacyCipherRecoveryEnabled || (a.batchRecoveryUsed && !live.BatchLegacyCipherRecoveryEnabled) {
 			return fmt.Errorf("collaboration recovery was disabled before retry")
 		}
 	}
@@ -396,6 +403,15 @@ func noteCollaborationEncryptedRecovery(c *gin.Context) {
 // An empty failed response does not prove a hosted tool had no side effects.
 // Only declarations known to execute on the client are safe to replay.
 func collaborationHasHostedTools(body []byte) bool {
+	return collaborationHasUnsafeReplayInput(body, false)
+}
+
+func collaborationHasUnsafeReplayInput(body []byte, rejectAmbiguous bool) bool {
+	request := gjson.ParseBytes(body)
+	// The retry encoder and GJSON disagree on which duplicate field wins.
+	if rejectAmbiguous && !collaborationUniqueObject(request) {
+		return true
+	}
 	var hosted func(gjson.Result) bool
 	hosted = func(list gjson.Result) bool {
 		if !list.Exists() {
@@ -405,6 +421,9 @@ func collaborationHasHostedTools(body []byte) bool {
 			return true
 		}
 		for _, tool := range list.Array() {
+			if rejectAmbiguous && !collaborationUniqueObject(tool) {
+				return true
+			}
 			switch tool.Get("type").String() {
 			case "function", "custom":
 			case "namespace":
@@ -417,10 +436,20 @@ func collaborationHasHostedTools(body []byte) bool {
 		}
 		return false
 	}
-	if hosted(gjson.GetBytes(body, "tools")) {
+	if hosted(request.Get("tools")) {
 		return true
 	}
-	for _, item := range gjson.GetBytes(body, "input").Array() {
+	for _, item := range request.Get("input").Array() {
+		if rejectAmbiguous && item.IsObject() && !collaborationUniqueObject(item) {
+			return true
+		}
+		if rejectAmbiguous && item.Get("type").String() == "agent_message" {
+			for _, part := range item.Get("content").Array() {
+				if part.IsObject() && !collaborationUniqueObject(part) {
+					return true
+				}
+			}
+		}
 		if item.Get("type").String() == "additional_tools" && (hosted(item.Get("tools")) || hosted(item.Get("additional_tools"))) {
 			return true
 		}

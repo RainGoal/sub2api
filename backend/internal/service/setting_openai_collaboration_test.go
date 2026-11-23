@@ -134,6 +134,27 @@ func TestOpenAICollaborationBlankPreludeRoundTripAndLegacySave(t *testing.T) {
 	require.Equal(t, 2*time.Second, svc.GetOpenAICollaborationSettingsCached(ctx).BlankPreludeWait())
 }
 
+func TestOpenAICollaborationBatchCipherRecoveryDefaultsAndRoundTrip(t *testing.T) {
+	require.False(t, DefaultOpenAICollaborationSettings().BatchLegacyCipherRecoveryEnabled)
+	settings, err := parseOpenAICollaborationSettings(`{"enabled":true,"legacy_cipher_recovery_enabled":true,"group_ids":[7]}`)
+	require.NoError(t, err)
+	require.False(t, settings.BatchLegacyCipherRecoveryEnabled)
+	require.True(t, settings.LegacyCipherRecoveryEnabled)
+
+	ctx := context.Background()
+	svc := NewSettingService(&panelRateLimitSettingRepo{}, &config.Config{})
+	settings.BatchLegacyCipherRecoveryEnabled = true
+	require.NoError(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	got, err := svc.GetOpenAICollaborationSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, settings, got)
+	require.Equal(t, settings, svc.GetOpenAICollaborationSettingsCached(ctx))
+
+	settings.BatchLegacyCipherRecoveryEnabled = false
+	require.NoError(t, svc.SetOpenAICollaborationSettings(ctx, settings))
+	require.Equal(t, settings, svc.GetOpenAICollaborationSettingsCached(ctx))
+}
+
 func TestOpenAICollaborationSettingsShutdownAndCacheOwnership(t *testing.T) {
 	ctx := context.Background()
 	repo := &panelRateLimitSettingRepo{}

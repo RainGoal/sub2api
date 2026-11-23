@@ -25,6 +25,8 @@ export default {
         plaintextHint: '完整传递新任务正文，并恢复客户端所需的协作工具身份。',
         recovery: '旧代理密文有损恢复',
         recoveryHint: '匹配加密错误后，允许省略选中的旧代理密文并重试一次。',
+        batchRecovery: '批量恢复旧代理密文',
+        batchRecoveryHint: '需同时开启兼容处理和旧代理密文恢复。确认代理消息密文报错后，可在一次重试中省略多处不透明密文并保留明文。依赖缺失内容的任务可能需要重新下发。',
         blankStreamFailover: '空白流失败切号',
         blankStreamFailoverHint: '独立于旧密文恢复。仅在首个有效输出前暂存空白，遇到可重试的上游失败时允许切号。空白阶段最多等待 30 秒，已有首输出超时更早时优先生效。正文、推理、工具调用等输出出现后不再切号，防止重复执行；正常响应保留原有空格和换行。',
         blankPreludeWaitSeconds: '旧密文空白流等待上限（秒）',

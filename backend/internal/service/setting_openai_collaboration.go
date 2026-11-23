@@ -23,13 +23,14 @@ const (
 // OpenAICollaborationSettings is opt-in per authorized group and optional API key.
 // Empty GroupIDs enables no traffic; empty APIKeyIDs permits all keys in those groups.
 type OpenAICollaborationSettings struct {
-	Enabled                     bool    `json:"enabled"`
-	PlaintextEnabled            bool    `json:"plaintext_enabled"`
-	LegacyCipherRecoveryEnabled bool    `json:"legacy_cipher_recovery_enabled"`
-	BlankStreamFailoverEnabled  bool    `json:"blank_stream_failover_enabled"`
-	BlankPreludeWaitSeconds     int     `json:"blank_prelude_wait_seconds"`
-	GroupIDs                    []int64 `json:"group_ids"`
-	APIKeyIDs                   []int64 `json:"api_key_ids"`
+	Enabled                          bool    `json:"enabled"`
+	PlaintextEnabled                 bool    `json:"plaintext_enabled"`
+	LegacyCipherRecoveryEnabled      bool    `json:"legacy_cipher_recovery_enabled"`
+	BatchLegacyCipherRecoveryEnabled bool    `json:"batch_legacy_cipher_recovery_enabled"`
+	BlankStreamFailoverEnabled       bool    `json:"blank_stream_failover_enabled"`
+	BlankPreludeWaitSeconds          int     `json:"blank_prelude_wait_seconds"`
+	GroupIDs                         []int64 `json:"group_ids"`
+	APIKeyIDs                        []int64 `json:"api_key_ids"`
 }
 
 func DefaultOpenAICollaborationSettings() OpenAICollaborationSettings {

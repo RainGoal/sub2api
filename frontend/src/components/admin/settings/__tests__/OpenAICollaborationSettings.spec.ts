@@ -12,6 +12,7 @@ vi.mock('@/stores', () => ({ useAppStore: () => ({ showSuccess: api.showSuccess,
 
 const enabled: Settings = {
   enabled: true, plaintext_enabled: true, legacy_cipher_recovery_enabled: true,
+  batch_legacy_cipher_recovery_enabled: false,
   blank_stream_failover_enabled: false,
   blank_prelude_wait_seconds: 10,
   group_ids: [7], api_key_ids: [12]
@@ -120,6 +121,48 @@ describe('OpenAI collaboration settings', () => {
     const wrapper = await open()
     expect(wrapper.get('[data-test="collaboration-blank-failover"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.get('[data-test="collaboration-save"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+  it('keeps batch recovery off when older settings omit the flag', async () => {
+    const older = { ...enabled, batch_legacy_cipher_recovery_enabled: undefined }
+    api.getSettings.mockResolvedValueOnce({ openai_collaboration_settings: older })
+    api.updateSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...older, api_key_ids: [42] } })
+    const wrapper = await open()
+    expect(wrapper.get('[data-test="collaboration-batch-recovery"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="collaboration-save"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="collaboration-key-ids"]').setValue('42')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ openai_collaboration_settings: { ...enabled, api_key_ids: [42] } })
+    expect(api.showSuccess).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+  it('saves and rolls back batch recovery without toggling legacy recovery', async () => {
+    const wrapper = await open('en')
+    const batchSwitch = wrapper.get('[data-test="collaboration-batch-recovery"]')
+    expect(wrapper.text()).toContain('Batch recovery for legacy agent ciphers')
+    for (const enabledFlag of [true, false]) {
+      await batchSwitch.trigger('click')
+      await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+      await flushPromises()
+      expect(api.updateSettings).toHaveBeenLastCalledWith({ openai_collaboration_settings: {
+        ...enabled, batch_legacy_cipher_recovery_enabled: enabledFlag
+      } })
+      expect(batchSwitch.attributes('aria-checked')).toBe(String(enabledFlag))
+      expect(wrapper.get('[data-test="collaboration-recovery"]').attributes('aria-checked')).toBe('true')
+    }
+    expect(api.showSuccess).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+  it.each([true, false])('requires the backend to confirm a change to batch recovery (%s)', async value => {
+    api.getSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, batch_legacy_cipher_recovery_enabled: !value } })
+    api.updateSettings.mockResolvedValueOnce({ openai_collaboration_settings: { ...enabled, batch_legacy_cipher_recovery_enabled: undefined } })
+    const wrapper = await open()
+    await wrapper.get('[data-test="collaboration-batch-recovery"]').trigger('click')
+    await wrapper.get('[data-test="collaboration-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('无法确认')
+    expect(api.showSuccess).not.toHaveBeenCalled()
     wrapper.unmount()
   })
   it('enables blank stream failover independently and preserves it during shutdown', async () => {

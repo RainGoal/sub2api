@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 const openAICollaborationMissingContentNotice = "Gateway compatibility notice: part of this agent message was omitted after an encrypted-content compatibility failure. Missing content does not mean the task was completed. Continue only with complete available instructions; if this work depends on the missing content, ask the parent agent to resend the complete task in plaintext."
+const openAICollaborationBatchSelection = "batch_agent_cipher"
 
 type openAICollaborationOmission struct {
 	MessageID    string
@@ -47,6 +49,10 @@ func recoverOpenAICollaborationEncryptedContent(body []byte, upstreamStatus int,
 }
 
 func recoverOpenAICollaborationEncryptedContentWithPlaintext(body []byte, upstreamStatus int, upstreamError []byte, allowUnlocated bool, knownPlaintext map[string]bool) (*openAICollaborationRecovery, error) {
+	return recoverOpenAICollaborationEncryptedContentWithPolicy(body, upstreamStatus, upstreamError, allowUnlocated, knownPlaintext, false)
+}
+
+func recoverOpenAICollaborationEncryptedContentWithPolicy(body []byte, upstreamStatus int, upstreamError []byte, allowUnlocated bool, knownPlaintext map[string]bool, batch bool) (*openAICollaborationRecovery, error) {
 	failure, matched := parseOpenAICollaborationFailure(upstreamStatus, upstreamError)
 	if !matched {
 		return nil, nil
@@ -84,12 +90,33 @@ func recoverOpenAICollaborationEncryptedContentWithPlaintext(body []byte, upstre
 	if err != nil || len(selected) == 0 {
 		return nil, err
 	}
+	// Require a precise match before expanding the omission to other messages.
+	if batch && (selection == "exact_path" || selection == "message_id") && failure.allowsBatchOmission() {
+		if candidates := collectOpenAICollaborationOmissions(input); len(candidates) > len(selected) {
+			selected, selection = candidates, openAICollaborationBatchSelection
+		}
+	}
 	applyOpenAICollaborationOmissions(input, selected)
 	updated, err := marshalOpenAIUpstreamJSON(request)
 	if err != nil {
 		return nil, fmt.Errorf("encode collaboration recovery request: %w", err)
 	}
 	return &openAICollaborationRecovery{Body: updated, Omissions: selected, Selection: selection}, nil
+}
+
+func (f openAICollaborationFailure) allowsBatchOmission() bool {
+	if !slices.Contains(f.codes, "invalid_encrypted_content") {
+		return false
+	}
+	for _, message := range f.messages {
+		lower := strings.ToLower(message)
+		for _, otherContent := range []string{"function output", "function_call_output", "tool output", "tool_output", "reasoning", "compaction"} {
+			if strings.Contains(lower, otherContent) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func isOpenAICollaborationEncryptedContentError(status int, payload []byte) bool {

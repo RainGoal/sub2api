@@ -1516,6 +1516,7 @@ export interface OpenAICollaborationSettings {
   enabled: boolean;
   plaintext_enabled: boolean;
   legacy_cipher_recovery_enabled: boolean;
+  batch_legacy_cipher_recovery_enabled: boolean;
   blank_stream_failover_enabled: boolean;
   blank_prelude_wait_seconds: number;
   group_ids: number[];
