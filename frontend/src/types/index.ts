@@ -373,6 +373,7 @@ export interface Announcement {
   content: string
   status: AnnouncementStatus
   notify_mode: AnnouncementNotifyMode
+  is_public?: boolean
   targeting: AnnouncementTargeting
   starts_at?: string
   ends_at?: string
@@ -399,6 +400,7 @@ export interface CreateAnnouncementRequest {
   content: string
   status?: AnnouncementStatus
   notify_mode?: AnnouncementNotifyMode
+  is_public?: boolean
   targeting: AnnouncementTargeting
   starts_at?: number
   ends_at?: number
@@ -409,6 +411,7 @@ export interface UpdateAnnouncementRequest {
   content?: string
   status?: AnnouncementStatus
   notify_mode?: AnnouncementNotifyMode
+  is_public?: boolean
   targeting?: AnnouncementTargeting
   starts_at?: number
   ends_at?: number

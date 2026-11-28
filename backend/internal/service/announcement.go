@@ -35,11 +35,12 @@ const (
 )
 
 var (
-	ErrAnnouncementNotFound        = domain.ErrAnnouncementNotFound
-	ErrAnnouncementInvalidTarget   = domain.ErrAnnouncementInvalidTarget
-	ErrAnnouncementNilInput        = infraerrors.BadRequest("ANNOUNCEMENT_INPUT_REQUIRED", "announcement input is required")
-	ErrAnnouncementInvalidTitle    = infraerrors.BadRequest("ANNOUNCEMENT_TITLE_INVALID", "announcement title is invalid")
-	ErrAnnouncementContentRequired = infraerrors.BadRequest(
+	ErrAnnouncementPublicTargetingConflict = domain.ErrAnnouncementPublicTargetingConflict
+	ErrAnnouncementNotFound                = domain.ErrAnnouncementNotFound
+	ErrAnnouncementInvalidTarget           = domain.ErrAnnouncementInvalidTarget
+	ErrAnnouncementNilInput                = infraerrors.BadRequest("ANNOUNCEMENT_INPUT_REQUIRED", "announcement input is required")
+	ErrAnnouncementInvalidTitle            = infraerrors.BadRequest("ANNOUNCEMENT_TITLE_INVALID", "announcement title is invalid")
+	ErrAnnouncementContentRequired         = infraerrors.BadRequest(
 		"ANNOUNCEMENT_CONTENT_REQUIRED",
 		"announcement content is required",
 	)
@@ -75,6 +76,7 @@ type AnnouncementRepository interface {
 
 	List(ctx context.Context, params pagination.PaginationParams, filters AnnouncementListFilters) ([]Announcement, *pagination.PaginationResult, error)
 	ListActive(ctx context.Context, now time.Time) ([]Announcement, error)
+	ListPublicActive(ctx context.Context, now time.Time, limit int) ([]Announcement, error)
 }
 
 type AnnouncementReadRepository interface {

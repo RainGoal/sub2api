@@ -41,6 +41,9 @@ func (Announcement) Fields() []ent.Field {
 			MaxLen(20).
 			Default(domain.AnnouncementStatusDraft).
 			Comment("状态: draft, active, archived"),
+		field.Bool("is_public").
+			Default(false).
+			Comment("是否允许未登录公开展示"),
 		field.String("notify_mode").
 			MaxLen(20).
 			Default(domain.AnnouncementNotifyModeSilent).
@@ -90,5 +93,8 @@ func (Announcement) Indexes() []ent.Index {
 		index.Fields("created_at"),
 		index.Fields("starts_at"),
 		index.Fields("ends_at"),
+		index.Fields("is_public", "status", "created_at", "id").
+			StorageKey("idx_announcements_public_active").
+			Annotations(entsql.IndexWhere("is_public = true AND status = 'active'"), entsql.DescColumns("created_at", "id")),
 	}
 }

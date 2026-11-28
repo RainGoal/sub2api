@@ -52,6 +52,9 @@
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <span class="truncate font-medium text-gray-900 dark:text-white">{{ value }}</span>
+                <span v-if="row.is_public" class="badge badge-primary shrink-0">
+                  {{ t('admin.announcements.publicBadge') }}
+                </span>
               </div>
               <div class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-dark-400">
                 <span>#{{ row.id }}</span>
@@ -211,7 +214,24 @@
           </div>
         </div>
 
+        <div>
+          <div class="flex items-center gap-3">
+            <label for="announcement-is-public" class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.announcements.form.publicDisplay') }}
+            </label>
+            <Toggle
+              id="announcement-is-public"
+              :model-value="form.is_public"
+              :disabled="saving"
+              aria-describedby="announcement-public-hint"
+              @update:model-value="setPublicDisplay"
+            />
+          </div>
+          <p id="announcement-public-hint" class="input-hint">{{ t('admin.announcements.form.publicDisplayHint') }}</p>
+        </div>
+
         <AnnouncementTargetingEditor
+          v-if="!form.is_public"
           v-model="form.targeting"
           :groups="subscriptionGroups"
         />
@@ -263,7 +283,10 @@ import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
-import type { AdminGroup, Announcement, AnnouncementTargeting } from '@/types'
+import type {
+  AdminGroup, Announcement, AnnouncementNotifyMode, AnnouncementStatus, AnnouncementTargeting,
+  CreateAnnouncementRequest, UpdateAnnouncementRequest
+} from '@/types'
 import type { Column } from '@/components/common/types'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -273,6 +296,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -430,8 +454,9 @@ const isEditing = computed(() => !!editingAnnouncement.value)
 const form = reactive({
   title: '',
   content: '',
-  status: 'draft',
-  notify_mode: 'silent',
+  status: 'draft' as AnnouncementStatus,
+  notify_mode: 'silent' as AnnouncementNotifyMode,
+  is_public: false,
   starts_at_str: '',
   ends_at_str: '',
   targeting: { any_of: [] } as AnnouncementTargeting
@@ -454,6 +479,7 @@ function resetForm() {
   form.content = ''
   form.status = 'draft'
   form.notify_mode = 'silent'
+  form.is_public = false
   form.starts_at_str = ''
   form.ends_at_str = ''
   form.targeting = { any_of: [] }
@@ -464,12 +490,18 @@ function fillFormFromAnnouncement(a: Announcement) {
   form.content = a.content
   form.status = a.status
   form.notify_mode = a.notify_mode || 'silent'
+  form.is_public = a.is_public ?? false
 
   // Backend returns RFC3339 strings
   form.starts_at_str = a.starts_at ? formatDateTimeLocalInput(Math.floor(new Date(a.starts_at).getTime() / 1000)) : ''
   form.ends_at_str = a.ends_at ? formatDateTimeLocalInput(Math.floor(new Date(a.ends_at).getTime() / 1000)) : ''
 
-  form.targeting = a.targeting ?? { any_of: [] }
+  form.targeting = form.is_public ? { any_of: [] } : a.targeting ?? { any_of: [] }
+}
+
+function setPublicDisplay(value: boolean) {
+  form.is_public = value
+  if (value) form.targeting = { any_of: [] }
 }
 
 function openCreateDialog() {
@@ -489,28 +521,30 @@ function closeEdit() {
   editingAnnouncement.value = null
 }
 
-function buildCreatePayload() {
+function buildCreatePayload(): CreateAnnouncementRequest {
   const startsAt = parseDateTimeLocalInput(form.starts_at_str)
   const endsAt = parseDateTimeLocalInput(form.ends_at_str)
 
   return {
     title: form.title,
     content: form.content,
-    status: form.status as any,
-    notify_mode: form.notify_mode as any,
+    status: form.status,
+    notify_mode: form.notify_mode,
+    is_public: form.is_public,
     targeting: form.targeting,
     starts_at: startsAt ?? undefined,
     ends_at: endsAt ?? undefined
   }
 }
 
-function buildUpdatePayload(original: Announcement) {
-  const payload: any = {}
+function buildUpdatePayload(original: Announcement): UpdateAnnouncementRequest {
+  const payload: UpdateAnnouncementRequest = {}
 
   if (form.title !== original.title) payload.title = form.title
   if (form.content !== original.content) payload.content = form.content
   if (form.status !== original.status) payload.status = form.status
   if (form.notify_mode !== (original.notify_mode || 'silent')) payload.notify_mode = form.notify_mode
+  if (form.is_public !== (original.is_public ?? false)) payload.is_public = form.is_public
 
   // starts_at / ends_at: distinguish unchanged vs clear(0) vs set
   const originalStarts = original.starts_at ? Math.floor(new Date(original.starts_at).getTime() / 1000) : null

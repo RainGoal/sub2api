@@ -36,6 +36,7 @@ type CreateAnnouncementInput struct {
 	Title      string
 	Content    string
 	Status     string
+	IsPublic   bool
 	NotifyMode string
 	Targeting  AnnouncementTargeting
 	StartsAt   *time.Time
@@ -47,6 +48,7 @@ type UpdateAnnouncementInput struct {
 	Title      *string
 	Content    *string
 	Status     *string
+	IsPublic   *bool
 	NotifyMode *string
 	Targeting  *AnnouncementTargeting
 	StartsAt   **time.Time
@@ -94,7 +96,10 @@ func (s *AnnouncementService) Create(ctx context.Context, input *CreateAnnouncem
 		return nil, ErrAnnouncementInvalidStatus
 	}
 
-	targeting, err := domain.AnnouncementTargeting(input.Targeting).NormalizeAndValidate()
+	if input.IsPublic && len(input.Targeting.AnyOf) > 0 {
+		return nil, ErrAnnouncementPublicTargetingConflict
+	}
+	targeting, err := input.Targeting.NormalizeAndValidate()
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +122,7 @@ func (s *AnnouncementService) Create(ctx context.Context, input *CreateAnnouncem
 		Title:      title,
 		Content:    content,
 		Status:     status,
+		IsPublic:   input.IsPublic,
 		NotifyMode: notifyMode,
 		Targeting:  targeting,
 		StartsAt:   input.StartsAt,
@@ -178,12 +184,22 @@ func (s *AnnouncementService) Update(ctx context.Context, id int64, input *Updat
 		a.NotifyMode = notifyMode
 	}
 
+	if input.IsPublic != nil {
+		a.IsPublic = *input.IsPublic
+	}
+	targeting := a.Targeting
 	if input.Targeting != nil {
-		targeting, err := domain.AnnouncementTargeting(*input.Targeting).NormalizeAndValidate()
+		targeting = *input.Targeting
+	}
+	if a.IsPublic && len(targeting.AnyOf) > 0 {
+		return nil, ErrAnnouncementPublicTargetingConflict
+	}
+	if input.Targeting != nil {
+		normalized, err := targeting.NormalizeAndValidate()
 		if err != nil {
 			return nil, err
 		}
-		a.Targeting = targeting
+		a.Targeting = normalized
 	}
 
 	if input.StartsAt != nil {
@@ -222,6 +238,27 @@ func (s *AnnouncementService) GetByID(ctx context.Context, id int64) (*Announcem
 
 func (s *AnnouncementService) List(ctx context.Context, params pagination.PaginationParams, filters AnnouncementListFilters) ([]Announcement, *pagination.PaginationResult, error) {
 	return s.announcementRepo.List(ctx, params, filters)
+}
+
+func (s *AnnouncementService) ListPublic(ctx context.Context, limit int) ([]Announcement, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	limit = min(limit, 50)
+
+	now := time.Now()
+	items, err := s.announcementRepo.ListPublicActive(ctx, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list public announcements: %w", err)
+	}
+
+	result := make([]Announcement, 0, len(items))
+	for i := range items {
+		if items[i].IsPubliclyVisibleAt(now) {
+			result = append(result, items[i])
+		}
+	}
+	return result, nil
 }
 
 func (s *AnnouncementService) ListForUser(ctx context.Context, userID int64, unreadOnly bool) ([]UserAnnouncement, error) {

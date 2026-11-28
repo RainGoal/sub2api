@@ -11,6 +11,7 @@ type Announcement struct {
 	Title      string `json:"title"`
 	Content    string `json:"content"`
 	Status     string `json:"status"`
+	IsPublic   bool   `json:"is_public"`
 	NotifyMode string `json:"notify_mode"`
 
 	Targeting service.AnnouncementTargeting `json:"targeting"`
@@ -40,6 +41,16 @@ type UserAnnouncement struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type PublicAnnouncement struct {
+	ID        int64      `json:"id"`
+	Title     string     `json:"title"`
+	Content   string     `json:"content"`
+	StartsAt  *time.Time `json:"starts_at"`
+	EndsAt    *time.Time `json:"ends_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
 func AnnouncementFromService(a *service.Announcement) *Announcement {
 	if a == nil {
 		return nil
@@ -49,6 +60,7 @@ func AnnouncementFromService(a *service.Announcement) *Announcement {
 		Title:      a.Title,
 		Content:    a.Content,
 		Status:     a.Status,
+		IsPublic:   a.IsPublic,
 		NotifyMode: a.NotifyMode,
 		Targeting:  a.Targeting,
 		StartsAt:   a.StartsAt,
@@ -57,6 +69,18 @@ func AnnouncementFromService(a *service.Announcement) *Announcement {
 		UpdatedBy:  a.UpdatedBy,
 		CreatedAt:  a.CreatedAt,
 		UpdatedAt:  a.UpdatedAt,
+	}
+}
+
+func PublicAnnouncementFromService(a *service.Announcement) PublicAnnouncement {
+	return PublicAnnouncement{
+		ID:        a.ID,
+		Title:     a.Title,
+		Content:   a.Content,
+		StartsAt:  a.StartsAt,
+		EndsAt:    a.EndsAt,
+		CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt,
 	}
 }
 

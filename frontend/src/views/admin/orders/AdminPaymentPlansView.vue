@@ -12,7 +12,10 @@
       <!-- Plans Table -->
       <DataTable :columns="planColumns" :data="plans" :loading="plansLoading">
         <template #cell-name="{ value, row }">
-          <span class="text-sm font-medium" :class="getPlanNameClass(row.group_id)">{{ value }}</span>
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="text-sm font-medium" :class="getPlanNameClass(row.group_id)">{{ value }}</span>
+            <span v-if="row.is_public" class="badge badge-primary">{{ t('payment.admin.publicBadge') }}</span>
+          </div>
         </template>
         <template #cell-group_id="{ value }">
           <span v-if="isGroupMissing(value)" class="text-sm">

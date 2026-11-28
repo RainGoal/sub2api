@@ -380,6 +380,7 @@ export default {
       deleteAnnouncement: '删除公告',
       searchAnnouncements: '搜索公告...',
       status: '状态',
+      publicBadge: '公开',
       allStatus: '全部状态',
       columns: {
         title: '标题',
@@ -409,6 +410,8 @@ export default {
         endsAt: '结束时间',
         startsAtHint: '留空表示立即生效',
         endsAtHint: '留空表示永久生效',
+        publicDisplay: '公开展示（未登录首页可见）',
+        publicDisplayHint: '公开公告面向所有访客，不可设置定向条件',
         targetingMode: '展示条件',
         targetingAll: '所有用户',
         targetingCustom: '按条件',

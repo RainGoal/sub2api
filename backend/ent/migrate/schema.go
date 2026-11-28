@@ -271,6 +271,7 @@ var (
 		{Name: "title", Type: field.TypeString, Size: 200},
 		{Name: "content", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "draft"},
+		{Name: "is_public", Type: field.TypeBool, Default: false},
 		{Name: "notify_mode", Type: field.TypeString, Size: 20, Default: "silent"},
 		{Name: "targeting", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "starts_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
@@ -294,17 +295,30 @@ var (
 			{
 				Name:    "announcement_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{AnnouncementsColumns[10]},
+				Columns: []*schema.Column{AnnouncementsColumns[11]},
 			},
 			{
 				Name:    "announcement_starts_at",
 				Unique:  false,
-				Columns: []*schema.Column{AnnouncementsColumns[6]},
+				Columns: []*schema.Column{AnnouncementsColumns[7]},
 			},
 			{
 				Name:    "announcement_ends_at",
 				Unique:  false,
-				Columns: []*schema.Column{AnnouncementsColumns[7]},
+				Columns: []*schema.Column{AnnouncementsColumns[8]},
+			},
+			{
+				Name:    "idx_announcements_public_active",
+				Unique:  false,
+				Columns: []*schema.Column{AnnouncementsColumns[4], AnnouncementsColumns[3], AnnouncementsColumns[11], AnnouncementsColumns[0]},
+				Annotation: &entsql.IndexAnnotation{
+					DescColumns: map[string]bool{
+						AnnouncementsColumns[11].Name: true,
+
+						AnnouncementsColumns[0].Name: true,
+					},
+					Where: "is_public = true AND status = 'active'",
+				},
 			},
 		},
 	}
@@ -1570,6 +1584,7 @@ var (
 		{Name: "features", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "product_name", Type: field.TypeString, Size: 100, Default: ""},
 		{Name: "for_sale", Type: field.TypeBool, Default: true},
+		{Name: "is_public", Type: field.TypeBool, Default: false},
 		{Name: "sort_order", Type: field.TypeInt, Default: 0},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
@@ -1589,6 +1604,14 @@ var (
 				Name:    "subscriptionplan_for_sale",
 				Unique:  false,
 				Columns: []*schema.Column{SubscriptionPlansColumns[11]},
+			},
+			{
+				Name:    "idx_subscription_plans_public_for_sale",
+				Unique:  false,
+				Columns: []*schema.Column{SubscriptionPlansColumns[12], SubscriptionPlansColumns[11], SubscriptionPlansColumns[13], SubscriptionPlansColumns[0]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "is_public = true AND for_sale = true",
+				},
 			},
 		},
 	}

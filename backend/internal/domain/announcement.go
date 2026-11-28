@@ -33,8 +33,9 @@ const (
 )
 
 var (
-	ErrAnnouncementNotFound      = infraerrors.NotFound("ANNOUNCEMENT_NOT_FOUND", "announcement not found")
-	ErrAnnouncementInvalidTarget = infraerrors.BadRequest("ANNOUNCEMENT_INVALID_TARGET", "invalid announcement targeting rules")
+	ErrAnnouncementNotFound                = infraerrors.NotFound("ANNOUNCEMENT_NOT_FOUND", "announcement not found")
+	ErrAnnouncementInvalidTarget           = infraerrors.BadRequest("ANNOUNCEMENT_INVALID_TARGET", "invalid announcement targeting rules")
+	ErrAnnouncementPublicTargetingConflict = infraerrors.BadRequest("ANNOUNCEMENT_PUBLIC_TARGETING_CONFLICT", "public announcements cannot have targeting rules")
 )
 
 type AnnouncementTargeting struct {
@@ -204,6 +205,7 @@ type Announcement struct {
 	Title      string
 	Content    string
 	Status     string
+	IsPublic   bool
 	NotifyMode string
 	Targeting  AnnouncementTargeting
 	StartsAt   *time.Time
@@ -229,4 +231,8 @@ func (a *Announcement) IsActiveAt(now time.Time) bool {
 		return false
 	}
 	return true
+}
+
+func (a *Announcement) IsPubliclyVisibleAt(now time.Time) bool {
+	return a.IsActiveAt(now) && a.IsPublic && len(a.Targeting.AnyOf) == 0
 }

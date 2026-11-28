@@ -70,6 +70,11 @@ func Status(v string) predicate.Announcement {
 	return predicate.Announcement(sql.FieldEQ(FieldStatus, v))
 }
 
+// IsPublic applies equality check predicate on the "is_public" field. It's identical to IsPublicEQ.
+func IsPublic(v bool) predicate.Announcement {
+	return predicate.Announcement(sql.FieldEQ(FieldIsPublic, v))
+}
+
 // NotifyMode applies equality check predicate on the "notify_mode" field. It's identical to NotifyModeEQ.
 func NotifyMode(v string) predicate.Announcement {
 	return predicate.Announcement(sql.FieldEQ(FieldNotifyMode, v))
@@ -298,6 +303,16 @@ func StatusEqualFold(v string) predicate.Announcement {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.Announcement {
 	return predicate.Announcement(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// IsPublicEQ applies the EQ predicate on the "is_public" field.
+func IsPublicEQ(v bool) predicate.Announcement {
+	return predicate.Announcement(sql.FieldEQ(FieldIsPublic, v))
+}
+
+// IsPublicNEQ applies the NEQ predicate on the "is_public" field.
+func IsPublicNEQ(v bool) predicate.Announcement {
+	return predicate.Announcement(sql.FieldNEQ(FieldIsPublic, v))
 }
 
 // NotifyModeEQ applies the EQ predicate on the "notify_mode" field.

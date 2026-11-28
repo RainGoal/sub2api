@@ -147,6 +147,7 @@ export interface SubscriptionPlan {
   /** Stored as JSON string in backend; API layer should parse before use */
   features: string[]
   for_sale: boolean
+  is_public?: boolean
   sort_order: number
 }
 

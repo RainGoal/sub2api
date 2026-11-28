@@ -10,7 +10,8 @@ import (
 )
 
 type announcementRepoStub struct {
-	item *Announcement
+	item       *Announcement
+	publicList func(time.Time, int) []Announcement
 }
 
 func (s *announcementRepoStub) Create(_ context.Context, a *Announcement) error {
@@ -22,7 +23,8 @@ func (s *announcementRepoStub) GetByID(_ context.Context, _ int64) (*Announcemen
 	if s.item == nil {
 		return nil, ErrAnnouncementNotFound
 	}
-	return s.item, nil
+	item := *s.item
+	return &item, nil
 }
 
 func (s *announcementRepoStub) Update(_ context.Context, a *Announcement) error {
@@ -40,6 +42,86 @@ func (*announcementRepoStub) List(context.Context, pagination.PaginationParams, 
 
 func (*announcementRepoStub) ListActive(context.Context, time.Time) ([]Announcement, error) {
 	return nil, nil
+}
+
+func (s *announcementRepoStub) ListPublicActive(_ context.Context, now time.Time, limit int) ([]Announcement, error) {
+	return s.publicList(now, limit), nil
+}
+
+func TestAnnouncementServiceListPublicFiltersVisibility(t *testing.T) {
+	repo := &announcementRepoStub{publicList: func(now time.Time, limit int) []Announcement {
+		require.Equal(t, 20, limit)
+		future := now.Add(time.Hour)
+		return []Announcement{
+			{ID: 1, Status: AnnouncementStatusActive, IsPublic: true, StartsAt: &now, EndsAt: &future},
+			{ID: 2, Status: AnnouncementStatusActive},
+			{ID: 3, Status: AnnouncementStatusDraft, IsPublic: true},
+			{ID: 4, Status: AnnouncementStatusActive, IsPublic: true, EndsAt: &now},
+			{ID: 5, Status: AnnouncementStatusActive, IsPublic: true, StartsAt: &future},
+			{ID: 6, Status: AnnouncementStatusActive, IsPublic: true, Targeting: announcementTestTargeting()},
+		}
+	}}
+	svc := NewAnnouncementService(repo, nil, nil, nil)
+
+	items, err := svc.ListPublic(context.Background(), 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.EqualValues(t, 1, items[0].ID)
+
+	repo.publicList = func(_ time.Time, limit int) []Announcement {
+		require.Equal(t, 50, limit)
+		return nil
+	}
+	items, err = svc.ListPublic(context.Background(), 100)
+	require.NoError(t, err)
+	require.Equal(t, []Announcement{}, items)
+}
+
+func TestAnnouncementServiceRejectsPublicTargetingOnCreate(t *testing.T) {
+	repo := &announcementRepoStub{}
+	svc := NewAnnouncementService(repo, nil, nil, nil)
+
+	_, err := svc.Create(context.Background(), &CreateAnnouncementInput{
+		Title:     "Announcement",
+		Content:   "Content",
+		IsPublic:  true,
+		Targeting: announcementTestTargeting(),
+	})
+	require.ErrorIs(t, err, ErrAnnouncementPublicTargetingConflict)
+	require.Nil(t, repo.item)
+}
+
+func TestAnnouncementServiceChecksFinalPublicTargetingOnUpdate(t *testing.T) {
+	ctx := context.Background()
+	targeting := announcementTestTargeting()
+	repo := &announcementRepoStub{item: &Announcement{ID: 1, Targeting: targeting}}
+	svc := NewAnnouncementService(repo, nil, nil, nil)
+
+	public := true
+	_, err := svc.Update(ctx, 1, &UpdateAnnouncementInput{IsPublic: &public})
+	require.ErrorIs(t, err, ErrAnnouncementPublicTargetingConflict)
+	require.False(t, repo.item.IsPublic)
+
+	item, err := svc.Update(ctx, 1, &UpdateAnnouncementInput{IsPublic: &public, Targeting: &AnnouncementTargeting{}})
+	require.NoError(t, err)
+	require.True(t, item.IsPublic)
+	require.Empty(t, item.Targeting.AnyOf)
+
+	_, err = svc.Update(ctx, 1, &UpdateAnnouncementInput{Targeting: &targeting})
+	require.ErrorIs(t, err, ErrAnnouncementPublicTargetingConflict)
+	require.Empty(t, repo.item.Targeting.AnyOf)
+
+	private := false
+	item, err = svc.Update(ctx, 1, &UpdateAnnouncementInput{IsPublic: &private, Targeting: &targeting})
+	require.NoError(t, err)
+	require.False(t, item.IsPublic)
+	require.Equal(t, targeting, item.Targeting)
+}
+
+func announcementTestTargeting() AnnouncementTargeting {
+	return AnnouncementTargeting{AnyOf: []AnnouncementConditionGroup{
+		{AllOf: []AnnouncementCondition{{Type: AnnouncementConditionTypeBalance, Operator: AnnouncementOperatorGT, Value: 10}}},
+	}}
 }
 
 func TestAnnouncementServiceCreateRejectsEqualStartEndTimes(t *testing.T) {

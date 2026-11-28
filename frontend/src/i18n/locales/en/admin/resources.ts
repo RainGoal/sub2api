@@ -383,6 +383,7 @@ export default {
       deleteAnnouncement: 'Delete Announcement',
       searchAnnouncements: 'Search announcements...',
       status: 'Status',
+      publicBadge: 'Public',
       allStatus: 'All Status',
       columns: {
         title: 'Title',
@@ -412,6 +413,8 @@ export default {
         endsAt: 'Ends At',
         startsAtHint: 'Leave empty to start immediately',
         endsAtHint: 'Leave empty to never expire',
+        publicDisplay: 'Show on the public homepage',
+        publicDisplayHint: 'Public announcements are visible to all visitors and cannot have targeting rules.',
         targetingMode: 'Targeting',
         targetingAll: 'All users',
         targetingCustom: 'Custom rules',

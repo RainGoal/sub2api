@@ -24,6 +24,25 @@ func NewAnnouncementHandler(announcementService *service.AnnouncementService) *A
 	}
 }
 
+// ListPublic handles GET /api/v1/announcements/public without authentication.
+func (h *AnnouncementHandler) ListPublic(c *gin.Context) {
+	limit, err := strconv.Atoi(c.Query("limit"))
+	if err != nil {
+		limit = 0
+	}
+	items, err := h.announcementService.ListPublic(c.Request.Context(), limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	out := make([]dto.PublicAnnouncement, 0, len(items))
+	for i := range items {
+		out = append(out, dto.PublicAnnouncementFromService(&items[i]))
+	}
+	response.Success(c, out)
+}
+
 // List handles listing announcements visible to current user
 // GET /api/v1/announcements
 func (h *AnnouncementHandler) List(c *gin.Context) {

@@ -64,21 +64,18 @@
         <textarea v-model="planFeaturesText" rows="3" class="input" :placeholder="t('payment.admin.featuresPlaceholder')"></textarea>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.featuresHint') }}</p>
       </div>
-      <div class="flex items-center gap-3">
-        <label class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.admin.forSale') }}</label>
-        <button
-          type="button"
-          :class="[
-            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-            planForm.for_sale ? 'bg-primary-500' : 'bg-gray-300 dark:bg-dark-600'
-          ]"
-          @click="planForm.for_sale = !planForm.for_sale"
-        >
-          <span :class="[
-            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-            planForm.for_sale ? 'translate-x-5' : 'translate-x-0'
-          ]" />
-        </button>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="flex items-center gap-3 self-start">
+          <label for="plan-for-sale" class="text-sm font-medium text-gray-900 dark:text-white">{{ t('payment.admin.forSale') }}</label>
+          <Toggle id="plan-for-sale" v-model="planForm.for_sale" :disabled="saving" />
+        </div>
+        <div>
+          <div class="flex items-center gap-3">
+            <label for="plan-is-public" class="text-sm font-medium text-gray-900 dark:text-white">{{ t('payment.admin.publicDisplay') }}</label>
+            <Toggle id="plan-is-public" v-model="planForm.is_public" :disabled="saving" aria-describedby="plan-public-hint" />
+          </div>
+          <p id="plan-public-hint" class="input-hint">{{ t('payment.admin.publicDisplayHint') }}</p>
+        </div>
       </div>
     </form>
     <template #footer>
@@ -95,13 +92,14 @@ import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI } from '@/api/admin/payment'
-import type { AdminPaymentConfig } from '@/api/admin/payment'
+import type { AdminPaymentConfig, CreateSubscriptionPlanRequest } from '@/api/admin/payment'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import type { SubscriptionPlan } from '@/types/payment'
 import type { AdminGroup } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import { platformTextClass } from '@/utils/platformColors'
@@ -122,7 +120,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const saving = ref(false)
-const planForm = reactive({ name: '', group_id: null as number | null, description: '', price: 0, original_price: 0, currency: '', validity_days: 30, validity_unit: 'days', sort_order: 0, for_sale: true })
+const planForm = reactive({ name: '', group_id: null as number | null, description: '', price: 0, original_price: 0, currency: '', validity_days: 30, validity_unit: 'days', sort_order: 0, for_sale: true, is_public: false })
 const planFeaturesText = ref('')
 
 const validityUnitOptions = computed(() => [
@@ -174,6 +172,7 @@ const subscriptionCnyPreview = computed(() => {
 // Reset form when dialog opens
 watch(() => props.show, (visible) => {
   if (!visible) return
+  planForm.is_public = props.plan?.is_public ?? false
   if (props.plan) {
     Object.assign(planForm, { name: props.plan.name, group_id: props.plan.group_id, description: props.plan.description, price: props.plan.price, original_price: props.plan.original_price || 0, currency: props.plan.currency || '', validity_days: props.plan.validity_days, validity_unit: props.plan.validity_unit || 'days', sort_order: props.plan.sort_order || 0, for_sale: props.plan.for_sale })
     planFeaturesText.value = (props.plan.features || []).join('\n')
@@ -184,11 +183,11 @@ watch(() => props.show, (visible) => {
 })
 
 /** Build request payload with snake_case keys matching backend JSON tags */
-function buildPlanPayload() {
+function buildPlanPayload(groupId: number): CreateSubscriptionPlanRequest {
   const features = planFeaturesText.value.split('\n').map(f => f.trim()).filter(Boolean).join('\n')
   return {
     name: planForm.name,
-    group_id: planForm.group_id,
+    group_id: groupId,
     description: planForm.description,
     price: planForm.price,
     original_price: planForm.original_price || 0,
@@ -197,6 +196,9 @@ function buildPlanPayload() {
     validity_unit: planForm.validity_unit,
     sort_order: planForm.sort_order,
     for_sale: planForm.for_sale,
+    is_public: props.plan && planForm.is_public === (props.plan.is_public ?? false)
+      ? undefined
+      : planForm.is_public,
     features,
   }
 }
@@ -216,7 +218,7 @@ async function handleSavePlan() {
   }
   saving.value = true
   try {
-    const data = buildPlanPayload()
+    const data = buildPlanPayload(planForm.group_id)
     if (props.plan) { await adminPaymentAPI.updatePlan(props.plan.id, data) }
     else { await adminPaymentAPI.createPlan(data) }
     appStore.showSuccess(t('common.saved'))

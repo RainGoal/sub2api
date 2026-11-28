@@ -13,6 +13,24 @@ import type {
 } from '@/types/payment'
 import type { BasePaginationResponse } from '@/types'
 
+export interface CreateSubscriptionPlanRequest {
+  group_id: number
+  name: string
+  description?: string
+  price: number
+  original_price?: number
+  currency?: string
+  validity_days: number
+  validity_unit: string
+  features?: string
+  product_name?: string
+  for_sale?: boolean
+  is_public?: boolean
+  sort_order?: number
+}
+
+export type UpdateSubscriptionPlanRequest = Partial<CreateSubscriptionPlanRequest>
+
 /** Admin-facing payment config returned by GET /admin/payment/config */
 export interface AdminPaymentConfig {
   enabled: boolean
@@ -193,12 +211,12 @@ export const adminPaymentAPI = {
   },
 
   /** Create a subscription plan */
-  createPlan(data: Record<string, unknown>) {
+  createPlan(data: CreateSubscriptionPlanRequest) {
     return apiClient.post<SubscriptionPlan>('/admin/payment/plans', data)
   },
 
   /** Update a subscription plan */
-  updatePlan(id: number, data: Record<string, unknown>) {
+  updatePlan(id: number, data: UpdateSubscriptionPlanRequest) {
     return apiClient.put<SubscriptionPlan>(`/admin/payment/plans/${id}`, data)
   },
 

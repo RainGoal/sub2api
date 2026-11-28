@@ -50,6 +50,20 @@ func (_c *AnnouncementCreate) SetNillableStatus(v *string) *AnnouncementCreate {
 	return _c
 }
 
+// SetIsPublic sets the "is_public" field.
+func (_c *AnnouncementCreate) SetIsPublic(v bool) *AnnouncementCreate {
+	_c.mutation.SetIsPublic(v)
+	return _c
+}
+
+// SetNillableIsPublic sets the "is_public" field if the given value is not nil.
+func (_c *AnnouncementCreate) SetNillableIsPublic(v *bool) *AnnouncementCreate {
+	if v != nil {
+		_c.SetIsPublic(*v)
+	}
+	return _c
+}
+
 // SetNotifyMode sets the "notify_mode" field.
 func (_c *AnnouncementCreate) SetNotifyMode(v string) *AnnouncementCreate {
 	_c.mutation.SetNotifyMode(v)
@@ -216,6 +230,10 @@ func (_c *AnnouncementCreate) defaults() {
 		v := announcement.DefaultStatus
 		_c.mutation.SetStatus(v)
 	}
+	if _, ok := _c.mutation.IsPublic(); !ok {
+		v := announcement.DefaultIsPublic
+		_c.mutation.SetIsPublic(v)
+	}
 	if _, ok := _c.mutation.NotifyMode(); !ok {
 		v := announcement.DefaultNotifyMode
 		_c.mutation.SetNotifyMode(v)
@@ -255,6 +273,9 @@ func (_c *AnnouncementCreate) check() error {
 		if err := announcement.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Announcement.status": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.IsPublic(); !ok {
+		return &ValidationError{Name: "is_public", err: errors.New(`ent: missing required field "Announcement.is_public"`)}
 	}
 	if _, ok := _c.mutation.NotifyMode(); !ok {
 		return &ValidationError{Name: "notify_mode", err: errors.New(`ent: missing required field "Announcement.notify_mode"`)}
@@ -308,6 +329,10 @@ func (_c *AnnouncementCreate) createSpec() (*Announcement, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(announcement.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.IsPublic(); ok {
+		_spec.SetField(announcement.FieldIsPublic, field.TypeBool, value)
+		_node.IsPublic = value
 	}
 	if value, ok := _c.mutation.NotifyMode(); ok {
 		_spec.SetField(announcement.FieldNotifyMode, field.TypeString, value)
@@ -442,6 +467,18 @@ func (u *AnnouncementUpsert) SetStatus(v string) *AnnouncementUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *AnnouncementUpsert) UpdateStatus() *AnnouncementUpsert {
 	u.SetExcluded(announcement.FieldStatus)
+	return u
+}
+
+// SetIsPublic sets the "is_public" field.
+func (u *AnnouncementUpsert) SetIsPublic(v bool) *AnnouncementUpsert {
+	u.Set(announcement.FieldIsPublic, v)
+	return u
+}
+
+// UpdateIsPublic sets the "is_public" field to the value that was provided on create.
+func (u *AnnouncementUpsert) UpdateIsPublic() *AnnouncementUpsert {
+	u.SetExcluded(announcement.FieldIsPublic)
 	return u
 }
 
@@ -655,6 +692,20 @@ func (u *AnnouncementUpsertOne) SetStatus(v string) *AnnouncementUpsertOne {
 func (u *AnnouncementUpsertOne) UpdateStatus() *AnnouncementUpsertOne {
 	return u.Update(func(s *AnnouncementUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetIsPublic sets the "is_public" field.
+func (u *AnnouncementUpsertOne) SetIsPublic(v bool) *AnnouncementUpsertOne {
+	return u.Update(func(s *AnnouncementUpsert) {
+		s.SetIsPublic(v)
+	})
+}
+
+// UpdateIsPublic sets the "is_public" field to the value that was provided on create.
+func (u *AnnouncementUpsertOne) UpdateIsPublic() *AnnouncementUpsertOne {
+	return u.Update(func(s *AnnouncementUpsert) {
+		s.UpdateIsPublic()
 	})
 }
 
@@ -1055,6 +1106,20 @@ func (u *AnnouncementUpsertBulk) SetStatus(v string) *AnnouncementUpsertBulk {
 func (u *AnnouncementUpsertBulk) UpdateStatus() *AnnouncementUpsertBulk {
 	return u.Update(func(s *AnnouncementUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetIsPublic sets the "is_public" field.
+func (u *AnnouncementUpsertBulk) SetIsPublic(v bool) *AnnouncementUpsertBulk {
+	return u.Update(func(s *AnnouncementUpsert) {
+		s.SetIsPublic(v)
+	})
+}
+
+// UpdateIsPublic sets the "is_public" field to the value that was provided on create.
+func (u *AnnouncementUpsertBulk) UpdateIsPublic() *AnnouncementUpsertBulk {
+	return u.Update(func(s *AnnouncementUpsert) {
+		s.UpdateIsPublic()
 	})
 }
 

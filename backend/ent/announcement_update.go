@@ -72,6 +72,20 @@ func (_u *AnnouncementUpdate) SetNillableStatus(v *string) *AnnouncementUpdate {
 	return _u
 }
 
+// SetIsPublic sets the "is_public" field.
+func (_u *AnnouncementUpdate) SetIsPublic(v bool) *AnnouncementUpdate {
+	_u.mutation.SetIsPublic(v)
+	return _u
+}
+
+// SetNillableIsPublic sets the "is_public" field if the given value is not nil.
+func (_u *AnnouncementUpdate) SetNillableIsPublic(v *bool) *AnnouncementUpdate {
+	if v != nil {
+		_u.SetIsPublic(*v)
+	}
+	return _u
+}
+
 // SetNotifyMode sets the "notify_mode" field.
 func (_u *AnnouncementUpdate) SetNotifyMode(v string) *AnnouncementUpdate {
 	_u.mutation.SetNotifyMode(v)
@@ -329,6 +343,9 @@ func (_u *AnnouncementUpdate) sqlSave(ctx context.Context) (_node int, err error
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(announcement.FieldStatus, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.IsPublic(); ok {
+		_spec.SetField(announcement.FieldIsPublic, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.NotifyMode(); ok {
 		_spec.SetField(announcement.FieldNotifyMode, field.TypeString, value)
 	}
@@ -474,6 +491,20 @@ func (_u *AnnouncementUpdateOne) SetStatus(v string) *AnnouncementUpdateOne {
 func (_u *AnnouncementUpdateOne) SetNillableStatus(v *string) *AnnouncementUpdateOne {
 	if v != nil {
 		_u.SetStatus(*v)
+	}
+	return _u
+}
+
+// SetIsPublic sets the "is_public" field.
+func (_u *AnnouncementUpdateOne) SetIsPublic(v bool) *AnnouncementUpdateOne {
+	_u.mutation.SetIsPublic(v)
+	return _u
+}
+
+// SetNillableIsPublic sets the "is_public" field if the given value is not nil.
+func (_u *AnnouncementUpdateOne) SetNillableIsPublic(v *bool) *AnnouncementUpdateOne {
+	if v != nil {
+		_u.SetIsPublic(*v)
 	}
 	return _u
 }
@@ -764,6 +795,9 @@ func (_u *AnnouncementUpdateOne) sqlSave(ctx context.Context) (_node *Announceme
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(announcement.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.IsPublic(); ok {
+		_spec.SetField(announcement.FieldIsPublic, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.NotifyMode(); ok {
 		_spec.SetField(announcement.FieldNotifyMode, field.TypeString, value)

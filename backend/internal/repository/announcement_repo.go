@@ -7,6 +7,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/announcement"
+	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -27,6 +28,7 @@ func (r *announcementRepository) Create(ctx context.Context, a *service.Announce
 		SetTitle(a.Title).
 		SetContent(a.Content).
 		SetStatus(a.Status).
+		SetIsPublic(a.IsPublic).
 		SetNotifyMode(a.NotifyMode).
 		SetTargeting(a.Targeting)
 
@@ -68,6 +70,7 @@ func (r *announcementRepository) Update(ctx context.Context, a *service.Announce
 		SetTitle(a.Title).
 		SetContent(a.Content).
 		SetStatus(a.Status).
+		SetIsPublic(a.IsPublic).
 		SetNotifyMode(a.NotifyMode).
 		SetTargeting(a.Targeting)
 
@@ -199,11 +202,7 @@ func announcementListOrders(params pagination.PaginationParams) []func(*entsql.S
 
 func (r *announcementRepository) ListActive(ctx context.Context, now time.Time) ([]service.Announcement, error) {
 	q := r.client.Announcement.Query().
-		Where(
-			announcement.StatusEQ(service.AnnouncementStatusActive),
-			announcement.Or(announcement.StartsAtIsNil(), announcement.StartsAtLTE(now)),
-			announcement.Or(announcement.EndsAtIsNil(), announcement.EndsAtGT(now)),
-		).
+		Where(announcementActiveAt(now)).
 		Order(dbent.Desc(announcement.FieldID)).
 		Limit(200)
 
@@ -212,6 +211,31 @@ func (r *announcementRepository) ListActive(ctx context.Context, now time.Time) 
 		return nil, err
 	}
 	return announcementEntitiesToService(items), nil
+}
+
+func (r *announcementRepository) ListPublicActive(ctx context.Context, now time.Time, limit int) ([]service.Announcement, error) {
+	items, err := r.client.Announcement.Query().
+		Where(announcement.IsPublicEQ(true), announcementActiveAt(now), announcementHasNoTargeting).
+		Order(dbent.Desc(announcement.FieldCreatedAt, announcement.FieldID)).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return announcementEntitiesToService(items), nil
+}
+
+func announcementActiveAt(now time.Time) predicate.Announcement {
+	return announcement.And(
+		announcement.StatusEQ(service.AnnouncementStatusActive),
+		announcement.Or(announcement.StartsAtIsNil(), announcement.StartsAtLTE(now)),
+		announcement.Or(announcement.EndsAtIsNil(), announcement.EndsAtGT(now)),
+	)
+}
+
+func announcementHasNoTargeting(s *entsql.Selector) {
+	// JSON extraction preserves the difference between an empty array and a string.
+	s.Where(entsql.ExprP("COALESCE(" + s.C(announcement.FieldTargeting) + " -> 'any_of', '[]') IN ('[]', 'null')"))
 }
 
 func applyAnnouncementEntityToService(dst *service.Announcement, src *dbent.Announcement) {
@@ -232,6 +256,7 @@ func announcementEntityToService(m *dbent.Announcement) *service.Announcement {
 		Title:      m.Title,
 		Content:    m.Content,
 		Status:     m.Status,
+		IsPublic:   m.IsPublic,
 		NotifyMode: m.NotifyMode,
 		Targeting:  m.Targeting,
 		StartsAt:   m.StartsAt,

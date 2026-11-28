@@ -309,6 +309,7 @@ type AdminSubscriptionPlanResult struct {
 	Features        string    `json:"features"`
 	ProductName     string    `json:"product_name"`
 	ForSale         bool      `json:"for_sale"`
+	IsPublic        bool      `json:"is_public"`
 	SortOrder       int       `json:"sort_order"`
 	CreatedAt       time.Time `json:"created_at,omitempty"`
 	UpdatedAt       time.Time `json:"updated_at,omitempty"`
@@ -341,6 +342,7 @@ func adminSubscriptionPlansForResponse(plans []*dbent.SubscriptionPlan, groupInf
 			Features:        p.Features,
 			ProductName:     p.ProductName,
 			ForSale:         p.ForSale,
+			IsPublic:        p.IsPublic,
 			SortOrder:       p.SortOrder,
 			CreatedAt:       p.CreatedAt,
 			UpdatedAt:       p.UpdatedAt,

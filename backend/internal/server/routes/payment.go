@@ -70,6 +70,7 @@ func RegisterPaymentRoutes(
 	publicRateLimiter := ratelimit.NewRateLimiter(redisClient)
 	public := v1.Group("/payment/public")
 	{
+		public.GET("/plans", panelRateLimiter.PublicIP(), paymentHandler.GetPublicPlans)
 		public.POST("/orders/verify",
 			publicRateLimiter.Limit("payment-public-order-verify", publicOrderVerifyRateLimit, publicOrderVerifyRateLimitWindow),
 			paymentHandler.VerifyOrderPublic)

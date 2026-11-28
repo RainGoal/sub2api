@@ -59,6 +59,8 @@ func (SubscriptionPlan) Fields() []ent.Field {
 			Default(""),
 		field.Bool("for_sale").
 			Default(true),
+		field.Bool("is_public").
+			Default(false),
 		field.Int("sort_order").
 			Default(0),
 		field.Time("created_at").
@@ -76,5 +78,8 @@ func (SubscriptionPlan) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("group_id"),
 		index.Fields("for_sale"),
+		index.Fields("is_public", "for_sale", "sort_order", "id").
+			StorageKey("idx_subscription_plans_public_for_sale").
+			Annotations(entsql.IndexWhere("is_public = true AND for_sale = true")),
 	}
 }

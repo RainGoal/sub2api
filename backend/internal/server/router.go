@@ -127,6 +127,9 @@ func registerRoutes(
 	if h.Sales != nil {
 		v1.GET("/sales/referral", panelRateLimiter.PublicIP(), h.Sales.Referral)
 	}
+	if h.Announcement != nil {
+		v1.GET("/announcements/public", panelRateLimiter.PublicIP(), h.Announcement.ListPublic)
+	}
 
 	// 注册各模块路由
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService, panelRateLimiter)
